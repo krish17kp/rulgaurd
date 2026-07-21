@@ -1,0 +1,19 @@
+[project]
+name = "bearing-rul-predictive-maintenance"
+version = "0.1.0"
+description = "Capstone: rolling-bearing degradation monitoring and RUL prediction (research prototype, not production)."
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "scripts", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
