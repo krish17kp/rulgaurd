@@ -8,7 +8,7 @@ Research capstone, not production. Estimate bearing RUL from vibration data; exp
 3. `context/Description.txt` (college data)
 4. Primary papers (`context/*.pdf`)
 5. Literature-review draft
-6. Original prompt (`command.md` in the sibling data-collection-git repo)
+6. Original prompt (`command.md`, this repo)
 
 ## Non-negotiable rules
 - FEMTO and college data stay in separate adapters (`femto.py`, `college.py`); normalize only at the feature-row contract (`docs/data-contract.md`).
@@ -34,6 +34,8 @@ ruff check .
 ```
 
 ## Folder ownership
+- `datasets/college/` - 129 college CSVs, published via Git LFS.
+- `datasets/femto/` - FEMTO raw archives (Training/Test/Validation .zip), published via Git LFS. Extract locally (gitignored, not committed) to run the pipeline.
 - `context/` - local-only reference (gitignored). Read-only.
 - `config/data_paths.toml` - local, gitignored, real paths. Copy from `.example.toml`.
 - `data/fixtures/` - tiny committed real-data excerpts for tests only.
@@ -51,7 +53,7 @@ ruff check .
 - Highest reasoning (Opus-class): leakage/methodology audits, hard bugs surviving 2 attempts, final scientific audit.
 
 ## Prohibited
-Committing raw datasets/LFS objects/secrets/private absolute paths into git history. Modifying the sibling `data-collection-git` LFS repo's structure or history. Training on hidden Full_Test_Set before freeze. Pushing to GitHub (commit only, user pushes manually).
+Committing secrets/private absolute paths into git history. Committing extracted FEMTO folders or raw high-frequency samples (only the archives in `datasets/femto/` and the LFS-tracked `datasets/college/` CSVs are published). Training on hidden Full_Test_Set before freeze. Pushing to GitHub (commit only, user pushes manually).
 
 ## Current milestone
-Accelerated review track (deadline 2026-07-25): M0-M4 + minimal M8 all DONE (see `TODO.md` for commit SHAs, `artifacts/evidence/REVIEW-M*/` for evidence). Review-ready. Remaining before 2026-07-25: stabilization only (command.md section 26.4). Post-review: M5 (stage classification), M6 (optional CNN), M7 (RAG/LLM), full 129-file college run, M9 (final audit). See `docs/milestone.md`, `TODO.md`, `reports/verification/review-readiness.md`.
+Accelerated review track (deadline 2026-07-25): M0-M4 + minimal M8 all DONE (see `TODO.md` for commit SHAs, `artifacts/evidence/REVIEW-M*/` for evidence). Review-ready. `docs/decisions.md` D12: application code and the dataset repo were consolidated into this single repo (was two separate repos through M8, merged with full history preserved). Remaining before 2026-07-25: stabilization only (command.md section 26.4). Post-review: M5 (stage classification), M6 (optional CNN), M7 (RAG/LLM), full 129-file college run, M9 (final audit). See `docs/milestone.md`, `TODO.md`, `reports/verification/review-readiness.md`.

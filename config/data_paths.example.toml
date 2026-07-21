@@ -3,15 +3,19 @@
 
 [college]
 # 129 hourly LogFile_*.csv, ~2,000,001 rows x 4 cols each, no header.
-raw_dir = "D:/capstone/data/Vibration_Bearing_RuntoFailure"
+# Published in this repo via Git LFS - datasets/college/ relative to repo root.
+raw_dir = "datasets/college"
 
 [femto]
+# datasets/femto/{Training_set,Test_set,Validation_Set}.zip are published via
+# Git LFS - extract them locally (not committed, ~9GB extracted) and point
+# these at the extracted folders. Adjust the base path for your machine.
 # Six complete learning trajectories.
-training_dir = "D:/capstone/data/data collection git/context/femto dataset/Training_set/Learning_set"
+training_dir = "<path-to-extracted-femto>/Training_set/Learning_set"
 # Eleven censored test prefixes (no hidden continuation).
-test_dir = "D:/capstone/data/data collection git/context/femto dataset/Test_set/Test_set"
+test_dir = "<path-to-extracted-femto>/Test_set/Test_set"
 # Eleven full continuations - DO NOT use to fit anything. Frozen-model evaluation only.
-validation_dir = "D:/capstone/data/data collection git/context/femto dataset/Validation_Set/Full_Test_Set"
+validation_dir = "<path-to-extracted-femto>/Validation_Set/Full_Test_Set"
 
 [output]
 processed_dir = "data/processed"

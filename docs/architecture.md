@@ -5,8 +5,8 @@
 ```mermaid
 flowchart LR
     subgraph Sources
-        F[FEMTO archives\nLearning_set / Test_set / Full_Test_Set]
-        C[College Git-LFS CSVs\nVibration_Bearing_RuntoFailure]
+        F[FEMTO archives\ndatasets/femto/*.zip, extracted locally]
+        C[College Git-LFS CSVs\ndatasets/college/]
     end
     F --> FA[femto.py adapter]
     C --> CA[college.py adapter]
@@ -24,8 +24,8 @@ flowchart LR
 ```
 
 ## Trust boundaries
-- Raw archives (FEMTO zips/7z, college CSVs) are read-only, external, never modified.
-- `context/` is local-only input, never a runtime dependency of the shipped app.
+- Raw archives (`datasets/femto/*.zip`, `datasets/college/*.csv`) are read-only inputs, published in this repo via Git LFS, never modified by the pipeline.
+- `context/` is local-only input (papers, literature draft), never a runtime dependency of the shipped app.
 - Adapters are the only code that touches raw file formats; everything downstream consumes the canonical feature-row contract.
 
 ## Data lineage

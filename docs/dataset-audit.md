@@ -1,10 +1,10 @@
 # Dataset Audit
 
-Evidence-based, from direct file inspection on 2026-07-21. Bounded sampling used where noted (full 18GB college set is never read in one pass). Source paths come from `config/data_paths.toml`.
+Evidence-based, from direct file inspection on 2026-07-21. Bounded sampling used where noted (full 18GB college set is never read in one pass). Source paths at audit time came from `config/data_paths.toml`; all facts below still hold (same file content) after the D12 repo consolidation moved the canonical copy to `datasets/college/` in this repo.
 
-## College run-to-failure (`Vibration_Bearing_RuntoFailure`)
+## College run-to-failure (originally audited at `Vibration_Bearing_RuntoFailure`, now `datasets/college/`)
 
-Path: `D:/capstone/data/Vibration_Bearing_RuntoFailure` (129 files; a second identical copy exists at `D:/capstone/data/data collection git/context/Vibration_Bearing_RuntoFailure`, also 129 files, unused by config).
+Path at audit time: `D:/capstone/data/Vibration_Bearing_RuntoFailure` (129 files; a second identical copy existed at `D:/capstone/data/data collection git/context/Vibration_Bearing_RuntoFailure`, unused by config). Now published as `datasets/college/` in this repo (git-mv rename, same LFS content, see D12) - `config/data_paths.toml` points there.
 
 Confirmed facts:
 - 129 files, range `LogFile_2022-06-20-17-00-31.csv` to `LogFile_2022-06-26-01-00-31.csv` — matches `Description.txt`.
@@ -77,9 +77,9 @@ Note vs. `command.md`'s "Test_set.7z" counts (a slightly different table listed 
 
 All 11 match exactly. M1 acceptance criterion "hidden-RUL derivation independently reproduced" is satisfied.
 
-## data collection git repo's own copy (not used by pipeline)
+## data collection git repo's own copy - now the canonical published copy (D12)
 
-`D:/capstone/data/data collection git/Vibration_Bearing_RuntoFailure/` — `git status` shows all 129 files as locally deleted (working tree), while `git lfs ls-files` still lists 129 tracked objects. Files are not on disk here (LFS content never checked out / removed to free space). Not a data-loss event: two other full copies exist (see above) and config does not point here. Left untouched; no `git lfs pull`/checkout run (would need ~18GB, only 42GB free on D:).
+At audit time, `D:/capstone/data/data collection git/Vibration_Bearing_RuntoFailure/` showed all 129 files as locally deleted (working tree) while `git lfs ls-files` still listed 129 tracked objects - not a data-loss event (two other full copies existed, see above), just a missing LFS checkout. Resolved during the D12 repo consolidation: `git lfs checkout` restored all 129 files (verified identical content, e.g. `LogFile_2022-06-20-17-00-31.csv` first line matches the original inspection above), then `git mv Vibration_Bearing_RuntoFailure datasets/college` (pure rename, same LFS objects). This is now the canonical, published copy `config/data_paths.toml` points at.
 
 ## New finding: literal NaN sensor dropouts in college CSVs (confirmed 2026-07-21, via M1 adapter code against real files)
 
