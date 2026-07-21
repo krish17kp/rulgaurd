@@ -54,4 +54,4 @@ ruff check .
 Committing raw datasets/LFS objects/secrets/private absolute paths into git history. Modifying the sibling `data-collection-git` LFS repo's structure or history. Training on hidden Full_Test_Set before freeze. Pushing to GitHub (commit only, user pushes manually).
 
 ## Current milestone
-Accelerated review track (deadline 2026-07-25): M0 done (docs + audit + decisions, first commit pending) -> M1 next (adapters not yet written). See `docs/milestone.md`, `TODO.md`.
+Accelerated review track (deadline 2026-07-25): M0-M4 + minimal M8 all DONE (see `TODO.md` for commit SHAs, `artifacts/evidence/REVIEW-M*/` for evidence). Review-ready. Remaining before 2026-07-25: stabilization only (command.md section 26.4). Post-review: M5 (stage classification), M6 (optional CNN), M7 (RAG/LLM), full 129-file college run, M9 (final audit). See `docs/milestone.md`, `TODO.md`, `reports/verification/review-readiness.md`.
