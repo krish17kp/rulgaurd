@@ -11,6 +11,8 @@ data/processed/
 # artifacts (models, indices, evidence logs can be large/binary)
 artifacts/models/*
 artifacts/indices/*
+artifacts/*.duckdb
+artifacts/*.duckdb.wal
 !artifacts/models/.gitkeep
 !artifacts/indices/.gitkeep
 
