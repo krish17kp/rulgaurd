@@ -81,6 +81,22 @@ All 11 match exactly. M1 acceptance criterion "hidden-RUL derivation independent
 
 `D:/capstone/data/data collection git/Vibration_Bearing_RuntoFailure/` — `git status` shows all 129 files as locally deleted (working tree), while `git lfs ls-files` still lists 129 tracked objects. Files are not on disk here (LFS content never checked out / removed to free space). Not a data-loss event: two other full copies exist (see above) and config does not point here. Left untouched; no `git lfs pull`/checkout run (would need ~18GB, only 42GB free on D:).
 
+## New finding: literal NaN sensor dropouts in college CSVs (confirmed 2026-07-21, via M1 adapter code against real files)
+
+The first file (`LogFile_2022-06-20-17-00-31.csv`) contains rows where fields are the literal string `NaN` (not empty, not malformed - the row still has exactly 4 comma-separated fields):
+- 82 rows with `NaN` in the bearing-temperature column (col 3) — occurring in two clusters (~41 rows each) at approximately row 72,043 and row 1,608,122.
+- Separately, 40 consecutive rows (~row 1,388,129-1,388,168) with `NaN` in **both vibration columns** (col 1, col 2) while temperature stays valid — a distinct dropout event from the temperature gaps.
+- Middle file (`LogFile_2022-06-23-09-01-31.csv`) also has 82 temp-NaN rows; last file has 41.
+
+This means missing-value handling is not FEMTO-only: the college adapter (`college.py`) must preserve `NaN` per-column, per-row rather than raising or fabricating a fill value. `read_college_chunks` was corrected to do this (previously raised on any NaN, which is wrong — these are genuine sensor dropouts, not malformed data).
+
+**Full-dataset scan (all 129 files, 258,000,129 rows, bounded-memory chunked read via `college.py`, ~5min runtime — `artifacts/evidence/REVIEW-M1/college_nan_scan.txt`):**
+- **129/129 files** (100%) contain at least one temperature NaN. Total temp-NaN cells: 21,074 across both temperature columns (~82 rows/file average, consistent with the 3-file sample).
+- **129/129 files** (100%) contain at least one vibration NaN. Total vibration-NaN cells: 12,800 across both vibration columns (~50 rows/file average).
+- This is a systemic, recurring sensor-logging artifact across the entire run, not a rare edge case — M2 feature extraction must budget for it in every window, not treat it as an exceptional path.
+
+Implication for M2: window-level features must carry an explicit missing-sample count/flag per column, matching the FEMTO `temp_available` pattern in `docs/data-contract.md` — the contract's current `temp_available: bool` (file-level) is too coarse for college data and should become row/window-level coverage, not just presence. Flagged as a data-contract follow-up, not fixed in this M1 pass (documentation-only change, deferred to M2 when features.py is written and can decide the exact representation).
+
 ## Processing-cost estimate
 
 College: 129 files x ~143.5MB = ~18.5GB raw, 2M rows/file. Feature extraction at the 25,600-sample/50%-overlap default yields ~78 windows/file (2,000,000/12,800 - 1) x 129 files = ~10,000 feature rows total (tiny — kilobytes as Parquet). Never materialize raw windows to disk.
