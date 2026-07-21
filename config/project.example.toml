@@ -1,0 +1,23 @@
+# Copy to config/project.toml if you need to override a default.
+# These are hypotheses to calibrate, not universal truths - see docs/decisions.md.
+
+[college.window]
+size_samples = 25600      # ~1s at 25.6kHz - resolves ~29.5Hz shaft speed (25Hz FFT bins)
+overlap_fraction = 0.5
+sample_rate_hz = 25600
+
+[femto]
+acquisition_samples = 2560   # one full 0.1s acquisition, used whole, not subdivided
+sample_rate_hz = 25600
+
+[features.frequency_bands_hz]
+# arbitrary equal split pending bearing-geometry-verified BPFO/BPFI/BSF/FTF bands
+low = [0, 1000]
+mid = [1000, 5000]
+high = [5000, 12800]
+
+[kurtosis]
+form = "fisher"   # excess kurtosis (scipy default, normal=0)
+
+[seed]
+value = 42

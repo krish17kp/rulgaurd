@@ -1,0 +1,11 @@
+scanning 129 files for NaN prevalence (full pass, bounded memory)...
+  ...20/129 files, elapsed 42s
+  ...40/129 files, elapsed 95s
+  ...60/129 files, elapsed 137s
+  ...80/129 files, elapsed 177s
+  ...100/129 files, elapsed 233s
+  ...120/129 files, elapsed 283s
+done in 301s
+total rows scanned: 258000129
+files with any temp NaN: 129/129, total temp-NaN cell count: 21074
+files with any vibration NaN: 129/129, total vib-NaN cell count: 12800

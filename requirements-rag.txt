@@ -1,0 +1,6 @@
+# M7 only - not on the review critical path (deadline 2026-07-25).
+# Embeddings via local Ollama nomic-embed-text (already installed) preferred
+# over sentence-transformers to avoid a heavy extra dependency; add
+# sentence-transformers only if Ollama embeddings prove insufficient.
+faiss-cpu
+ollama

@@ -1,0 +1,41 @@
+# local-only reference material, never pushed
+/context/
+context/
+
+# raw and derived data (large, external)
+/data/interim/
+/data/processed/
+data/interim/
+data/processed/
+
+# artifacts (models, indices, evidence logs can be large/binary)
+artifacts/models/*
+artifacts/indices/*
+artifacts/*.duckdb
+artifacts/*.duckdb.wal
+!artifacts/models/.gitkeep
+!artifacts/indices/.gitkeep
+
+# reports output
+reports/figures/*
+reports/metrics/*
+reports/pdf/*
+!reports/figures/.gitkeep
+!reports/metrics/.gitkeep
+!reports/pdf/.gitkeep
+
+# local config with private paths
+config/data_paths.toml
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db

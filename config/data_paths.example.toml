@@ -1,0 +1,19 @@
+# Copy to config/data_paths.toml (gitignored) and adjust for your machine.
+# Paths point at the ORIGINAL extracted archives, never at duplicates.
+
+[college]
+# 129 hourly LogFile_*.csv, ~2,000,001 rows x 4 cols each, no header.
+raw_dir = "D:/capstone/data/Vibration_Bearing_RuntoFailure"
+
+[femto]
+# Six complete learning trajectories.
+training_dir = "D:/capstone/data/data collection git/context/femto dataset/Training_set/Learning_set"
+# Eleven censored test prefixes (no hidden continuation).
+test_dir = "D:/capstone/data/data collection git/context/femto dataset/Test_set/Test_set"
+# Eleven full continuations - DO NOT use to fit anything. Frozen-model evaluation only.
+validation_dir = "D:/capstone/data/data collection git/context/femto dataset/Validation_Set/Full_Test_Set"
+
+[output]
+processed_dir = "data/processed"
+interim_dir = "data/interim"
+duckdb_path = "artifacts/metadata.duckdb"
