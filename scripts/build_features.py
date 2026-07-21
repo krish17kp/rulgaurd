@@ -35,9 +35,11 @@ def _code_version() -> str:
         return "unknown"
 
 
-def build_college(paths, con, code_version: str) -> None:
-    files = discover_college_files(paths.college_raw_dir)
-    print(f"[college] {len(files)} files discovered, building windows (this can take ~15min for the full run)...")
+def build_college(paths, con, code_version: str, sample_stride: int = 1) -> None:
+    all_files = discover_college_files(paths.college_raw_dir)
+    files = all_files[::sample_stride]
+    label = "full run" if sample_stride == 1 else f"1-in-{sample_stride} representative sample"
+    print(f"[college] {len(files)}/{len(all_files)} files selected ({label}), building windows...")
     ensure_dataset(con, "college", "College run-to-failure (NSK 6205)", "v1")
     ensure_bearing_run(con, "college:nsk6205", "college", "nsk6205", "college_run")
 
@@ -82,6 +84,10 @@ def main() -> int:
         "--role", choices=["learning", "test_censored", "full_test"], action="append",
         help="FEMTO only; repeatable. Default: learning only (test_censored/full_test are M4 concerns).",
     )
+    parser.add_argument(
+        "--sample-stride", type=int, default=1,
+        help="College only: process every Nth file (command.md section 26.8 review-sample shortcut). Default 1 = full run.",
+    )
     args = parser.parse_args()
 
     paths = load_data_paths(args.config)
@@ -90,7 +96,7 @@ def main() -> int:
 
     try:
         if args.dataset == "college":
-            build_college(paths, con, code_version)
+            build_college(paths, con, code_version, sample_stride=args.sample_stride)
         else:
             roles = args.role or ["learning"]
             build_femto(paths, con, code_version, roles)
