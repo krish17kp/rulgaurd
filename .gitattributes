@@ -2,3 +2,4 @@
 # Tiny committed test fixtures (a few hundred KB) stay as plain text, not LFS -
 # they need to be readable without an LFS pull for tests/docs to work standalone.
 data/fixtures/**/*.csv -filter -diff -merge -text
+datasets/femto/*.zip filter=lfs diff=lfs merge=lfs -text
