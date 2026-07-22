@@ -1,11 +1,11 @@
-# Review Readiness — Bearing RUL Predictive Maintenance Capstone
+# Review Readiness — RULGuard: Bearing Health Monitoring and Remaining Useful Life Prediction
 
 Date: 2026-07-21. Review deadline: 2026-07-25.
 
 ## Exact run commands
 
 ```bash
-cd D:\capstone\bearing-rul-predictive-maintenance
+cd <path-to-cloned-repo>   # e.g. D:\capstone\rulgaurd
 pip install -e . --no-deps          # once, makes bearing_pdm importable
 python scripts/audit_data.py --config config/data_paths.toml   # NOT YET WRITTEN - see gaps below; audit was done manually this session, see docs/dataset-audit.md
 python scripts/build_features.py --dataset femto --config config/data_paths.toml

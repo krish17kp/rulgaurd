@@ -1,7 +1,7 @@
 [project]
-name = "bearing-rul-predictive-maintenance"
+name = "rulguard"
 version = "0.1.0"
-description = "Capstone: rolling-bearing degradation monitoring and RUL prediction (research prototype, not production)."
+description = "RULGuard: Bearing Health Monitoring and Remaining Useful Life Prediction (research prototype, not production)."
 requires-python = ">=3.11"
 
 [tool.ruff]

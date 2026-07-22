@@ -93,8 +93,8 @@ def _fft_plot_data(x: np.ndarray, sample_rate_hz: float) -> tuple[np.ndarray, np
 
 
 def main() -> None:
-    st.set_page_config(page_title="Bearing RUL - Capstone Review", layout="wide")
-    st.title("Bearing RUL Predictive Maintenance - Review Dashboard")
+    st.set_page_config(page_title="RULGuard - Capstone Review", layout="wide")
+    st.title("RULGuard: Bearing Health Monitoring and Remaining Useful Life Prediction")
     st.caption(
         "Research prototype capstone, not production. Cached artifacts only "
         "(no training on page load). See docs/prd.md for explicit non-claims."

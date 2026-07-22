@@ -1,4 +1,4 @@
-# bearing_pdm - CLAUDE.md
+# RULGuard (bearing_pdm package) - CLAUDE.md
 
 Research capstone, not production. Estimate bearing RUL from vibration data; explain via evidence-grounded RAG. LLM never alters numeric predictions.
 
@@ -23,9 +23,10 @@ Research capstone, not production. Estimate bearing RUL from vibration data; exp
 
 ## Commands
 ```
-python scripts/audit_data.py --config config/data_paths.toml
+# audit_data.py deferred (M0/M1 audit was done by direct inspection, see docs/dataset-audit.md)
 python scripts/build_features.py --dataset femto --config config/data_paths.toml
 python scripts/build_features.py --dataset college --config config/data_paths.toml
+python scripts/build_health.py --config config/data_paths.toml
 python scripts/train_models.py --config config/data_paths.toml
 python scripts/evaluate_models.py --config config/data_paths.toml
 python scripts/run_dashboard.py
