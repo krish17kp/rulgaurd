@@ -1,0 +1,140 @@
+{
+  "femto_lobo": [
+    {
+      "model": "naive",
+      "held_out_bearing": "femto:Bearing1_1",
+      "mae_seconds": 12429.509097395647,
+      "rmse_seconds": 13895.53052272662,
+      "n": 2803
+    },
+    {
+      "model": "extra_trees",
+      "held_out_bearing": "femto:Bearing1_1",
+      "mae_seconds": 8001.753585444166,
+      "rmse_seconds": 9769.593430257628,
+      "n": 2803
+    },
+    {
+      "model": "naive",
+      "held_out_bearing": "femto:Bearing1_2",
+      "mae_seconds": 4616.0,
+      "rmse_seconds": 4616.0,
+      "n": 871
+    },
+    {
+      "model": "extra_trees",
+      "held_out_bearing": "femto:Bearing1_2",
+      "mae_seconds": 4910.315269804822,
+      "rmse_seconds": 6290.605568381,
+      "n": 871
+    },
+    {
+      "model": "naive",
+      "held_out_bearing": "femto:Bearing2_1",
+      "mae_seconds": 4136.0,
+      "rmse_seconds": 4136.0,
+      "n": 911
+    },
+    {
+      "model": "extra_trees",
+      "held_out_bearing": "femto:Bearing2_1",
+      "mae_seconds": 2396.611855104281,
+      "rmse_seconds": 2974.4344400168393,
+      "n": 911
+    },
+    {
+      "model": "naive",
+      "held_out_bearing": "femto:Bearing2_2",
+      "mae_seconds": 5504.0,
+      "rmse_seconds": 5504.0,
+      "n": 797
+    },
+    {
+      "model": "extra_trees",
+      "held_out_bearing": "femto:Bearing2_2",
+      "mae_seconds": 2479.0631116687578,
+      "rmse_seconds": 3523.7602025865062,
+      "n": 797
+    },
+    {
+      "model": "naive",
+      "held_out_bearing": "femto:Bearing3_1",
+      "mae_seconds": 8888.0,
+      "rmse_seconds": 8888.0,
+      "n": 515
+    },
+    {
+      "model": "extra_trees",
+      "held_out_bearing": "femto:Bearing3_1",
+      "mae_seconds": 8411.229902912622,
+      "rmse_seconds": 8815.39601658834,
+      "n": 515
+    },
+    {
+      "model": "naive",
+      "held_out_bearing": "femto:Bearing3_2",
+      "mae_seconds": 3935.023824068418,
+      "rmse_seconds": 4126.8754574046125,
+      "n": 1637
+    },
+    {
+      "model": "extra_trees",
+      "held_out_bearing": "femto:Bearing3_2",
+      "mae_seconds": 4167.168112400733,
+      "rmse_seconds": 4801.41465333839,
+      "n": 1637
+    }
+  ],
+  "femto_lobo_mean_mae_by_model": {
+    "extra_trees": 5061.023639555897,
+    "naive": 6584.755486910678
+  },
+  "college_walk_forward": [
+    {
+      "model": "naive",
+      "fold": 1,
+      "mae_seconds": 0.0,
+      "rmse_seconds": 0.0,
+      "n": 1008
+    },
+    {
+      "model": "extra_trees",
+      "fold": 1,
+      "mae_seconds": 116657.03085813491,
+      "rmse_seconds": 133459.47203658684,
+      "n": 1008
+    },
+    {
+      "model": "naive",
+      "fold": 2,
+      "mae_seconds": 0.0,
+      "rmse_seconds": 0.0,
+      "n": 1007
+    },
+    {
+      "model": "extra_trees",
+      "fold": 2,
+      "mae_seconds": 118904.38548162859,
+      "rmse_seconds": 130682.84917665867,
+      "n": 1007
+    },
+    {
+      "model": "naive",
+      "fold": 3,
+      "mae_seconds": 0.0,
+      "rmse_seconds": 0.0,
+      "n": 1008
+    },
+    {
+      "model": "extra_trees",
+      "fold": 3,
+      "mae_seconds": 131762.3845138889,
+      "rmse_seconds": 153330.20849529008,
+      "n": 1008
+    }
+  ],
+  "college_mean_mae_by_model": {
+    "extra_trees": 122441.26695121748,
+    "naive": 0.0
+  }
+}

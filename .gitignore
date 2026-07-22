@@ -1,0 +1,41 @@
+# raw datasets intentionally not published here (~19GB) - see README.md "Datasets"
+/datasets/
+datasets/
+
+# local-only reference material (papers, private copies), never published
+/context/
+context/
+
+# raw and derived data (large, external)
+/data/interim/
+/data/processed/
+data/interim/
+data/processed/
+
+# generated models/database (local run output, not committed - README explains how to regenerate)
+artifacts/models/*
+artifacts/indices/*
+artifacts/*.duckdb
+artifacts/*.duckdb.wal
+!artifacts/models/.gitkeep
+!artifacts/indices/.gitkeep
+
+# future generated report output beyond the curated set already committed
+reports/pdf/*
+!reports/pdf/.gitkeep
+
+# local config with private paths
+config/data_paths.toml
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db

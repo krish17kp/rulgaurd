@@ -1,0 +1,98 @@
+{
+  "transparent_hi": {
+    "mean_monotonicity": 0.00868060889970733,
+    "mean_trend_corr": -0.5254548897500946,
+    "per_bearing": [
+      {
+        "bearing_run_id": "femto:Bearing1_1",
+        "monotonicity": 0.007851534618129907,
+        "trend_corr": -0.8746166692755772,
+        "n": 2803
+      },
+      {
+        "bearing_run_id": "femto:Bearing1_2",
+        "monotonicity": 0.022988505747126436,
+        "trend_corr": -0.14288209744513167,
+        "n": 871
+      },
+      {
+        "bearing_run_id": "femto:Bearing2_1",
+        "monotonicity": 0.001098901098901099,
+        "trend_corr": -0.6645606082793258,
+        "n": 911
+      },
+      {
+        "bearing_run_id": "femto:Bearing2_2",
+        "monotonicity": 0.017587939698492462,
+        "trend_corr": -0.7805531660886456,
+        "n": 797
+      },
+      {
+        "bearing_run_id": "femto:Bearing3_1",
+        "monotonicity": 0.0019455252918287938,
+        "trend_corr": -0.3151378699906142,
+        "n": 515
+      },
+      {
+        "bearing_run_id": "femto:Bearing3_2",
+        "monotonicity": 0.0006112469437652812,
+        "trend_corr": -0.37497892742127265,
+        "n": 1637
+      }
+    ]
+  },
+  "pca_hi": {
+    "selected_features": [
+      "vibration_x_spectral_centroid_hz",
+      "vibration_x_band_energy_frac_mid",
+      "vibration_y_abs_mean",
+      "vibration_x_band_energy_frac_high",
+      "vibration_y_rms",
+      "vibration_y_std",
+      "vibration_y_total_spectral_energy",
+      "vibration_y_var"
+    ],
+    "mean_monotonicity": 0.01932303519009935,
+    "mean_trend_corr": -0.4647871020988094,
+    "per_bearing": [
+      {
+        "bearing_run_id": "femto:Bearing1_1",
+        "monotonicity": 0.0014275517487508922,
+        "trend_corr": -0.2697355900454908,
+        "n": 2803
+      },
+      {
+        "bearing_run_id": "femto:Bearing1_2",
+        "monotonicity": 0.016091954022988506,
+        "trend_corr": -0.3634791135532305,
+        "n": 871
+      },
+      {
+        "bearing_run_id": "femto:Bearing2_1",
+        "monotonicity": 0.01978021978021978,
+        "trend_corr": -0.6742765850750646,
+        "n": 911
+      },
+      {
+        "bearing_run_id": "femto:Bearing2_2",
+        "monotonicity": 0.022613065326633167,
+        "trend_corr": -0.6588165726353207,
+        "n": 797
+      },
+      {
+        "bearing_run_id": "femto:Bearing3_1",
+        "monotonicity": 0.038910505836575876,
+        "trend_corr": -0.443260779747949,
+        "n": 515
+      },
+      {
+        "bearing_run_id": "femto:Bearing3_2",
+        "monotonicity": 0.017114914425427872,
+        "trend_corr": -0.37915397153580066,
+        "n": 1637
+      }
+    ]
+  },
+  "selected": "transparent_hi",
+  "selection_reason": "higher |mean trend correlation| across the 6 learning bearings"
+}

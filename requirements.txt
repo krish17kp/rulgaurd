@@ -1,0 +1,14 @@
+numpy
+pandas
+scipy
+scikit-learn
+pyarrow
+duckdb
+joblib
+matplotlib
+plotly
+streamlit
+py7zr
+pytest
+reportlab
+ruff
