@@ -1,5 +1,9 @@
 # Database Schema (DuckDB, no ORM)
 
+## Materialization status (as of the review build)
+
+This file defines the **full planned** M0-M9 schema. The current `artifacts/metadata.duckdb` materializes the 5 lineage/metadata tables the review track (M0-M4, M8) actually uses: `schema_version`, `datasets` (2 rows), `bearing_runs` (7 rows: 6 FEMTO learning + 1 college), `acquisitions` (11,564 rows: 7,534 FEMTO + 4,030 college), `feature_batches` (2 rows). The `model_runs`, `evaluation_metrics`, `predictions`, `knowledge_documents`, `retrieval_events`, and `generated_reports` tables belong to the post-review milestones (M5/M7) and are defined here but not yet created - RUL/HI metrics currently live as versioned JSON under `reports/metrics/` (see `docs/database-structure.md`), which the dashboard reads directly.
+
 ## ER diagram
 
 ```mermaid

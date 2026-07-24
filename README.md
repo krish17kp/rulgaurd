@@ -79,6 +79,7 @@ See `reports/verification/review-readiness.md` for exact commands, environment, 
 
 ## Methodology
 
+- `docs/brd.md` — business framing: problem, stakeholders, value, scope, risks, success criteria.
 - `docs/prd.md` — problem, goals, non-goals, explicit non-claims.
 - `docs/data-contract.md` — canonical feature-row schema both adapters emit.
 - `docs/architecture.md` — data flow, trust boundaries, why raw samples stay out of the database.
