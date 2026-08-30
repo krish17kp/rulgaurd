@@ -10,6 +10,7 @@ from bearing_pdm.evaluation import (
     score_hidden_set,
     summarize_hidden_set,
 )
+from bearing_pdm.modeling import fit_naive_baseline, predict_naive_baseline
 
 N = 40
 
@@ -142,6 +143,44 @@ def test_score_hidden_set_records_condition_id():
         df, {"Bearing1_3": 1000.0, "Bearing2_7": 500.0}, {"m": _constant_predictor(1.0)}
     )
     assert dict(zip(scored["bearing"], scored["condition_id"])) == {"Bearing1_3": 1, "Bearing2_7": 2}
+
+
+def test_score_hidden_set_gives_the_real_naive_baseline_history_to_compute_elapsed_time():
+    """Regression test for the bug where score_hidden_set passed the naive
+    baseline only the LAST censored row. NaiveBaseline has no start-time entry
+    for a hidden bearing (it was never in the training set), so it falls back
+    to the group-min timestamp of whatever frame it is given
+    (modeling._elapsed_seconds). A one-row frame's group-min is its own
+    timestamp, so elapsed collapsed to 0 and every bearing's naive prediction
+    became the same constant (mean_total_life_seconds) regardless of how far
+    into its own censored prefix it actually was.
+
+    Two hidden bearings with different-length censored prefixes must therefore
+    get DIFFERENT naive predictions, and each must be less than the bare
+    training mean (since each has nonzero elapsed time to subtract)."""
+    train_df = _femto_learning_df(n_bearings=3)
+    naive_model = fit_naive_baseline(train_df)
+
+    # Same construction, but Bearing2_7's censored prefix runs far longer than
+    # Bearing1_3's - a real naive baseline must read that difference.
+    df = pd.concat(
+        [_censored_df(labels=("Bearing1_3",), n=5), _censored_df(labels=("Bearing2_7",), n=50)],
+        ignore_index=True,
+    )
+
+    scored = score_hidden_set(
+        df,
+        {"Bearing1_3": 100000.0, "Bearing2_7": 100000.0},
+        {"naive": lambda frame: predict_naive_baseline(frame, naive_model)},
+    )
+
+    predictions = dict(zip(scored["bearing"], scored["predicted_rul_seconds"]))
+    assert predictions["Bearing1_3"] != predictions["Bearing2_7"], (
+        "naive predictions for bearings with different elapsed censored history "
+        "must differ - identical values means elapsed time collapsed to 0 again"
+    )
+    assert predictions["Bearing1_3"] < naive_model.mean_total_life_seconds
+    assert predictions["Bearing2_7"] < naive_model.mean_total_life_seconds
 
 
 def test_summarize_hidden_set_counts_overestimates_separately():

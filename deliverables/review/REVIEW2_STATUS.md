@@ -71,7 +71,10 @@ that bearing's own acquisitions [10, 60) (fixed count + offset, not a fraction o
 MAD scale frozen from training bearings, trailing rolling median, and a **logistic map** onto
 the open interval (0, 1) — which makes pinning structurally impossible rather than clipped away.
 
-**Result (leave-one-bearing-out calibration):**
+**Implementation diagnostics (leave-one-bearing-out calibration)** — these confirm the fix
+behaved as designed, not primary validation evidence (they are close-to-guaranteed by
+construction: the logistic is centred to put the healthy reference near 0.95, and is
+structurally open-interval so pinning cannot occur):
 
 | bearing | % at HI=1.0 before | after | HI in healthy window | HI at final 1 % | Spearman |
 |---|---|---|---|---|---|
@@ -82,15 +85,36 @@ the open interval (0, 1) — which makes pinning structurally impossible rather 
 | Bearing3_1 | 87.4 % | **0.00 %** | 0.954 | 0.063 | −0.477 |
 | Bearing3_2 | 88.9 % | **0.00 %** | 0.959 | 0.000 | −0.181 |
 
-Pinning 47.5 % → **0.00 % on every bearing**. Healthy anchor now consistent at **0.95 ± 0.005
-across all three operating conditions**. Every bearing reaches failure territory, including the
-two whose HI previously never moved at all.
+**Defensible comparative evidence** — mean |Spearman| and usable p05–p95 range, computed the
+same way for all three HIs (`health.evaluate_hi`, `reports/metrics/health_indicator_comparison.json`;
+docs/decisions.md D20 item 3, correcting an earlier apples-to-oranges comparison that mixed
+Pearson for the legacy HIs with Spearman for the reference HI):
+
+| HI | mean &#124;Spearman&#124; | usable range (p05–p95) |
+|---|---|---|
+| reference_hi (selected) | **0.534** | **0.776** |
+| transparent_hi (legacy, rejected — pins) | 0.414 | 0.679 |
+| pca_hi (legacy, rejected — collapsed range) | 0.398 | 0.106 |
+
+Pinning went from a mean of 47.5 % to 0.00 % on every bearing, and every bearing now reaches
+failure territory, including the two whose HI previously never moved at all — but the number
+that actually argues reference_hi is a *better* indicator, not merely an unpinned one, is the
+Spearman/usable-range table above.
 
 **Leakage-safety:** the per-bearing reference reads only that bearing's own acquisitions 10–59
 — strictly in the past, available at inference, present on all 11 censored bearings (verified:
 every censored prefix starts at `sequence_index == 0`). Scale and anchors fit on training
-bearings only, frozen in `ReferenceHIModel`. `rul_seconds` never read. Smoothing trailing-only.
-`health_indicator` added to `NON_FEATURE_COLUMNS` so it can never become a RUL input.
+bearings only, frozen in `ReferenceHIModel`. `rul_seconds` never read. Smoothing trailing-only,
+and now sorts each bearing's rows by `sequence_index` internally rather than trusting caller
+order (D20 item 4). `health_indicator` added to `NON_FEATURE_COLUMNS` so it can never become a
+RUL input.
+
+**Disclosure:** the feature set, `SKIP=10`, `N=50`, and `smooth_window=11` were chosen by
+inspecting the six FEMTO learning bearings' own measured behaviour (the run-in transient, the
+terminal-cliff width), not re-derived per fold. The per-fold anchors/scales above are genuinely
+leave-one-bearing-out; the underlying design choices are not a fully untouched evaluation
+against those six bearings. The 11 hidden/censored bearings were never used to choose any of
+this (docs/decisions.md D20 item 6).
 
 ## 7. ExtraTrees RUL model
 `ExtraTreesRegressor(n_estimators=100, random_state=42)` on the non-contract feature columns,
@@ -122,12 +146,21 @@ the strongest argument *for* eventually trying a sequence-aware model.
 Ground truth = the **archive-derived** variant. Bearing1_4's true RUL is genuinely ambiguous
 between the official challenge table (339 s) and the archives (2,890 s), so both variants are
 carried and scored (D17). Under the **official** variant the same frozen models score ExtraTrees
-MAE 4,323.5 s against naive 9,691.3 s — the 2x conclusion is unchanged either way.
+MAE 4,323.5 s against naive (corrected) 5,122.5 s.
+
+**Corrected 2026-08-30 (docs/decisions.md D20 item 1):** `score_hidden_set` was passing the
+naive baseline only the last row of each bearing's censored prefix, so its elapsed-time term
+collapsed to 0 and every bearing got the same constant prediction. The bug made naive look far
+worse than it is (originally reported: MAE 9,459.4 s, "2.08x better"). Fixed by giving the
+baseline the whole chronologically-ordered prefix; only naive's numbers change below —
+ExtraTrees is a row-wise predictor and was never affected (`rul_evaluation.json` reproduces
+byte-identically).
 
 | model | MAE | RMSE | mean abs %Er | PHM2012 | over-estimates |
 |---|---|---|---|---|---|
-| **ExtraTrees** | **4,555.4 s** | 5,388.0 s | 347.5 % | **0.0682** | **8 / 11** |
-| naive | 9,459.4 s | 9,786.4 s | 681.7 % | 0.0000 | 11 / 11 |
+| **ExtraTrees** | **4,555.4 s** | 5,388.0 s | 347.5 % | **0.0682** | 8 / 11 |
+| naive (corrected) | 5,203.9 s | 5,917.9 s | 383.3 % | 0.0294 | **4 / 11** |
+| ~~naive (original, bugged)~~ | ~~9,459.4 s~~ | ~~9,786.4 s~~ | ~~681.7 %~~ | ~~0.0000~~ | ~~11 / 11~~ |
 
 **Leave-one-bearing-out, 6 learning bearings** (`reports/metrics/rul_evaluation.json`):
 
@@ -144,12 +177,16 @@ MAE 4,323.5 s against naive 9,691.3 s — the 2x conclusion is unchanged either 
 ExtraTrees beats naive on **4 of 6** bearings. The mean hides that it loses on two — reported.
 
 ## 11. What the results honestly mean
-ExtraTrees beats the naive baseline by **2.08×** on data it has never seen. That is a real
-result and the first evidence the model learned something transferable rather than memorising
-the learning bearings.
+ExtraTrees beats the corrected naive baseline by **~1.14×** on data it has never seen (4,555.4 s
+vs 5,203.9 s MAE) — a real but narrow margin, not the 2.08× originally reported before the D20
+naive-baseline bug was found and fixed. It is still the first evidence the model learned
+something transferable rather than memorising the learning bearings, but the margin does not
+support calling ExtraTrees decisively better than naive on this benchmark.
 
-But absolute accuracy is **poor**: 347 % mean absolute percent error, PHM2012 score 0.068, and
-**8 of 11 predictions are over-estimates — the unsafe direction** for maintenance planning.
+Absolute accuracy is **poor** either way: 347 % mean absolute percent error, PHM2012 score
+0.068, and **8 of 11 predictions are over-estimates — the unsafe direction** for maintenance
+planning. The corrected naive baseline is actually safer by this measure: it over-estimates on
+only 4 of 11.
 
 Diagnosis: the model sees only instantaneous statistics of a single 2,560-sample acquisition,
 with no notion of elapsed time or trajectory (correctly so — elapsed time is excluded to prevent
@@ -159,11 +196,17 @@ limitation, not a bug.
 
 ## 12. Degradation stages (M5, new this session)
 **HEALTHY / DEGRADING / CRITICAL** — a statistical alarm band on the HI plus a persistence rule.
-Both boundaries are **fitted quantiles of the training bearings' own HI**, never chosen numbers:
-`hi_warn` = 5th percentile over training healthy windows; `hi_critical` = median over training
-end-of-life windows. A stage change is committed only after **5 consecutive acquisitions agree**,
-so a single noise spike cannot trip an alarm. `rul_seconds` is never used to fit a boundary —
-only afterwards to score the result.
+`hi_warn` = 5th percentile over training healthy windows — a genuine fitted quantile that moves
+with the data. `hi_critical` = median over training end-of-life windows, which is computed from
+data but is **not** an independent fit in the same sense: the reference HI's fixed logistic
+steepness pins the end-of-life score near a constant (≈0.047) regardless of the training
+bearings, so `hi_critical` measures 0.0474–0.0477 across every leave-one-bearing-out fold — a
+threshold derived from the score mapping's own end-of-life anchor, not two independently fitted
+quantiles the way the previous wording implied (docs/decisions.md D20 item 2). A stage change is
+committed only after **5 consecutive acquisitions agree**, so a single noise spike cannot trip
+an alarm. `rul_seconds` is never used to fit a boundary — only afterwards to score the result.
+A run with no valid HI reading (leading gap, or entirely missing) now reports `UNKNOWN`, never
+silently `HEALTHY` (D20 item 5).
 
 | bearing | HEALTHY | DEGRADING | CRITICAL | life frac at 1st CRITICAL | **RUL at 1st CRITICAL** | reversions |
 |---|---|---|---|---|---|---|

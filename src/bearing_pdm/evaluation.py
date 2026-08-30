@@ -96,10 +96,17 @@ def score_hidden_set(
         group = df_censored[df_censored["bearing_run_id"] == bearing_run_id]
         if group.empty:
             continue
-        last_acquisition = group.sort_values("sequence_index").iloc[[-1]]
+        # Pass the WHOLE censored prefix, chronologically ordered, not just its
+        # last row. NaiveBaseline needs the bearing's earlier acquisitions to
+        # compute elapsed time (docs/decisions.md D9/D20): a one-row frame has
+        # no history, so `_elapsed_seconds`' group-min fallback collapses to
+        # the row's own timestamp and elapsed becomes 0 for every bearing here.
+        # Row-wise predictors (e.g. the tree baseline) are unaffected, since
+        # their prediction for the last row does not depend on the other rows.
+        ordered = group.sort_values("sequence_index")
 
         for model_name, predict in predictors.items():
-            predicted = float(predict(last_acquisition).iloc[0])
+            predicted = float(predict(ordered).iloc[-1])
             error = predicted - actual
             rows.append({
                 "model": model_name,

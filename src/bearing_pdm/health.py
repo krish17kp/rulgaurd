@@ -207,19 +207,36 @@ def apply_pca_hi(df: pd.DataFrame, model: PcaHIModel) -> pd.Series:
 
 
 def evaluate_hi(df: pd.DataFrame, hi: pd.Series) -> pd.DataFrame:
-    """Per-bearing monotonicity (|mean(sign(diff))|, 1=perfectly monotone)
-    and trend correlation (HI vs sequence_index; expect strongly negative)."""
+    """Per-bearing monotonicity (|mean(sign(diff))|, 1=perfectly monotone),
+    Pearson trend correlation, and Spearman rank correlation (HI vs
+    sequence_index; expect strongly negative).
+
+    Spearman is the metric to compare across HIs (docs/decisions.md D20):
+    FEMTO degradation is flat-then-cliff, so a linear Pearson correlation
+    against a linear time axis understates an otherwise usable HI, and
+    comparing one HI's Pearson to another's Spearman is not apples-to-apples.
+    `reference_hi_diagnostics` computes the same Spearman value for the
+    reference HI; this keeps the two comparable."""
     rows = []
     tmp = df.assign(hi=hi.to_numpy())
     for bearing, g in tmp.sort_values("sequence_index").groupby("bearing_run_id"):
         values = g["hi"].to_numpy()
+        sequence = g["sequence_index"].to_numpy()
         diffs = np.diff(values)
         monotonicity = float(np.abs(np.mean(np.sign(diffs)))) if diffs.size else float("nan")
         if np.std(values) > 0:
-            trend_corr = float(np.corrcoef(values, g["sequence_index"].to_numpy())[0, 1])
+            trend_corr = float(np.corrcoef(values, sequence)[0, 1])
+            spearman = float(pd.Series(values).corr(pd.Series(sequence), method="spearman"))
         else:
             trend_corr = float("nan")
-        rows.append({"bearing_run_id": bearing, "monotonicity": monotonicity, "trend_corr": trend_corr, "n": len(g)})
+            spearman = float("nan")
+        rows.append({
+            "bearing_run_id": bearing,
+            "monotonicity": monotonicity,
+            "trend_corr": trend_corr,
+            "spearman": spearman,
+            "n": len(g),
+        })
     return pd.DataFrame(rows)
 
 
@@ -362,11 +379,20 @@ def _degradation_score(
 ) -> pd.Series:
     """Fuse the standardised per-feature deviations, then smooth with a
     TRAILING rolling median per bearing. Trailing and uncentred by design - a
-    centred window would read future acquisitions into the current value."""
+    centred window would read future acquisitions into the current value.
+
+    Sorts each bearing's rows by `sequence_index` before rolling, rather than
+    trusting the row order `df` arrives in: `pandas.rolling` only knows
+    positional order, so an out-of-order or shuffled input would otherwise
+    silently mix future acquisitions into a "trailing" window."""
     fused = pd.concat([centered[f] / scales[f] for f in features], axis=1).mean(axis=1)
-    return fused.groupby(df["bearing_run_id"]).transform(
-        lambda s: s.rolling(window, min_periods=1).median()
-    )
+    result = pd.Series(index=fused.index, dtype=float)
+    for _bearing, group in df.groupby("bearing_run_id", sort=False):
+        ordered_idx = group.sort_values("sequence_index").index
+        result.loc[ordered_idx] = (
+            fused.loc[ordered_idx].rolling(window, min_periods=1).median().to_numpy()
+        )
+    return result
 
 
 def fit_reference_hi(

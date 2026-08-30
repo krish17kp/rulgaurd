@@ -75,6 +75,7 @@ def test_transparent_hi_evaluate_shows_strong_negative_trend():
     # linear time axis is necessarily weaker than monotonicity alone implies -
     # -0.5 still confirms a strong, consistent negative trend.
     assert (report["trend_corr"] < -0.5).all()
+    assert (report["spearman"] < -0.5).all()
 
 
 def test_monotonicity_trendability_ranks_real_features_above_noise():
@@ -99,6 +100,7 @@ def test_pca_hi_selects_degradation_features_and_orients_correctly():
     assert hi.iloc[0] > hi.iloc[N - 1]  # healthy > degraded, oriented correctly
     report = evaluate_hi(df, hi)
     assert (report["trend_corr"] < -0.5).all()
+    assert (report["spearman"] < -0.5).all()
 
 
 def test_pca_hi_excludes_columns_entirely_missing_for_some_bearings():
@@ -235,6 +237,23 @@ def test_reference_hi_is_causal():
     for cut in (80, 120, 199):
         truncated = apply_reference_hi(df.iloc[: cut + 1].copy(), model).to_numpy()
         assert truncated[cut] == full[cut]
+
+
+def test_reference_hi_is_robust_to_shuffled_row_order():
+    """The trailing rolling smoother must key off sequence_index, not row
+    position. A caller that hands rows out of chronological order (or with
+    bearings interleaved) must get the same per-acquisition HI back, not a
+    value contaminated by whatever order the rows happened to arrive in."""
+    df = _reference_df()
+    model = fit_reference_hi(_reference_df())
+
+    chronological = apply_reference_hi(df, model)
+
+    shuffled_df = df.sample(frac=1.0, random_state=7)
+    shuffled_hi = apply_reference_hi(shuffled_df, model)
+
+    aligned = shuffled_hi.reindex(df.index)
+    np.testing.assert_allclose(aligned.to_numpy(), chronological.to_numpy(), rtol=0, atol=1e-12)
 
 
 def test_reference_hi_survives_a_joblib_round_trip(tmp_path):

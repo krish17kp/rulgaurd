@@ -39,3 +39,9 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# review deliverables - large binaries and study material are intentionally
+# local only (docs/decisions.md D20 item 8); the generated status doc stays
+# tracked
+deliverables/review/*
+!deliverables/review/REVIEW2_STATUS.md

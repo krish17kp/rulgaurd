@@ -182,8 +182,8 @@ def main() -> int:
     # pinning gate, prefer the strongest rank trend against life progression.
     # Spearman rather than Pearson because FEMTO degradation is flat-then-cliff.
     candidates = {
-        "transparent_hi": (_pinning_report(hi_transparent, df), report_transparent["trend_corr"]),
-        "pca_hi": (_pinning_report(hi_pca, df), report_pca["trend_corr"]),
+        "transparent_hi": (_pinning_report(hi_transparent, df), report_transparent["spearman"]),
+        "pca_hi": (_pinning_report(hi_pca, df), report_pca["spearman"]),
         "reference_hi": (_pinning_report(hi_reference_lobo, df), report_reference_lobo["spearman"]),
     }
     PIN_GATE = 5.0  # percent of a bearing's acquisitions allowed at exactly 1.0
@@ -227,6 +227,7 @@ def main() -> int:
                             "three operating conditions pins most acquisitions at exactly 1.0",
             "mean_monotonicity": float(report_transparent["monotonicity"].mean()),
             "mean_trend_corr": float(report_transparent["trend_corr"].mean()),
+            "mean_spearman": float(report_transparent["spearman"].mean()),
             "pinning": _pinning_report(hi_transparent, df),
             "per_bearing": report_transparent.to_dict(orient="records"),
         },
@@ -237,6 +238,7 @@ def main() -> int:
             "selected_features": list(pca_model.selected_features),
             "mean_monotonicity": float(report_pca["monotonicity"].mean()),
             "mean_trend_corr": float(report_pca["trend_corr"].mean()),
+            "mean_spearman": float(report_pca["spearman"].mean()),
             "pinning": _pinning_report(hi_pca, df),
             "per_bearing": report_pca.to_dict(orient="records"),
         },
@@ -275,8 +277,12 @@ def main() -> int:
             },
         },
         "stages": {
-            "method": "statistical alarm band on the selected HI plus a persistence rule; "
-                      "both boundaries are fitted quantiles of the TRAINING bearings' HI",
+            "method": "statistical alarm band on the selected HI plus a persistence rule. "
+                      "hi_warn is a genuine fitted quantile of the training bearings' healthy "
+                      "HI. hi_critical is a quantile of HI values already compressed by the "
+                      "reference HI's fixed /6 logistic steepness toward a constant end-of-life "
+                      "anchor (~0.047, docs/decisions.md D20) - a threshold computed from data, "
+                      "but not an independent fit the way hi_warn is",
             "order": list(STAGE_ORDER),
             "not_a_diagnosis": "a stage is a severity band on a health indicator, not a fault "
                                "type - no inner-race/outer-race/ball/cage/lubrication claim",

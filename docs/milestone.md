@@ -43,11 +43,15 @@ Acceptance: ground truth re-derived from the archives and cross-checked against
 the official table before scoring; one prediction per bearing at the last
 censored acquisition; official PHM2012 scoring function verified against primary
 sources before use.
-Result: ExtraTrees MAE **4,555 s** vs naive **9,459 s** (2.1x better), PHM2012
-score **0.068** vs 0.000. Beats the baseline out-of-sample, but absolute accuracy
-is poor and 8/11 predictions err in the unsafe (over-estimate) direction.
-See `docs/decisions.md` D16 (result and diagnosis) and D17 (Bearing1_4 ground-truth
-conflict, and the verified scoring formula).
+Result: ExtraTrees MAE **4,555 s** vs naive **5,204 s** (~1.14x better), PHM2012
+score **0.068** vs 0.029. Beats the baseline out-of-sample, but absolute accuracy
+is poor, the margin over naive is narrow, and 8/11 predictions err in the unsafe
+(over-estimate) direction (naive over-estimates 4/11).
+See `docs/decisions.md` D16 (result and diagnosis), D17 (Bearing1_4 ground-truth
+conflict, and the verified scoring formula), and D20 (Review 2: the naive baseline
+above was computed on a single-row frame with no history, collapsing its elapsed-time
+term to 0 and understating naive's accuracy at MAE 9,459 s / a false 2.08x margin -
+corrected here).
 
 ## M5 - degradation-stage classification (DONE 2026-08-30)
 Purpose: turn the health indicator into an actionable severity band.
@@ -56,8 +60,11 @@ indicator that was pinned at 1.0 for 88% of two bearings' lives would have been 
 
 Deliverables: `src/bearing_pdm/health.py` reference HI (D18), `src/bearing_pdm/stages.py`
 (HEALTHY / DEGRADING / CRITICAL), stage badge on the dashboard, `tests/test_stages.py`.
-Label policy: both boundaries are **fitted quantiles of the training bearings' own HI**
-(healthy-window 5th percentile, end-of-life median), never chosen numbers, plus a
+Label policy: `hi_warn` is a genuine fitted quantile of the training bearings' own healthy-window
+HI (5th percentile). `hi_critical` (end-of-life median) is computed from data but is not an
+independent fit in the same sense - the reference HI's fixed logistic steepness pins the
+end-of-life score near a constant (~0.047) regardless of the training set, so `hi_critical`
+clusters there across every leave-one-bearing-out fold (see `docs/decisions.md` D20). Plus a
 5-acquisition persistence rule. `rul_seconds` is never used to fit a boundary - only
 afterwards to score the result.
 Acceptance: HI pinning at 1.0 is 0.00% on every learning bearing (was 47.5% mean); every

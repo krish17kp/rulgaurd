@@ -246,9 +246,11 @@ def main() -> None:
                     )(f"Degradation stage: **{stage}**")
                     st.caption(
                         f"Severity band on the health indicator, not a fault diagnosis. "
-                        f"Boundaries are fitted quantiles of the training bearings' HI "
-                        f"(DEGRADING below {thresholds.hi_warn:.3f}, CRITICAL below "
-                        f"{thresholds.hi_critical:.3f}), committed only after "
+                        f"DEGRADING below {thresholds.hi_warn:.3f} (a fitted quantile of the "
+                        f"training bearings' healthy HI); CRITICAL below "
+                        f"{thresholds.hi_critical:.3f} (a threshold derived from the score "
+                        f"mapping's own end-of-life anchor, not an independently fitted "
+                        f"quantile - see docs/decisions.md D20). Committed only after "
                         f"{thresholds.persistence} consecutive acquisitions agree."
                     )
 

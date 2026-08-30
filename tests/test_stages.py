@@ -16,6 +16,7 @@ from bearing_pdm.stages import (
     DEGRADING,
     HEALTHY,
     STAGE_ORDER,
+    UNKNOWN,
     _apply_persistence,
     assign_stages,
     fit_stage_thresholds,
@@ -142,17 +143,53 @@ def test_persistence_starts_in_the_first_observed_stage():
     assert list(_apply_persistence(raw, 5)) == [CRITICAL] * 10
 
 
-def test_missing_hi_is_not_reported_as_healthy():
+def test_leading_missing_hi_is_unknown_not_healthy():
+    """A bearing with no valid HI reading YET must read UNKNOWN, never
+    HEALTHY. The previous implementation peeked ahead to the first known
+    reading in the whole array and back-filled it onto the leading gap - which
+    both invents a green "healthy" status from nothing and is not causal
+    (an early index's label depended on a later index's value)."""
     df, hi = _train_frame()
     th = fit_stage_thresholds(df, hi, SKIP, N_REF)
 
     gapped = hi.copy()
     gapped.iloc[:3] = np.nan
     stages = assign_stages(df, gapped, th)
-    # Carried forward from the first KNOWN stage, never invented as HEALTHY
-    # because the reading was absent.
+
     assert stages.notna().all()
-    assert set(stages.unique()) <= set(STAGE_ORDER)
+    assert list(stages.iloc[:3]) == [UNKNOWN, UNKNOWN, UNKNOWN]
+    assert set(stages.unique()) <= set(STAGE_ORDER) | {UNKNOWN}
+
+
+def test_entirely_missing_hi_is_unknown_never_healthy():
+    """A bearing/run with NO valid HI value at all must never silently render
+    as HEALTHY - the dashboard must not show a green condition when nothing
+    was actually measured."""
+    df, hi = _train_frame()
+    th = fit_stage_thresholds(df, hi, SKIP, N_REF)
+
+    missing = pd.Series(np.nan, index=hi.index)
+    stages = assign_stages(df, missing, th)
+
+    assert set(stages.unique()) == {UNKNOWN}
+
+
+def test_valid_hi_after_missing_values_recovers_normal_progression():
+    """Once real readings resume after a leading gap, staging must proceed
+    normally and still reach CRITICAL by end of life."""
+    df, hi = _train_frame()
+    th = fit_stage_thresholds(df, hi, SKIP, N_REF)
+
+    gapped = hi.copy()
+    for _bearing, group in df.groupby("bearing_run_id"):
+        leading = group.sort_values("sequence_index").index[:5]
+        gapped.loc[leading] = np.nan
+    stages = assign_stages(df, gapped, th)
+
+    for _bearing, group in df.assign(_s=stages).groupby("bearing_run_id"):
+        ordered = group.sort_values("sequence_index")
+        assert ordered["_s"].iloc[0] == UNKNOWN
+        assert ordered["_s"].iloc[-1] == CRITICAL
 
 
 def test_summarize_stages_is_well_formed():

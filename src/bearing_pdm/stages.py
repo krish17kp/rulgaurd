@@ -6,10 +6,18 @@ bearing geometry is not verified in this project and BPFO/BPFI/BSF/FTF are not
 derivable from the available data (.claude/rules/ml-data.md).
 
 Method: a statistical alarm band with a persistence rule, in the spirit of
-classical condition-monitoring practice (ISO 13373-style alarm bands). Both
-boundaries are **fitted quantiles of the training bearings' own HI
-distribution**, never chosen numbers - the point being that every threshold
-traces to a fitted value the way `reports/metrics/*.json` numbers do.
+classical condition-monitoring practice (ISO 13373-style alarm bands).
+`hi_warn` is a genuine fitted quantile of the training bearings' HEALTHY
+window - it moves with the data. `hi_critical`, by contrast, is a quantile of
+HI values that are themselves produced by `apply_reference_hi`'s fixed /6
+logistic steepness (health.py), which was specifically calibrated to pin the
+end-of-life anchor near HI ~ 0.047 (`1/(1+exp(3))`) regardless of the
+underlying raw score. So `hi_critical` measurably clusters near that constant
+across every leave-one-bearing-out fold (`reports/metrics/health_indicator_
+comparison.json`: 0.0474-0.0477 across all 6 holds) - it is a threshold
+computed from the data, but one substantially determined by the fixed score
+mapping upstream of it, not an independent fit. Do not describe both
+boundaries as equally "fitted, never chosen" (docs/decisions.md D20).
 
 Leakage-safe by the same argument as the reference HI (health.py): thresholds
 are fitted on the training fold and applied to the held-out bearing, and
@@ -31,6 +39,13 @@ CRITICAL = "CRITICAL"
 # Ordered least to most severe. A stage index is only ever compared, never
 # used as a numeric feature.
 STAGE_ORDER: tuple[str, ...] = (HEALTHY, DEGRADING, CRITICAL)
+
+# Not a severity level - deliberately excluded from STAGE_ORDER. Emitted when
+# no valid HI reading has ever been seen yet for a bearing (leading missing
+# values) or none exists at all (entirely missing HI). Must never be conflated
+# with HEALTHY: a green "healthy" badge implies a measurement was actually
+# taken and looked fine, which is not true here.
+UNKNOWN = "UNKNOWN"
 
 # A stage change is committed only after this many consecutive acquisitions
 # agree, so a single noise spike cannot trip an alarm. Backward-looking, so the
@@ -124,20 +139,30 @@ def _apply_persistence(raw: np.ndarray, k: int) -> np.ndarray:
     """Commit a stage change only after `k` consecutive acquisitions agree.
 
     Causal: the label at index i depends only on indices <= i. The stream
-    starts in the first observed stage rather than assuming HEALTHY, so a
-    bearing that is already degraded when monitoring begins is not mislabelled
-    as healthy for the first k acquisitions.
+    starts UNKNOWN - never HEALTHY - until the first known (non-empty) raw
+    reading is observed, and that first reading is trusted immediately (no
+    persistence delay is needed to establish a baseline where none existed).
+    A bearing that is already degraded when monitoring begins is therefore
+    still not mislabelled as healthy for the first k acquisitions; a bearing
+    with no valid reading yet (leading gap, or an entirely missing HI) is
+    UNKNOWN rather than silently HEALTHY. Reading ahead into the array for the
+    initial state - the previous behaviour - would have let a later index's
+    value determine an earlier index's label, which is not causal.
     """
     committed = np.empty(raw.shape, dtype=object)
-    current = next((s for s in raw if s), HEALTHY)
+    current = UNKNOWN
     candidate, run = None, 0
     for i, stage in enumerate(raw):
-        if stage and stage != current:
+        if not stage:
+            pass  # missing reading: carry the last known state forward
+        elif current == UNKNOWN:
+            current = stage
+        elif stage != current:
             run = run + 1 if stage == candidate else 1
             candidate = stage
             if run >= k:
                 current, candidate, run = stage, None, 0
-        elif stage == current:
+        else:
             candidate, run = None, 0
         committed[i] = current
     return committed
