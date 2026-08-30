@@ -31,6 +31,37 @@ _BEARING_DIR_RE = re.compile(r"^Bearing(\d+)_(\d+)$")
 _ACC_RE = re.compile(r"^acc_(\d+)\.csv$", re.IGNORECASE)
 _TEMP_RE = re.compile(r"^temp_(\d+)\.csv$", re.IGNORECASE)
 
+# One acceleration acquisition per 10 s (docs/dataset-audit.md, confirmed against
+# the archives). This is what converts a difference in acquisition counts into a
+# duration, so it is the basis of the hidden-RUL derivation below.
+ACQUISITION_INTERVAL_S = 10.0
+
+# Actual RUL (seconds) for the 11 IEEE PHM 2012 test bearings, as printed in
+# Table 3 of the official challenge document (IEEEPHM2012-Challenge-Details.pdf,
+# section 5.2). This is the citable table the published literature scores
+# against, so it is what makes a score comparable to other work.
+#
+# It is NOT simply trusted: derive_hidden_rul_seconds() re-derives every value
+# from the archives on disk, and the two agree for 10 of 11 bearings. Bearing1_4
+# is a real, documented conflict - see BEARING1_4_DERIVED_RUL_S and
+# docs/decisions.md D17.
+OFFICIAL_HIDDEN_RUL_S: dict[str, float] = {
+    "Bearing1_3": 5730.0, "Bearing1_4": 339.0, "Bearing1_5": 1610.0,
+    "Bearing1_6": 1460.0, "Bearing1_7": 7570.0, "Bearing2_3": 7530.0,
+    "Bearing2_4": 1390.0, "Bearing2_5": 3090.0, "Bearing2_6": 1290.0,
+    "Bearing2_7": 580.0, "Bearing3_3": 820.0,
+}
+
+# Bearing1_4 is the single disagreement between the official table and the
+# archives (docs/decisions.md D17). Acquisitions are 10 s apart, so every RUL
+# must be a multiple of 10; 339 is the only value in the official table that is
+# not, and the file counts give (1428-1139)*10 = 2890. Both numbers are carried
+# explicitly so a score can be reported either way instead of silently picking.
+BEARING1_4_DERIVED_RUL_S = 2890.0
+
+# Deprecated alias kept so older callers/notebooks do not break silently.
+PUBLISHED_HIDDEN_RUL_S = OFFICIAL_HIDDEN_RUL_S
+
 # Default tolerance for nearest-wall-clock temp<->acc alignment (seconds).
 # Observed temp cadence ~60s vs acc cadence ~10s (docs/dataset-audit.md);
 # ponytail: single global constant, revisit if a bearing needs a different value.
@@ -64,6 +95,34 @@ def discover_femto_bearings(root_dir: str | Path, role: str) -> list[FemtoBearin
     if not bearings:
         raise FileNotFoundError(f"No BearingC_N folders found under {root_dir}")
     return bearings
+
+
+def derive_hidden_rul_seconds(
+    test_dir: str | Path, full_test_dir: str | Path
+) -> dict[str, float]:
+    """Re-derive each test bearing's hidden RUL from the archives themselves.
+
+    `Test_set/` holds a censored *prefix* of each run; `Full_Test_Set/` holds the
+    same run continued to failure. The acquisitions the prefix is missing are
+    exactly the remaining useful life, at one acquisition per 10 s:
+
+        RUL_seconds = (full_test_acc_count - test_acc_count) * ACQUISITION_INTERVAL_S
+
+    Deriving this rather than hardcoding it means the ground truth is checkable
+    against the data on disk. Compare the result with PUBLISHED_HIDDEN_RUL_S -
+    they must agree for all 11 bearings, otherwise the local archives are not
+    the official ones and no score computed from them is meaningful.
+    """
+    test_dir, full_test_dir = Path(test_dir), Path(full_test_dir)
+    rul = {}
+    for bearing in discover_femto_bearings(test_dir, role=ROLE_TEST_CENSORED):
+        full_bearing_dir = full_test_dir / bearing.bearing_label
+        if not full_bearing_dir.is_dir():
+            continue
+        censored = len(list_acquisition_indices(bearing.path))
+        complete = len(list_acquisition_indices(full_bearing_dir))
+        rul[bearing.bearing_label] = (complete - censored) * ACQUISITION_INTERVAL_S
+    return rul
 
 
 def list_acquisition_indices(bearing_dir: str | Path) -> list[int]:

@@ -4,8 +4,10 @@ import pytest
 
 from bearing_pdm.femto import (
     ACC_COLUMNS,
+    PUBLISHED_HIDDEN_RUL_S,
     TEMP_COLUMNS,
     build_temperature_time_index,
+    derive_hidden_rul_seconds,
     detect_delimiter,
     discover_femto_bearings,
     find_nearest_temperature_index,
@@ -94,3 +96,30 @@ def test_find_nearest_temperature_index_no_temp_files_returns_none(tmp_path):
     bearing_dir.mkdir()
     (bearing_dir / "acc_00001.csv").write_text("9,39,39,65664,0.552,-0.146\n")
     assert find_nearest_temperature_index(bearing_dir, acc_index=1) is None
+
+
+def test_derive_hidden_rul_seconds_from_acquisition_counts(tmp_path):
+    """The hidden RUL is (full-run acquisitions - censored-prefix acquisitions)
+    x 10s. Deriving it from the archives keeps the ground truth checkable
+    instead of hardcoded (docs/dataset-audit.md, docs/decisions.md D16)."""
+    test_dir = tmp_path / "Test_set"
+    full_dir = tmp_path / "Full_Test_Set"
+    for bearing, n_censored, n_full in [("Bearing1_3", 3, 6), ("Bearing2_7", 2, 4)]:
+        (test_dir / bearing).mkdir(parents=True)
+        (full_dir / bearing).mkdir(parents=True)
+        for i in range(1, n_censored + 1):
+            (test_dir / bearing / f"acc_{i:05d}.csv").write_text("0,0,0,0,0,0\n")
+        for i in range(1, n_full + 1):
+            (full_dir / bearing / f"acc_{i:05d}.csv").write_text("0,0,0,0,0,0\n")
+
+    assert derive_hidden_rul_seconds(test_dir, full_dir) == {
+        "Bearing1_3": 30.0,   # (6-3)*10
+        "Bearing2_7": 20.0,   # (4-2)*10
+    }
+
+
+def test_published_hidden_rul_table_covers_all_eleven_test_bearings():
+    assert len(PUBLISHED_HIDDEN_RUL_S) == 11
+    assert PUBLISHED_HIDDEN_RUL_S["Bearing1_3"] == 5730.0
+    assert PUBLISHED_HIDDEN_RUL_S["Bearing2_7"] == 580.0
+    assert all(v > 0 for v in PUBLISHED_HIDDEN_RUL_S.values())

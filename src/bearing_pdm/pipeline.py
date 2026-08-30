@@ -14,11 +14,16 @@ import hashlib
 import uuid
 from collections.abc import Iterator
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 
 from bearing_pdm.college import CollegeFile, read_college_chunks
-from bearing_pdm.features import frequency_domain_features, temperature_features, time_domain_features
+from bearing_pdm.features import (
+    frequency_domain_features,
+    temperature_features,
+    time_domain_features,
+)
 from bearing_pdm.femto import (
     FemtoBearing,
     build_temperature_time_index,
@@ -84,7 +89,8 @@ def build_college_window_rows(
                 "dataset_id": "college",
                 "bearing_run_id": "college:nsk6205",
                 "role": "college_run",
-                "source_file_path": str(college_file.path),
+                # as_posix() keeps the batch readable on either OS (D13).
+                "source_file_path": Path(college_file.path).as_posix(),
                 "sequence_index": window_index,
                 "event_timestamp": event_timestamp,
                 "sample_rate_hz": sample_rate_hz,
@@ -166,7 +172,8 @@ def build_femto_feature_rows(
             "dataset_id": "femto",
             "bearing_run_id": f"femto:{bearing.bearing_label}",
             "role": bearing.role,
-            "source_file_path": str(acc_path),
+            # as_posix() keeps the batch readable on either OS (D13).
+            "source_file_path": Path(acc_path).as_posix(),
             "sequence_index": seq,
             "event_timestamp": event_timestamp,
             "sample_rate_hz": sample_rate_hz,

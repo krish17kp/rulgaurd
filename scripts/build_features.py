@@ -17,7 +17,12 @@ from bearing_pdm.college import discover_college_files
 from bearing_pdm.config import load_data_paths
 from bearing_pdm.femto import discover_femto_bearings
 from bearing_pdm.pipeline import build_college_feature_rows, build_femto_feature_rows
-from bearing_pdm.storage import ensure_bearing_run, ensure_dataset, get_connection, write_feature_batch
+from bearing_pdm.storage import (
+    ensure_bearing_run,
+    ensure_dataset,
+    get_connection,
+    write_feature_batch,
+)
 
 FEMTO_ROLE_DIR_ATTR = {
     "learning": "femto_training_dir",

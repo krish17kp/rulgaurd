@@ -13,7 +13,9 @@ from pathlib import Path
 
 import duckdb
 import pandas as pd
+import pyarrow.parquet as pq
 
+from bearing_pdm.config import resolve_stored_path
 from bearing_pdm.pipeline import SCHEMA_VERSION, sha256_file
 
 _DDL_STATEMENTS = [
@@ -60,6 +62,54 @@ def get_connection(duckdb_path: str | Path) -> duckdb.DuckDBPyConnection:
         "WHERE NOT EXISTS (SELECT 1 FROM schema_version WHERE version = 1)"
     )
     return con
+
+
+def batch_roles(parquet_path: str | Path) -> set[str]:
+    """The distinct `role` values a feature batch actually contains.
+
+    Read from the batch's own Parquet rows, which are authoritative. The
+    `bearing_runs` table is NOT usable for this: `ensure_bearing_run` is
+    insert-once, and FEMTO's `Test_set/` and `Full_Test_Set/` hold the same 11
+    bearing labels, so `bearing_run_id` 'femto:Bearing1_3' is registered under
+    whichever role was built first and never updated (docs/decisions.md D15).
+    Only the `role` column reflects the role of each individual batch.
+    """
+    table = pq.read_table(parquet_path, columns=["role"])
+    return {r for r in table.column("role").to_pylist() if r is not None}
+
+
+def latest_batch_parquet(
+    con: duckdb.DuckDBPyConnection, dataset_id: str, role: str | None = None
+) -> Path | None:
+    """Resolved Parquet path of the most recent feature batch for `dataset_id`,
+    restricted to batches that actually contain rows of `role` when given.
+
+    The `role` filter is load-bearing, not a convenience (docs/decisions.md D15).
+    Selecting merely "the newest femto batch" was correct only while exactly one
+    femto batch existed; once `build_features.py --role test_censored` writes a
+    second one, the newest batch is the *censored* set, and a caller that then
+    filters `role == 'learning'` is left with zero rows. `train_models.py` failed
+    with an opaque sklearn "at least one array or dtype is required"; the
+    evaluation path would have scored an empty frame instead.
+
+    Returns None when no batch matches - callers raise their own domain error.
+    """
+    rows = con.execute(
+        "SELECT parquet_path FROM feature_batches WHERE dataset_id = ? "
+        "ORDER BY created_at DESC",
+        [dataset_id],
+    ).fetchall()
+
+    for (stored_path,) in rows:
+        path = resolve_stored_path(stored_path)
+        if role is None:
+            return path
+        if not path.is_file():
+            continue  # unreadable batch cannot be confirmed; try the next one
+        if role in batch_roles(path):
+            return path
+
+    return None
 
 
 def ensure_dataset(con: duckdb.DuckDBPyConnection, dataset_id: str, display_name: str, version: str) -> None:
@@ -110,7 +160,13 @@ def write_feature_batch(
 
     con.execute(
         "INSERT INTO feature_batches VALUES (?, ?, ?, ?, ?, ?, ?, current_timestamp)",
-        [feature_batch_id, dataset_id, SCHEMA_VERSION, str(parquet_path), len(df), code_version, batch_sha256],
+        # as_posix(), not str(): a path written with the host separator is
+        # unreadable on the other OS (docs/decisions.md D13). Forward slashes
+        # are accepted by both, so the batch stays portable.
+        [
+            feature_batch_id, dataset_id, SCHEMA_VERSION, parquet_path.as_posix(),
+            len(df), code_version, batch_sha256,
+        ],
     )
 
     source_cols = [c for c in _ACQUISITION_COLUMNS if c not in ("kind", "feature_batch_id", "feature_row_index")]

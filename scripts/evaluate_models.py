@@ -17,15 +17,11 @@ import pandas as pd
 
 from bearing_pdm.config import load_data_paths
 from bearing_pdm.evaluation import college_walk_forward, leave_one_bearing_out_femto
-from bearing_pdm.storage import get_connection
+from bearing_pdm.storage import get_connection, latest_batch_parquet
 
 
-def _latest_batch_parquet(con, dataset_id: str) -> Path | None:
-    row = con.execute(
-        "SELECT parquet_path FROM feature_batches WHERE dataset_id = ? ORDER BY created_at DESC LIMIT 1",
-        [dataset_id],
-    ).fetchone()
-    return Path(row[0]) if row else None
+def _latest_batch_parquet(con, dataset_id: str, role: str | None = None) -> Path | None:
+    return latest_batch_parquet(con, dataset_id, role=role)
 
 
 def main() -> int:
@@ -36,8 +32,10 @@ def main() -> int:
     paths = load_data_paths(args.config)
     con = get_connection(paths.duckdb_path)
     try:
-        femto_path = _latest_batch_parquet(con, "femto")
-        college_path = _latest_batch_parquet(con, "college")
+        # role= is required: once a test_censored batch exists it is the newest
+        # femto batch, and this evaluation is defined over learning rows (D15).
+        femto_path = _latest_batch_parquet(con, "femto", role="learning")
+        college_path = _latest_batch_parquet(con, "college", role="college_run")
     finally:
         con.close()
 

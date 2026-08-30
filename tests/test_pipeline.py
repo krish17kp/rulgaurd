@@ -7,10 +7,10 @@ import pytest
 from bearing_pdm.college import discover_college_files
 from bearing_pdm.femto import FemtoBearing
 from bearing_pdm.pipeline import (
+    _college_run_end_timestamp,
     build_college_feature_rows,
     build_college_window_rows,
     build_femto_feature_rows,
-    _college_run_end_timestamp,
 )
 
 COLLEGE_FIXTURES = Path(__file__).parent.parent / "data" / "fixtures" / "college"

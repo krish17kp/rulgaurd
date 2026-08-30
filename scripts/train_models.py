@@ -20,16 +20,17 @@ import pandas as pd
 
 from bearing_pdm.config import load_data_paths
 from bearing_pdm.modeling import fit_naive_baseline, fit_tree_baseline
-from bearing_pdm.storage import get_connection
+from bearing_pdm.storage import get_connection, latest_batch_parquet
 
 
 def _latest_femto_learning_parquet(con) -> Path:
-    row = con.execute(
-        "SELECT parquet_path FROM feature_batches WHERE dataset_id = 'femto' ORDER BY created_at DESC LIMIT 1"
-    ).fetchone()
-    if row is None:
-        raise RuntimeError("No femto feature_batches found - run build_features.py --dataset femto first.")
-    return Path(row[0])
+    path = latest_batch_parquet(con, "femto", role="learning")
+    if path is None:
+        raise RuntimeError(
+            "No femto feature batch containing learning-role rows found - "
+            "run build_features.py --dataset femto --role learning first."
+        )
+    return path
 
 
 def _select_model(eval_metrics_path: Path) -> str:
