@@ -169,9 +169,11 @@ Selection logic in `build_health.py` changed accordingly: an HI that pins is not
 Regression check: `reports/metrics/rul_evaluation.json` and `reports/metrics/hidden_set_evaluation.json` reproduce **byte-identically** after this change (verified by `sha256sum` after re-running `scripts/evaluate_models.py`), confirming the HI does not reach the RUL feature matrix. ExtraTrees was not retrained.
 
 ## D19: degradation stages are a fitted alarm band on the HI, not chosen thresholds and not a fault diagnosis (2026-08-30, M5)
+**Superseded in part by D20 item 2**: the claim below that "both boundaries are fitted quantiles ... rather than a preference" overstates `hi_critical`, which is measurably dominated by `apply_reference_hi`'s fixed end-of-life anchor rather than being an independent fit. See D20 item 2 for the corrected description and current code/doc language (`src/bearing_pdm/stages.py`, `docs/milestone.md`, `deliverables/review/REVIEW2_STATUS.md`).
+
 With D18's HI usable, M5 became possible. Two things had to be avoided: arbitrary cut-offs ("HEALTHY above 0.7") that cannot be defended, and any use of `rul_seconds` to define the stages, which would be circular.
 
-Method (`src/bearing_pdm/stages.py`): a statistical alarm band plus a persistence rule, in the spirit of classical condition-monitoring practice. Both boundaries are **fitted quantiles of the training bearings' own HI distribution**, so each traces to a fitted value rather than a preference:
+Method (`src/bearing_pdm/stages.py`): a statistical alarm band plus a persistence rule, in the spirit of classical condition-monitoring practice. Both boundaries are **fitted quantiles of the training bearings' own HI distribution**, so each traces to a fitted value rather than a preference (see superseded note above):
 
 - `hi_warn` = 5th percentile of HI over the training bearings' healthy reference windows - the lower edge of the band a healthy bearing actually occupies.
 - `hi_critical` = median HI over the training bearings' end-of-life windows - the level bearings are actually at when they fail.
