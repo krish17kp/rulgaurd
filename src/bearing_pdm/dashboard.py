@@ -18,11 +18,12 @@ import pandas as pd
 import streamlit as st
 
 from bearing_pdm.college import COLLEGE_COLUMNS
-from bearing_pdm.config import load_data_paths
+from bearing_pdm.config import load_data_paths, resolve_stored_path
 from bearing_pdm.femto import read_acceleration, read_temperature
-from bearing_pdm.health import apply_pca_hi, apply_transparent_hi
+from bearing_pdm.health import apply_pca_hi, apply_reference_hi, apply_transparent_hi
 from bearing_pdm.modeling import predict_naive_baseline, predict_tree_baseline
-from bearing_pdm.storage import get_connection
+from bearing_pdm.stages import CRITICAL, DEGRADING, HEALTHY, assign_stages
+from bearing_pdm.storage import batch_roles, get_connection
 
 CONFIG_PATH = "config/data_paths.toml"
 
@@ -34,20 +35,48 @@ def _load_paths():
 
 @st.cache_data
 def _list_batches() -> pd.DataFrame:
+    """Every feature batch, annotated with the role(s) its rows actually carry.
+
+    The role annotation matters: once a `test_censored` batch exists it is the
+    newest femto batch, so picking "the latest batch" silently swaps the six
+    learning bearings for the eleven censored test bearings - no ground-truth
+    RUL, and different bearings entirely (docs/decisions.md D15).
+    """
     paths = _load_paths()
     con = get_connection(paths.duckdb_path)
     try:
-        return con.execute(
+        batches = con.execute(
             "SELECT dataset_id, feature_batch_id, parquet_path, row_count, code_version, created_at "
             "FROM feature_batches ORDER BY created_at DESC"
         ).fetchdf()
     finally:
         con.close()
 
+    roles = []
+    for stored in batches["parquet_path"]:
+        path = resolve_stored_path(stored)
+        roles.append(",".join(sorted(batch_roles(path))) if path.is_file() else "unreadable")
+    batches["roles"] = roles
+    return batches
+
+
+# Role shown by default per dataset: the one carrying ground-truth RUL, so the
+# dashboard opens on the data the Health Indicator and RUL tabs are about.
+_PREFERRED_ROLE = {"femto": "learning", "college": "college_run"}
+
 
 @st.cache_data
 def _load_batch(parquet_path: str) -> pd.DataFrame:
-    return pd.read_parquet(parquet_path)
+    # Resolved, not used raw: a batch built on Windows recorded the path with
+    # backslashes, which is unopenable here (docs/decisions.md D13).
+    return pd.read_parquet(resolve_stored_path(parquet_path))
+
+
+def _resolve_source(stored: str) -> Path:
+    """Locate a raw source file recorded by an earlier run, re-rooting it under
+    this machine's configured dataset directories when the stored path came
+    from another machine."""
+    return resolve_stored_path(stored, _load_paths().source_search_roots())
 
 
 @st.cache_resource
@@ -60,8 +89,9 @@ def _load_joblib(path: str):
 
 
 def _load_raw_femto_row(row: pd.Series) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-    bearing_dir = Path(row["source_file_path"]).parent
-    acc_index = int(Path(row["source_file_path"]).stem.split("_")[1])
+    source = _resolve_source(row["source_file_path"])
+    bearing_dir = source.parent
+    acc_index = int(source.stem.split("_")[1])
     acc_df = read_acceleration(bearing_dir, acc_index)
     temp = None
     if row["temp_available"]:
@@ -77,7 +107,8 @@ def _load_raw_college_row(row: pd.Series) -> tuple[np.ndarray, np.ndarray, np.nd
     skiprows = int(row["row_start"])
     nrows = int(row["row_end"]) - int(row["row_start"]) + 1
     window = pd.read_csv(
-        row["source_file_path"], header=None, names=COLLEGE_COLUMNS, skiprows=skiprows, nrows=nrows,
+        _resolve_source(row["source_file_path"]),
+        header=None, names=COLLEGE_COLUMNS, skiprows=skiprows, nrows=nrows,
     )
     return (
         window["vibration_x"].to_numpy(), window["vibration_y"].to_numpy(),
@@ -106,11 +137,35 @@ def main() -> None:
         return
 
     dataset_id = st.sidebar.selectbox("Dataset", sorted(batches["dataset_id"].unique()))
-    batch_row = batches[batches["dataset_id"] == dataset_id].iloc[0]
-    st.sidebar.caption(
-        f"batch {batch_row['feature_batch_id'][:8]}... | {batch_row['row_count']} rows | "
-        f"code {batch_row['code_version']} | {batch_row['created_at']}"
+    dataset_batches = batches[batches["dataset_id"] == dataset_id].reset_index(drop=True)
+
+    # Default to the batch carrying ground-truth RUL rather than merely the
+    # newest one (D15); let the user switch when several batches exist.
+    preferred = _PREFERRED_ROLE.get(dataset_id)
+    default_idx = next(
+        (i for i, r in enumerate(dataset_batches["roles"]) if preferred and preferred in r.split(",")),
+        0,
     )
+    if len(dataset_batches) > 1:
+        labels = [
+            f"{r.roles} | {r.row_count} rows | {r.feature_batch_id[:8]}"
+            for r in dataset_batches.itertuples()
+        ]
+        choice = st.sidebar.selectbox("Feature batch (role)", labels, index=default_idx)
+        batch_row = dataset_batches.iloc[labels.index(choice)]
+    else:
+        batch_row = dataset_batches.iloc[default_idx]
+
+    st.sidebar.caption(
+        f"batch {batch_row['feature_batch_id'][:8]}... | role(s) {batch_row['roles']} | "
+        f"{batch_row['row_count']} rows | code {batch_row['code_version']} | {batch_row['created_at']}"
+    )
+    if "learning" not in str(batch_row["roles"]).split(",") and dataset_id == "femto":
+        st.sidebar.warning(
+            f"This batch holds role(s) '{batch_row['roles']}', which have no ground-truth "
+            "RUL (censored by design). Predictions are shown without a true value to "
+            "compare against - see the Model Evaluation tab for scored results."
+        )
     if dataset_id == "college":
         st.sidebar.info("College batch is a representative sample (command.md section 26.8), not the full 129-file run - see docs/decisions.md.")
 
@@ -126,7 +181,7 @@ def main() -> None:
     )
 
     with tab_signal:
-        st.subheader(f"Row {idx}/{len(df_bearing)-1} - {row['source_file_path']}")
+        st.subheader(f"Row {idx}/{len(df_bearing)-1} - {_resolve_source(row['source_file_path'])}")
         try:
             if dataset_id == "femto":
                 vib_x, vib_y, temp = _load_raw_femto_row(row)
@@ -158,20 +213,57 @@ def main() -> None:
                 "bearings (scripts/build_health.py). Applying a FEMTO-fit scaler/PCA to college's very "
                 "different feature scale is out-of-domain and produces meaningless values (confirmed while "
                 "building this dashboard - PCA HI swung below -3 on college data). Not shown for college in "
-                "this MVP; a college-specific HI would need its own fit, deferred (docs/decisions.md)."
+                "this MVP; a college-specific HI would need its own fit, deferred (docs/decisions.md). "
+                "Note: the reference HI (D18) normalises each bearing against its own early life, "
+                "so a college-specific fit is now feasible - it is the next step, not done yet."
             )
         else:
+            reference_model = _load_joblib("artifacts/models/reference_hi_model.joblib")
+            thresholds = _load_joblib("artifacts/models/stage_thresholds.joblib")
             baseline = _load_joblib("artifacts/models/transparent_hi_baseline.joblib")
             pca_model = _load_joblib("artifacts/models/pca_hi_model.joblib")
-            if baseline is None:
-                st.warning("No fitted HI baseline found - run scripts/build_health.py.")
+
+            if reference_model is None:
+                st.warning(
+                    "No fitted reference HI found - run scripts/build_health.py to generate "
+                    "artifacts/models/reference_hi_model.joblib."
+                )
             else:
-                hi_t = apply_transparent_hi(df_bearing, baseline)
-                chart_data = {"transparent_hi": hi_t}
+                hi = apply_reference_hi(df_bearing, reference_model)
+                st.metric(
+                    "Current health indicator", f"{hi.iloc[idx]:.3f}",
+                    help="Reference HI: ~0.95 at this bearing's own healthy baseline, "
+                         "->0 as degradation progresses. Dimensionless.",
+                )
+
+                # Stage badge. A severity band on the HI, never a fault type.
+                if thresholds is None:
+                    st.info("Stage thresholds not found - run scripts/build_health.py.")
+                else:
+                    stage = assign_stages(df_bearing, hi, thresholds).iloc[idx]
+                    {HEALTHY: st.success, DEGRADING: st.warning, CRITICAL: st.error}.get(
+                        stage, st.info
+                    )(f"Degradation stage: **{stage}**")
+                    st.caption(
+                        f"Severity band on the health indicator, not a fault diagnosis. "
+                        f"Boundaries are fitted quantiles of the training bearings' HI "
+                        f"(DEGRADING below {thresholds.hi_warn:.3f}, CRITICAL below "
+                        f"{thresholds.hi_critical:.3f}), committed only after "
+                        f"{thresholds.persistence} consecutive acquisitions agree."
+                    )
+
+                chart_data = {"reference_hi (selected)": hi}
+                if baseline is not None:
+                    chart_data["transparent_hi (legacy)"] = apply_transparent_hi(df_bearing, baseline)
                 if pca_model is not None:
-                    chart_data["pca_hi"] = apply_pca_hi(df_bearing, pca_model)
+                    chart_data["pca_hi (legacy)"] = apply_pca_hi(df_bearing, pca_model)
                 st.line_chart(pd.DataFrame(chart_data, index=df_bearing["sequence_index"]))
-                st.metric("Current transparent HI", f"{hi_t.iloc[idx]:.3f}", help="1.0=healthy, ->0 as degradation progresses")
+                st.caption(
+                    "The two legacy curves are shown because their failure is the evidence for "
+                    "the current one (docs/decisions.md D18): transparent_hi pinned 47.5% of all "
+                    "learning acquisitions at exactly 1.0 (88.9% of Bearing3_2), and pca_hi's "
+                    "usable range collapsed to ~2% on Bearing3_1. Neither is used for staging."
+                )
 
     with tab_rul:
         if dataset_id != "femto":
@@ -229,7 +321,23 @@ def main() -> None:
             "- College's `rul_seconds` label uses the known final timestamp (uncensored run) - "
             "its naive baseline scores a trivial 0.0 MAE by construction (D10), not a real result.\n"
             "- College feature batch shown here is a representative sample, not the full 129-file run (section 26.8).\n"
-            "- Per-acquisition HI monotonicity is low (~0.01-0.02); trend correlation is the more meaningful signal.\n"
+            "- Per-acquisition HI monotonicity is low (~0.01-0.11) for every HI tried. "
+            "|mean(sign(diff))| is near zero for any noisy real signal, so Spearman rank "
+            "correlation and the healthy-vs-end-of-life separation are the headline metrics "
+            "instead (D18).\n"
+            "- FEMTO degradation is flat-then-cliff, not gradual: Bearing3_2's vibration_x_rms "
+            "sits at ~0.30 for ~95% of life then jumps 6x inside the final ~17 acquisitions. "
+            "A linear trend statistic understates an otherwise usable HI.\n"
+            "- Bearing3_1 and Bearing3_2 have weak HI rank trends (-0.48, -0.18) for that "
+            "reason. Their HI does reach failure territory, but only very late - Bearing3_1 "
+            "gives 120 s of CRITICAL warning. That is a property of those bearings, not a "
+            "tuning choice.\n"
+            "- The reference HI assumes the bearing is healthy during acquisitions 10-59 of "
+            "its own record. True by construction for PRONOSTIA and the college rig (both run "
+            "to failure from new); it would not hold for a bearing instrumented mid-life.\n"
+            "- The reference HI normalises each bearing against its own early life, which makes "
+            "a college-specific HI feasible for the first time. Not yet fitted - the college "
+            "gate on this dashboard still stands.\n"
         )
 
 

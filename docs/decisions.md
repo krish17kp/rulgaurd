@@ -59,3 +59,138 @@ Resolution, in order:
 8. This repo's folder renamed to `D:/capstone/bearing-rul-predictive-maintenance` - actual GitHub repo rename is the user's manual action, not done by the agent (matches the existing "commit only, user pushes/renames manually" policy).
 
 Superseded by this decision: D4 (duplicate-copy tracking - college data now lives in one canonical published place), the "kept out of code repo" framing in `docs/prd.md`'s original licensing section, and every "sibling repo" reference in `CLAUDE.md`/`docs/architecture.md`. Historical evidence files (`artifacts/evidence/REVIEW-M*/`, `command.md`, `reports/verification/review-readiness.md`) are left as point-in-time records of the two-repo period and were not rewritten.
+
+## D13: persisted paths used the host OS separator, breaking every reader after the Windows -> Linux migration (2026-08-30, found by running the test suite on the new machine)
+`storage.write_feature_batch` recorded the batch location with `str(parquet_path)`, and `pipeline.py` recorded `source_file_path` with `str(...)`. On Windows both produce backslash separators, so the DuckDB `feature_batches` rows contain `data\processed\femto_<id>.parquet` and the feature rows contain `D:\capstone\...\Bearing1_1\acc_00001.csv`. On POSIX a backslash is an ordinary filename character, not a separator, so each of those strings is read as one long filename that does not exist.
+
+Real symptom: `pytest -q` reported `2 failed, 70 passed` — both `tests/test_dashboard.py` cases, with `FileNotFoundError: 'data\\processed\\college_941e9d63-...parquet'` raised from `dashboard.py`'s `_load_batch`. The blast radius was larger than the two tests suggested: `scripts/train_models.py`, `scripts/build_health.py` and `scripts/evaluate_models.py` all read `parquet_path` out of DuckDB and pass it straight to `pd.read_parquet`, so the entire pipeline was unrunnable on Linux, not just the dashboard. `config/data_paths.toml` separately still held `D:/capstone/...` raw-dataset paths.
+
+Resolution, in three parts:
+1. **Writers store portable paths.** `write_feature_batch` now records `parquet_path.as_posix()`, and `pipeline.py` records `source_file_path` via `Path(...).as_posix()`. Forward slashes are accepted by both operating systems, so new batches are readable either way.
+2. **Readers resolve defensively**, so the *existing* artifacts work without re-running the pipeline (a full rebuild would have cost hours and changed nothing scientifically). New `config.resolve_stored_path()` normalises separators, and where that is not enough — an absolute path from another machine — re-roots the trailing path segments under the locally configured dataset directories. It never raises: an unresolvable path is returned unchanged so `dashboard.py`'s existing "source file not reachable, showing cached features only" branch still handles it. Applied at all five read sites (dashboard batch load, dashboard raw-signal re-read, and the three model scripts).
+3. `config/data_paths.toml` (gitignored, local) repointed at Linux paths: college resolves to the relative `datasets/college`; the FEMTO directories point into `data/interim/femto`, where the shipped archives must be extracted locally.
+
+Verification: `pytest -q` went from `2 failed, 70 passed` to **86 passed** (14 new tests in `tests/test_config.py` plus a `tests/test_storage.py` regression test asserting no backslash is ever persisted); `ruff check .` clean; the dashboard was launched for real (`streamlit run`, HTTP 200 on `/`, `ok` from `/_stcore/health`, no exception in the server log); and `scripts/evaluate_models.py` ran end-to-end.
+
+Unexpected bonus finding — **reproducibility confirmed across a full stack change.** Re-running `evaluate_models.py` on Linux / Python 3.12.3 / numpy 2.5.2 / scikit-learn 1.9.0 regenerated `reports/metrics/rul_evaluation.json` **bit-identical** to the file produced on Windows / Python 3.13.7 with the 2026-07 library versions. `SEED=42` discipline holds across OS, Python minor version, and major numpy/sklearn upgrades.
+
+Note: the pre-existing DuckDB rows were deliberately *not* rewritten. They still contain the Windows-written strings; every reader now normalises them, and the file is a regenerable artifact. A `scripts/migrate_db.py` that rewrites them in place remains unwritten (it was already a documented gap).
+
+## D14: ruff's default rule set drifted between versions, so unchanged code went from clean to failing (2026-08-30)
+`ruff check .` reported 33 errors on code that was recorded as clean through M8. `pyproject.toml` pinned only `line-length` and `src`, leaving rule selection to ruff's defaults, which expanded between the version used on the old machine and 0.16.5 here. 20 of the 33 were `EXE002` ("file is executable but no shebang"), which is not a code problem at all: this working tree lives on an NTFS/fuseblk mount that reports every file as mode 0755, so the rule fires on all 20 Python files regardless of content.
+
+Resolution: `[tool.ruff.lint] select = ["E4", "E7", "E9", "F", "I"]` pinned in `pyproject.toml` — the effective rule set the project already passed, plus import sorting. This makes `ruff check .` reproducible across ruff versions instead of drifting with each release, and excludes `EXE002` on the documented grounds that it reports a filesystem property rather than a property of the code. The 5 resulting `I001` import-ordering findings were auto-fixed; no behaviour changed.
+
+## D15: "latest feature batch" selection silently returned the wrong role once a second FEMTO batch existed (2026-08-30, found by running train_models.py after building the censored test set)
+`train_models.py`, `build_health.py` and `evaluate_models.py` each selected their input with `SELECT parquet_path FROM feature_batches WHERE dataset_id='femto' ORDER BY created_at DESC LIMIT 1`, then filtered the loaded frame to `role == 'learning'`. That was correct only while exactly one FEMTO batch had ever been written. The pipeline has always supported `build_features.py --role test_censored`; the moment that batch exists it *is* the newest FEMTO batch, so the query returns the censored set and the role filter leaves zero rows.
+
+Real symptom: `train_models.py` died inside scikit-learn with `ValueError: at least one array or dtype is required` - an opaque message four frames deep in `check_array`, with nothing pointing at batch selection. `evaluate_models.py` would have scored an empty frame instead of failing.
+
+First fix attempt was itself wrong, and an independent review caught it. Filtering via `acquisitions JOIN bearing_runs ON bearing_run_id` looked natural, but `ensure_bearing_run` is insert-once and FEMTO's `Test_set/` and `Full_Test_Set/` contain the *same 11 bearing labels*, so `bearing_run_id='femto:Bearing1_3'` is recorded under whichever role was built first and never updated. Verified against the live DB: with the censored batch built first, a `role='full_test'` lookup returned `None` while `role='test_censored'` returned the **Full_Test_Set** batch - i.e. it would have handed back the frozen hold-out continuation.
+
+Resolution: `storage.batch_roles()` reads the `role` column from the batch's own Parquet rows, which is the only authoritative record of what a batch contains, and `storage.latest_batch_parquet(con, dataset_id, role=...)` walks batches newest-first and returns the first that actually contains that role. The three scripts now call it with an explicit role; `bearing_runs.role` is no longer used for this decision. Regression test: `tests/test_storage.py::test_latest_batch_parquet_role_filter_skips_a_newer_wrong_role_batch`.
+
+Related regression, same review, same root cause: `dashboard.py` had been left on the old unfiltered "newest batch" selection, so after the censored batch was built the FEMTO view silently lost all six learning bearings and showed eleven censored test bearings with no ground-truth RUL - and `tests/test_dashboard.py` still passed, because it only asserts "no exception" and "five tabs". The dashboard now annotates every batch with its real role, defaults to the role carrying ground truth (`learning` for FEMTO, `college_run` for college), lets the user switch when several batches exist, and warns explicitly when a batch without ground-truth RUL is selected.
+
+## D16: FEMTO hidden-set (Full_Test_Set) scoring - the project's first genuinely out-of-sample result (2026-08-30)
+Through M8 the pipeline was frozen and ready but had never been scored on held-out data; every reported number was leave-one-bearing-out over the same 6 learning bearings. This closes that gap.
+
+Method: build features for the 11 censored `Test_set` bearings (13,959 acquisitions, every per-bearing count matching `docs/dataset-audit.md`), apply the frozen models fit on the 6 learning bearings, and take **one prediction per bearing at the last acquisition of the censored prefix** - so n=11 scored points, not 13,959. Ground truth is re-derived from the archives by `femto.derive_hidden_rul_seconds()` rather than hardcoded, and cross-checked against the official table before scoring is allowed to proceed.
+
+Result (ground truth = archive-derived; `reports/metrics/hidden_set_evaluation.json`):
+
+| model | MAE | RMSE | mean abs %Er | PHM2012 score | over-estimates |
+|---|---|---|---|---|---|
+| extra_trees | **4,555.4 s** | 5,388.0 s | 347.5% | **0.0682** | 8/11 |
+| naive | 9,459.4 s | 9,786.4 s | 681.7% | 0.0000 | 11/11 |
+
+Honest reading: ExtraTrees beats the naive baseline by **2.1x on MAE** on data it has never seen, which is a real result and the first evidence that the model learned something transferable rather than memorising the learning bearings. But the absolute performance is poor - a mean absolute percent error of 347% and a PHM2012 score of 0.068 against a reported competition best of roughly 0.28 (that 0.28 figure is itself **unverified** - the official challenge document publishes no numeric scores, and the paper it is attributed to is paywalled; do not cite it as fact). 8 of 11 predictions are over-estimates, i.e. wrong in the *unsafe* direction for maintenance planning.
+
+Diagnosis of why, for the record: the model sees only instantaneous vibration/temperature statistics of a single 2,560-sample acquisition, with no notion of elapsed time or trajectory (correctly so - elapsed time is excluded from the feature matrix to prevent leakage). Two bearings with similar instantaneous RMS can be at very different points in their lives, and tree ensembles cannot extrapolate outside the training target range. This is a genuine limitation of the feature/model formulation, not a bug, and it is the strongest scientific argument yet for a sequence-aware comparison model - which remains a *comparison*, not a replacement (see `CLAUDE.md`).
+
+## D17: Bearing1_4's actual RUL conflicts between the official challenge table and the archives (2026-08-30, found while verifying the PHM2012 scoring function)
+`docs/dataset-audit.md` recorded "hidden RUL, 11/11 match" against the table in `command.md`, including **Bearing1_4 = 2890 s**. Checking the primary source before implementing the challenge score showed that Table 3 of the official challenge document (`IEEEPHM2012-Challenge-Details.pdf` s5.2) prints **339 s** for Bearing1_4. The other 10 bearings agree exactly. So the earlier "11/11 match" was a match against `command.md`, not against the official document.
+
+Evidence on both sides:
+- For 2890: acquisitions are 10 s apart, and `(1428 - 1139) * 10 = 2890` reproduces the official value exactly for all 10 other bearings by the same arithmetic. **339 is the only value in the official table that is not a multiple of 10**, which it must be if RUL is measured in whole acquisitions.
+- For 339: it is the citable, published number, and the literature scores against it - at least one paper notes it and rounds it to 340 s. A score computed against 2890 is not comparable to any published benchmark.
+- Additional context (from inspecting the signal, not from a paper): Bearing1_4's vibration at `acc_01139`, the last file of the censored prefix, already exceeds the 20 g threshold the challenge uses to define failure, so its truncation appears to sit at or past failure - unlike the other ten. Under the challenge's own definition its RUL at truncation is close to 0, which matches neither figure. Bearing1_4 is genuinely pathological.
+
+Resolution: carry **both** numbers explicitly (`femto.OFFICIAL_HIDDEN_RUL_S` with 339, `femto.BEARING1_4_DERIVED_RUL_S` = 2890) and report the hidden-set score under each, rather than silently choosing. `scripts/score_hidden_set.py` aborts on any *other* disagreement between the official table and the archives, since that would mean the local data is not the official dataset. `docs/dataset-audit.md`'s "11/11 match" claim should be read as "matches `command.md`", and is corrected by this entry.
+
+Scoring function itself, verified before use (as `command.md` s1515 requires - "PHM challenge score only after verifying its authoritative formula"): `A_i = exp(-ln(0.5)*(Er_i/5))` for `Er_i <= 0`, `exp(+ln(0.5)*(Er_i/20))` for `Er_i > 0`, with `%Er_i = 100*(ActRUL - PredRUL)/ActRUL`, aggregate = arithmetic mean. Confirmed identical in the official challenge document (s5.1 eq. 2-3) and the PRONOSTIA paper (Nectoux et al., IEEE PHM 2012, eq. 2), and validated against the two points annotated on the official figure (`Er=-10 -> 0.25`, `Er=+20 -> 0.50`), both of which the implementation reproduces exactly. Note the asymmetry direction, which is easy to invert: **`Er > 0` is an under-estimate** (early warning, penalised leniently, denominator 20) and **`Er <= 0` is an over-estimate** (late warning, the dangerous direction, penalised harshly, denominator 5).
+
+## D18: the health indicator pinned 47.5% of all learning acquisitions at exactly HI=1.0, blocking M5 (2026-08-30, found while preparing degradation-stage classification)
+M5 (degradation stages) could not start: a severity band on a health indicator is meaningless if the HI is constant. Measuring the selected `transparent_hi` per bearing on the real FEMTO learning batch showed why.
+
+| bearing | n | % at HI=1.0 | IQR | trend_corr |
+|---|---|---|---|---|
+| Bearing1_1 | 2803 | 39.0% | 0.63 | -0.875 |
+| Bearing1_2 | 871 | 34.0% | 0.75 | -0.143 |
+| Bearing2_1 | 911 | 11.4% | **0.10** | -0.665 |
+| Bearing2_2 | 797 | 24.5% | 0.68 | -0.781 |
+| Bearing3_1 | 515 | **87.4%** | **0.00** | -0.315 |
+| Bearing3_2 | 1637 | **88.9%** | **0.00** | -0.375 |
+
+Four compounding defects, not one:
+
+1. **Hard floor.** `apply_transparent_hi` computed `anomaly.clip(lower=0)` then `1/(1+anomaly)`, so every row at or below the reference collapsed to exactly 1.0. All resolution on the healthy side was destroyed by construction.
+2. **Pooled healthy reference across three operating conditions.** FEMTO runs at 1800rpm/4000N, 1650rpm/4200N and 1500rpm/5000N, so absolute vibration level differs per condition. Pooled healthy `vibration_x_rms` = 0.401 while Bearing3_1/3_2 sit at ~0.31 for most of their lives - permanently "below reference", so defect 1 pinned them. Bearing2_1 had the mirror problem: median z = +1.58 from its first acquisition, an IQR of 0.10 for its whole life.
+3. **Feature ranking inverted by a run-in transient.** `monotonicity_trendability_scores` ranks on full-life correlation, but median `vibration_x_rms` by life decile for Bearing3_1 runs `0.458 -> 0.324 -> 0.310 -> ... -> 0.305`: high, then settling. That transient drags the full-life correlation negative even though end-of-life is 1.9x the settled baseline, so the ranking selected spectral centroid and band-energy fractions instead of amplitude/impulsiveness. The same transient contaminated the reference itself, because `_healthy_baseline_mask` takes the first 10% of life *including* the run-in.
+4. **Non-robust scale and fusion.** Pooled healthy std of `vibration_y_kurtosis` was 15.34 against a mean of 2.12 (raw range 0.02..412), so a plain mean of z-scores was spike-dominated. `pca_hi`'s pooled `pc1_min`/`pc1_max` was set by those same extremes, collapsing Bearing3_1's p10->p90 span to 0.968->0.987 (~2% of the nominal range).
+
+The decisive measurement is that **the degradation signal was never missing - the pooled reference hid it.** Ratio of each bearing's own end-of-life median to its own early-life median: `vibration_x_rms` 1.57-4.28x, crest factor 1.44-1.86x, kurtosis 25-331x, on all six. Yet no feature is consistently signed against a *pooled* baseline: `vibration_x_rms` scores Spearman +0.86 on Bearing1_1 and -0.42 on Bearing3_1.
+
+Also recorded, because it changes how results must be read: **FEMTO degradation is flat-then-cliff, not gradual.** Bearing3_2's `vibration_x_rms` by 5% blocks runs `0.41, 0.30, 0.30, ..., 0.31, 0.26, 1.58` - flat for ~95% of life, then a 6x jump inside the final ~17 acquisitions. Same shape on Bearing3_1 and Bearing1_2. This is why per-acquisition monotonicity is ~0.01 for every HI tried, and why a linear trend statistic understates an otherwise usable HI.
+
+Resolution: add a third HI (`fit_reference_hi`/`apply_reference_hi`, `src/bearing_pdm/health.py`) rather than rewrite either existing one - their measured failure is the evidence for the new one, and `scripts/build_health.py` now reports all three side by side. The new HI uses a fixed, physically-motivated feature set (RMS, peak-to-peak, kurtosis, crest factor on both channels), `log1p` on the heavy-tailed kurtosis channels, a **per-bearing** healthy reference taken as the median of acquisitions `[10, 60)` of that bearing's own record (a fixed count with a fixed offset - a *fraction* of total life cannot be computed online or on a censored bearing, and the offset skips the run-in), a MAD-based per-feature scale frozen from the training bearings, a trailing rolling-median smoother, and a **logistic** map onto (0, 1). The logistic is the point: it is strictly between 0 and 1 for every finite score, so pinning is structurally impossible rather than clipped away.
+
+Leakage-safety: the per-bearing reference reads only that bearing's own acquisitions 10-59, strictly in the past of every later acquisition, available at inference, and present on all 11 censored test bearings (verified - every censored prefix starts at `sequence_index == 0`). Scale and anchors are fitted on training bearings only and frozen in `ReferenceHIModel`. `rul_seconds` is never read; `health_indicator` and `hi_degradation_score` were added to `NON_FEATURE_COLUMNS` so that persisting the HI later can never turn a model output into a RUL input. Smoothing is trailing-only.
+
+Result, leave-one-bearing-out calibration (`reports/metrics/health_indicator_comparison.json`):
+
+| bearing | % at 1.0 before | after | HI in healthy window | HI at final 1% | Spearman |
+|---|---|---|---|---|---|
+| Bearing1_1 | 39.0% | **0.00%** | 0.953 | 0.000 | -0.844 |
+| Bearing1_2 | 34.0% | **0.00%** | 0.954 | 0.000 | -0.323 |
+| Bearing2_1 | 11.4% | **0.00%** | 0.952 | 0.001 | -0.744 |
+| Bearing2_2 | 24.5% | **0.00%** | 0.949 | 0.000 | -0.633 |
+| Bearing3_1 | 87.4% | **0.00%** | 0.954 | 0.063 | -0.477 |
+| Bearing3_2 | 88.9% | **0.00%** | 0.959 | 0.000 | -0.181 |
+
+Pinning went from a mean of 47.5% to 0.00% on every bearing; the healthy anchor is now consistent at 0.95 +/- 0.005 across all three operating conditions; and every bearing reaches failure territory, including the two whose HI previously never moved at all.
+
+Honest limitations, stated rather than smoothed over: Bearing3_1's usable p05-p95 range is only 0.083 because it stays at ~0.95 for ~98% of its life and collapses only in its final ~2% - a real property of that bearing, visible in the raw feature blocks above, not a tuning artifact. Bearing3_2's Spearman is -0.18 for the same reason. Per-acquisition monotonicity remains low (0.01-0.11); `|mean(sign(diff))|` is near zero for any noisy real signal, so it is demoted to a diagnostic and **Spearman rank correlation plus the healthy-vs-end-of-life separation are the headline metrics**. The reference window assumes the bearing is healthy during its own acquisitions 10-59 - true by construction for PRONOSTIA and the college rig, both run to failure from new, but it would not hold for a bearing first instrumented mid-life.
+
+Selection logic in `build_health.py` changed accordingly: an HI that pins is not a candidate whatever its trend correlation, so the gate is "worst per-bearing `pct_at_one` < 5%" first, then strongest `|mean rank trend|`. `transparent_hi` is now rejected by that gate at 88.9%.
+
+Regression check: `reports/metrics/rul_evaluation.json` and `reports/metrics/hidden_set_evaluation.json` reproduce **byte-identically** after this change (verified by `sha256sum` after re-running `scripts/evaluate_models.py`), confirming the HI does not reach the RUL feature matrix. ExtraTrees was not retrained.
+
+## D19: degradation stages are a fitted alarm band on the HI, not chosen thresholds and not a fault diagnosis (2026-08-30, M5)
+With D18's HI usable, M5 became possible. Two things had to be avoided: arbitrary cut-offs ("HEALTHY above 0.7") that cannot be defended, and any use of `rul_seconds` to define the stages, which would be circular.
+
+Method (`src/bearing_pdm/stages.py`): a statistical alarm band plus a persistence rule, in the spirit of classical condition-monitoring practice. Both boundaries are **fitted quantiles of the training bearings' own HI distribution**, so each traces to a fitted value rather than a preference:
+
+- `hi_warn` = 5th percentile of HI over the training bearings' healthy reference windows - the lower edge of the band a healthy bearing actually occupies.
+- `hi_critical` = median HI over the training bearings' end-of-life windows - the level bearings are actually at when they fail.
+- `HEALTHY` at or above `hi_warn`; `DEGRADING` between; `CRITICAL` below `hi_critical`.
+- A stage change is committed only after **5 consecutive acquisitions agree**, so a single noise spike cannot trip an alarm. The rule is backward-looking, so it stays causal.
+
+`fit_stage_thresholds` refuses to fit when `hi_critical` is not below `hi_warn` - i.e. when the HI does not separate healthy from failed - rather than emitting stages that mean nothing. That guard is what would have fired on the old pinned HI.
+
+Leakage-safety: thresholds are fitted on the training fold and applied to the held-out bearing; `rul_seconds` never enters the fit. RUL is used only afterwards by `summarize_stages` to *score* the result, which is evaluation, not fitting. `stage_label` was already in `NON_FEATURE_COLUMNS`, so a stage can never leak back into the ExtraTrees feature matrix.
+
+Result, leave-one-bearing-out (`reports/metrics/health_indicator_comparison.json`, `stages.leave_one_bearing_out`):
+
+| bearing | frac HEALTHY | frac DEGRADING | frac CRITICAL | life frac at first CRITICAL | RUL at first CRITICAL | severity reversions |
+|---|---|---|---|---|---|---|
+| Bearing1_1 | 0.51 | 0.46 | 0.03 | 0.47 | 14,740 s | 5 |
+| Bearing1_2 | 0.22 | 0.56 | 0.22 | 0.15 | 7,430 s | 19 |
+| Bearing2_1 | 0.14 | 0.84 | 0.02 | 0.94 | 550 s | 1 |
+| Bearing2_2 | 0.23 | 0.65 | 0.11 | 0.55 | 3,570 s | 1 |
+| Bearing3_1 | 0.56 | 0.42 | 0.02 | 0.97 | 120 s | 8 |
+| Bearing3_2 | 0.10 | 0.84 | 0.06 | 0.88 | 1,970 s | 4 |
+
+Honest reading: every bearing does reach CRITICAL before failing, but the warning lead time spans two orders of magnitude - 14,740 s on Bearing1_1 down to **120 s on Bearing3_1**. That is the flat-then-cliff shape from D18 showing through: a bearing that degrades only in its final ~2% of life cannot be given much warning by any threshold on any instantaneous health indicator. It is a limitation of the data and the formulation, not of the band. Severity reversions (stages moving back toward healthy) are reported rather than suppressed; Bearing1_2's 19 reversions reflect a genuinely noisy HI on that bearing.
+
+**Framing constraint, non-negotiable:** a stage is a severity band on a health indicator, **not** a fault diagnosis. No inner-race / outer-race / ball / cage / lubrication claim is made or implied - bearing geometry is not verified in this project and BPFO/BPFI/BSF/FTF are not derivable from the available data. The dashboard states this beside every stage badge.

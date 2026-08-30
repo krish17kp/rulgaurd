@@ -14,8 +14,10 @@ flowchart LR
     CA --> FC
     FC --> PQ[(Parquet feature store)]
     PQ --> DB[(DuckDB metadata/lineage)]
-    PQ --> HI[health indicator\ntransparent + paper-inspired]
-    HI --> RUL[RUL model + stage model]
+    PQ --> HI[health indicator\nreference HI, selected\n+ 2 legacy, D18]
+    HI --> ST[stage bands\nstages.py, D19]
+    HI --> RUL[RUL model\nExtraTrees + naive]
+    ST --> SVC
     RUL --> SVC[prediction service functions]
     SVC --> RAG[FAISS retrieval\nM7, deferred]
     RAG --> LLM[Ollama llama3.1:8b\nor deterministic template]
