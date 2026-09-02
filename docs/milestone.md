@@ -4,7 +4,7 @@ Accelerated review track (deadline 2026-07-25). Full M0-M9 defined here; M0-M4 +
 
 ## M0 - foundation audit (DONE 2026-07-21)
 Purpose: verify repo/tooling/data facts before writing feature code.
-Deliverables: this doc set, `docs/tooling-inventory.md`, `docs/dataset-audit.md`, folder skeleton, `.gitignore`.
+Deliverables: this doc set, `docs/dataset-audit.md`, folder skeleton, `.gitignore`.
 Acceptance: datasets separated, archive roles confirmed against real files, no hidden-test leakage designed in, raw rows never planned for DuckDB.
 Evidence: `artifacts/evidence/REVIEW-M0/`.
 

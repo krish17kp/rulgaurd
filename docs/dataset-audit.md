@@ -75,7 +75,9 @@ Note vs. `command.md`'s "Test_set.7z" counts (a slightly different table listed 
 | Bearing2_7 | 58*10=580 | 580 | Y |
 | Bearing3_3 | 82*10=820 | 820 | Y |
 
-All 11 match exactly. M1 acceptance criterion "hidden-RUL derivation independently reproduced" is satisfied.
+All 11 match exactly against `command.md`'s expected table. M1 acceptance criterion "hidden-RUL derivation independently reproduced" is satisfied.
+
+**Caveat (see `docs/decisions.md` D17):** this match is against `command.md`'s table, not the official IEEE PHM 2012 challenge document. For Bearing1_4 specifically, the official table gives 339s vs. the 2890s derived here — both values and the arithmetic reasoning are recorded in D17, not silently reconciled.
 
 ## data collection git repo's own copy - now the canonical published copy (D12)
 

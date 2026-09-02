@@ -68,7 +68,7 @@ No personal data. College-bearing data has no PII. Absolute local paths must nev
 FEMTO/PRONOSTIA: IEEE PHM 2012 Challenge dataset, cite per `context/` papers; archives published in `datasets/femto/` under the challenge's original terms. College dataset: user-collected, published in `datasets/college/` via Git LFS in this repo (see `docs/decisions.md` D12 for the repo consolidation).
 
 ## Risks
-See `docs/risk-register.md` (to be expanded post-review). Data drive is tight (~19-21GB free after publishing both datasets via LFS + restoring the college working-tree checkout) - avoid further large local duplicates. Redundant local (non-repo) copies of both datasets still exist outside this repo at `D:/capstone/data/`; left untouched per the no-delete policy, not part of this repo.
+Tracked inline here (no separate `docs/risk-register.md` exists). Data drive is tight (~19-21GB free after publishing both datasets via LFS + restoring the college working-tree checkout) - avoid further large local duplicates. Redundant local (non-repo) copies of both datasets still exist outside this repo at `D:/capstone/data/`; left untouched per the no-delete policy, not part of this repo.
 
 ## Acceptance criteria
 Each milestone's own gate in `docs/milestone.md`.
