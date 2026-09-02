@@ -5,7 +5,8 @@ Research capstone project. Estimates rolling-bearing degradation state and Remai
 ## Status (read this first)
 
 - **Accelerated review MVP (deadline 2026-07-25): DONE.** Milestones M0-M4 plus a minimal M8 (Streamlit dashboard) are complete, each backed by a real-data run with evidence under `artifacts/evidence/REVIEW-M*/`.
-- **The full M0-M9 capstone is NOT finished.** M5 (degradation-stage classification), M6 (optional 1D-CNN-over-HI), M7 (RAG/local-LLM report generation), and M9 (final reproducibility/scientific audit) are deferred, post-review work. See `docs/milestone.md` and `TODO.md` for the authoritative per-task status.
+- **Post-review work continued: M4b and M5 are also DONE (2026-08-30).** M4b scored the FEMTO hidden set (`Full_Test_Set`) for the first genuinely out-of-sample result; M5 added degradation-stage classification (HEALTHY/DEGRADING/CRITICAL) on top of a corrected health indicator. See `docs/decisions.md` D13-D20.
+- **M6 (optional 1D-CNN-over-HI), M7 (RAG/local-LLM report generation), and M9 (final reproducibility/scientific audit) remain deferred** — no work has started on them. See `docs/milestone.md` and `TODO.md` for the authoritative per-task status.
 - Do not read "review-ready" as "feature-complete." It means the reviewed subset is real, tested, and honestly reported — not that every planned capability exists yet.
 
 ## Known limitations (stated up front, not buried)
@@ -15,11 +16,12 @@ Research capstone project. Estimates rolling-bearing degradation state and Remai
 3. FEMTO-trained models (fit only on the 6 FEMTO `Learning_set` bearings) are **never applied to college data** — the dashboard explicitly gates on dataset and shows a domain-mismatch message instead of a silently-wrong number (`docs/decisions.md` D11).
 4. No physical fault-type diagnosis (inner/outer race, ball, lubrication) is claimed anywhere — this is RUL regression, not fault diagnosis, and bearing-frequency (BPFO/BPFI/BSF/FTF) claims require verified geometry this project does not have.
 5. College feature extraction currently uses a 1-in-5 file sample (26/129 files) for the review run, not the full archive — see `reports/verification/review-readiness.md` for why and what a full run would need.
-6. `Validation_Set/Full_Test_Set` (FEMTO's hidden RUL continuation) has not been scored yet — the pipeline is frozen but hidden-set evaluation is a deliberately separate later step, not skipped by accident.
+6. `Validation_Set/Full_Test_Set` (FEMTO's hidden RUL continuation) **has been scored** (M4b, 2026-08-30): ExtraTrees MAE 4,555s vs. naive 5,204s (~1.14x better), PHM2012 score 0.068 vs. 0.029. It beats the naive baseline out-of-sample, but absolute accuracy is poor and 8/11 predictions err in the unsafe (over-estimate) direction. See `docs/decisions.md` D16/D17/D20.
+7. Degradation stages (M5) are a severity band on the health indicator, not a fault type, and warning lead time varies enormously across bearings (14,740s down to 120s) because FEMTO degradation is flat-then-cliff — reported, not hidden. See `docs/decisions.md` D18/D19.
 
 ## Architecture
 
-Two independent adapters (`femto.py`, `college.py`) normalize into one canonical feature-row contract (`docs/data-contract.md`), features land in Parquet with DuckDB lineage/metadata (never raw high-frequency rows), then health indicator -> RUL model -> Streamlit dashboard. Full diagram and trust boundaries in `docs/architecture.md`.
+Two independent adapters (`femto.py`, `college.py`) normalize into one canonical feature-row contract (`docs/data-contract.md`), features land in Parquet with DuckDB lineage/metadata (never raw high-frequency rows), then health indicator -> RUL model (+ degradation-stage classification) -> Streamlit dashboard. Full diagram and trust boundaries in `docs/architecture.md`.
 
 ## Install
 
@@ -59,6 +61,7 @@ python scripts/build_features.py --dataset college --config config/data_paths.to
 python scripts/build_health.py --config config/data_paths.toml
 python scripts/train_models.py --config config/data_paths.toml
 python scripts/evaluate_models.py --config config/data_paths.toml
+python scripts/score_hidden_set.py --config config/data_paths.toml   # post-freeze only, FEMTO hidden set (M4b)
 python scripts/run_dashboard.py
 ```
 
@@ -84,12 +87,12 @@ See `reports/verification/review-readiness.md` for exact commands, environment, 
 - `docs/data-contract.md` — canonical feature-row schema both adapters emit.
 - `docs/architecture.md` — data flow, trust boundaries, why raw samples stay out of the database.
 - `docs/dataset-audit.md` — real file inspection results (schemas, counts, hidden-RUL derivation).
-- `docs/decisions.md` — every source conflict and bug found during development, with resolution and evidence, in date order (D1-D12). Read this if you want to know what actually went wrong and how it was caught.
+- `docs/decisions.md` — every source conflict and bug found during development, with resolution and evidence, in date order (D1-D20). Read this if you want to know what actually went wrong and how it was caught.
 - `docs/milestone.md` / `TODO.md` — per-milestone and per-task status, acceptance criteria, evidence pointers.
 
 ## Continuing development
 
-Post-review work is scoped in `docs/milestone.md` (M5 stage classification, M6 optional CNN, M7 RAG/local-LLM, M9 final audit) and tracked task-by-task in `TODO.md`. `CLAUDE.md` documents the non-negotiable rules (no leakage, adapter separation, no fabricated labels/fault claims) that any new work must keep following.
+M0-M4, M4b, minimal M8, and M5 are done. Remaining post-review work is scoped in `docs/milestone.md` (M6 optional CNN, M7 RAG/local-LLM, M9 final audit) and tracked task-by-task in `TODO.md`. `CLAUDE.md` documents the non-negotiable rules (no leakage, adapter separation, no fabricated labels/fault claims, ExtraTrees stays the primary model) that any new work must keep following.
 
 ## License and citation
 
