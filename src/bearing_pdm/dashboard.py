@@ -27,6 +27,23 @@ from bearing_pdm.storage import batch_roles, get_connection
 
 CONFIG_PATH = "config/data_paths.toml"
 
+# Streamlit Community Cloud clones the repo fresh, so none of the gitignored
+# local artifacts exist there (config/data_paths.toml, the DuckDB catalogue,
+# data/processed/, artifacts/models/, reports/metrics/). When they are absent
+# the dashboard falls back to `deploy_data/`, a tracked snapshot of real
+# pipeline outputs built by scripts/build_deploy_snapshot.py. Same five views,
+# same computations - a representative subset of the data, never synthesised.
+DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy_data"
+
+
+def _cloud_mode() -> bool:
+    return not Path(CONFIG_PATH).exists() and DEPLOY_DIR.is_dir()
+
+
+def _artifact(local_path: str) -> str:
+    """Local artifact path, or its flat copy inside the deployment snapshot."""
+    return str(DEPLOY_DIR / Path(local_path).name) if _cloud_mode() else local_path
+
 
 @st.cache_resource
 def _load_paths():
@@ -42,6 +59,22 @@ def _list_batches() -> pd.DataFrame:
     learning bearings for the eleven censored test bearings - no ground-truth
     RUL, and different bearings entirely (docs/decisions.md D15).
     """
+    if _cloud_mode():
+        snap = pd.read_parquet(DEPLOY_DIR / "feature_snapshot.parquet",
+                               columns=["dataset_id", "role"])
+        return pd.DataFrame([
+            {
+                "dataset_id": dataset_id,
+                "feature_batch_id": f"deploy-snapshot-{dataset_id}",
+                "parquet_path": str(DEPLOY_DIR / "feature_snapshot.parquet"),
+                "row_count": len(g),
+                "code_version": "deployment snapshot",
+                "created_at": "bundled with the repository",
+                "roles": ",".join(sorted(g["role"].unique())),
+            }
+            for dataset_id, g in snap.groupby("dataset_id")
+        ])
+
     paths = _load_paths()
     con = get_connection(paths.duckdb_path)
     try:
@@ -104,6 +137,54 @@ def _load_predictions(path: str) -> pd.DataFrame | None:
     return pd.read_parquet(p) if p.exists() else None
 
 
+@st.cache_data
+def _load_raw_snapshot() -> pd.DataFrame:
+    """The measured windows bundled for cloud mode: genuine recorded waveforms,
+    a representative few per bearing, not the full acquisition history."""
+    return pd.read_parquet(DEPLOY_DIR / "raw_signal_samples.parquet")
+
+
+def _raw_from_snapshot(row: pd.Series) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    snap = _load_raw_snapshot()
+    match = snap[
+        (snap["bearing_run_id"] == row["bearing_run_id"])
+        & (snap["sequence_index"] == int(row["sequence_index"]))
+    ]
+    if match.empty:
+        raise FileNotFoundError(
+            f"No bundled waveform for {row['bearing_run_id']} #{row['sequence_index']}"
+        )
+    hit = match.iloc[0]
+    temp = hit["temperature_c"]
+    return (
+        np.asarray(hit["vibration_x"], dtype=float),
+        np.asarray(hit["vibration_y"], dtype=float),
+        None if temp is None else np.asarray(temp, dtype=float),
+    )
+
+
+def _bundled_positions(df_bearing: pd.DataFrame) -> list[int]:
+    """Row positions in `df_bearing` whose waveform ships in the snapshot.
+
+    Must match on the bearing as well as the index: sequence_index restarts at 0
+    for every bearing and every dataset, so an index-only match offers windows
+    that belong to a different run and have no waveform here.
+    """
+    if df_bearing.empty:
+        return []
+    snap = _load_raw_snapshot()
+    bearing = df_bearing["bearing_run_id"].iloc[0]
+    have = set(snap.loc[snap["bearing_run_id"] == bearing, "sequence_index"].astype(int))
+    return [i for i, s in enumerate(df_bearing["sequence_index"].astype(int)) if s in have]
+
+
+def _life_stage_label(position: int, n_rows: int) -> str:
+    """Where a bundled window sits in the bearing's own record. A position label,
+    not a degradation stage - stages come from stages.py."""
+    frac = position / max(n_rows - 1, 1)
+    return "healthy" if frac < 1 / 3 else "mid-life" if frac < 2 / 3 else "late"
+
+
 def _load_raw_femto_row(row: pd.Series) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     source = _resolve_source(row["source_file_path"])
     bearing_dir = source.parent
@@ -146,6 +227,16 @@ def main() -> None:
         "Research prototype capstone, not production. Cached artifacts only "
         "(no training on page load). See docs/prd.md for explicit non-claims."
     )
+    if _cloud_mode():
+        st.info(
+            "**Running on a precomputed deployment snapshot.** Every number, curve and "
+            "waveform here is a real output of the project's own pipeline, but only a "
+            "representative subset ships with the repository: three FEMTO bearings (one "
+            "per operating condition) with their full feature history, a few genuinely "
+            "measured raw windows each, and the evaluation artifacts. The full datasets "
+            "are not bundled, nothing is recomputed or streamed live, and no sensor is "
+            "connected - see Architecture & Limitations."
+        )
 
     VIEWS = ["Signal & FFT", "Health Indicator", "RUL Prediction",
              "Model Evaluation", "Architecture & Limitations"]
@@ -196,16 +287,51 @@ def main() -> None:
             st.sidebar.info("College batch is a representative sample (command.md section 26.8), not the full 129-file run - see docs/decisions.md.")
 
         df = _load_batch(batch_row["parquet_path"])
+        if _cloud_mode():
+            df = df[df["dataset_id"] == dataset_id].reset_index(drop=True)
         bearing_run_id = st.sidebar.selectbox("Bearing / run", sorted(df["bearing_run_id"].unique()))
         df_bearing = df[df["bearing_run_id"] == bearing_run_id].sort_values("sequence_index").reset_index(drop=True)
 
-        idx = st.sidebar.slider("Acquisition / window index", 0, len(df_bearing) - 1, 0)
+        if _cloud_mode():
+            bundled = _bundled_positions(df_bearing)
+            # Plain string options, not format_func: select_slider round-trips the
+            # displayed label back as the widget value, so an int-keyed format_func
+            # is handed its own output on the next run.
+            choices = {
+                f"#{int(df_bearing['sequence_index'].iloc[p])} "
+                f"({_life_stage_label(p, len(df_bearing))})": p
+                for p in bundled
+            }
+            if choices:
+                picked = st.sidebar.select_slider(
+                    "Acquisition / window (bundled)", options=list(choices)
+                )
+                idx = choices[picked]
+            else:
+                idx = 0
+            st.sidebar.caption(
+                f"{len(bundled)} of this bearing's {len(df_bearing)} acquisitions ship with "
+                "the repository as raw waveforms; the Health Indicator curve below still "
+                "covers every acquisition."
+            )
+        else:
+            idx = st.sidebar.slider("Acquisition / window index", 0, len(df_bearing) - 1, 0)
         row = df_bearing.iloc[idx]
 
     if view == "Signal & FFT":
-        st.subheader(f"Row {idx}/{len(df_bearing)-1} - {_resolve_source(row['source_file_path'])}")
+        # In cloud mode the raw file is not on disk - the waveform comes from the
+        # bundled snapshot - so identify the acquisition rather than a local path.
+        if _cloud_mode():
+            st.subheader(
+                f"Row {idx}/{len(df_bearing)-1} - {bearing_run_id} "
+                f"acquisition #{int(row['sequence_index'])}"
+            )
+        else:
+            st.subheader(f"Row {idx}/{len(df_bearing)-1} - {_resolve_source(row['source_file_path'])}")
         try:
-            if dataset_id == "femto":
+            if _cloud_mode():
+                vib_x, vib_y, temp = _raw_from_snapshot(row)
+            elif dataset_id == "femto":
                 vib_x, vib_y, temp = _load_raw_femto_row(row)
             else:
                 vib_x, vib_y, bearing_temp, ambient_temp = _load_raw_college_row(row)
@@ -240,10 +366,10 @@ def main() -> None:
                 "so a college-specific fit is now feasible - it is the next step, not done yet."
             )
         else:
-            reference_model = _load_joblib("artifacts/models/reference_hi_model.joblib")
-            thresholds = _load_joblib("artifacts/models/stage_thresholds.joblib")
-            baseline = _load_joblib("artifacts/models/transparent_hi_baseline.joblib")
-            pca_model = _load_joblib("artifacts/models/pca_hi_model.joblib")
+            reference_model = _load_joblib(_artifact("artifacts/models/reference_hi_model.joblib"))
+            thresholds = _load_joblib(_artifact("artifacts/models/stage_thresholds.joblib"))
+            baseline = _load_joblib(_artifact("artifacts/models/transparent_hi_baseline.joblib"))
+            pca_model = _load_joblib(_artifact("artifacts/models/pca_hi_model.joblib"))
 
             if reference_model is None:
                 st.warning(
@@ -298,15 +424,33 @@ def main() -> None:
                 "which fits fresh models inside each fold on college's own data (src/bearing_pdm/evaluation.py)."
             )
         else:
-            naive_model = _load_joblib("artifacts/models/rul_naive.joblib")
-            tree_model = _load_joblib("artifacts/models/rul_extra_trees.joblib")
-            selected_path = Path("artifacts/models/rul_selected_model.json")
+            naive_model = _load_joblib(_artifact("artifacts/models/rul_naive.joblib"))
+            tree_model = _load_joblib(_artifact("artifacts/models/rul_extra_trees.joblib"))
+            selected_path = Path(_artifact("artifacts/models/rul_selected_model.json"))
             selected = json.loads(selected_path.read_text())["selected"] if selected_path.exists() else "extra_trees"
 
             col1, col2, col3 = st.columns(3)
             if tree_model is not None:
                 pred_tree = predict_tree_baseline(df_bearing.iloc[[idx]], tree_model).iloc[0]
                 col1.metric(f"ExtraTrees prediction {'(selected)' if selected == 'extra_trees' else ''}", f"{pred_tree/3600:.2f} h")
+            elif _cloud_mode():
+                # The fitted forest is ~104MB, over GitHub's hard limit, so it is
+                # not bundled. Its leave-one-bearing-out prediction for this exact
+                # acquisition is - and that one is out-of-sample, which the frozen
+                # model's own prediction for a bearing it trained on is not.
+                lobo_all = _load_predictions(_artifact("reports/metrics/rul_predictions.parquet"))
+                hit = pd.DataFrame() if lobo_all is None else lobo_all[
+                    (lobo_all["model"] == "extra_trees")
+                    & (lobo_all["bearing_run_id"] == bearing_run_id)
+                    & (lobo_all["sequence_index"] == int(row["sequence_index"]))
+                ]
+                if not hit.empty:
+                    col1.metric(
+                        "ExtraTrees prediction (held-out)",
+                        f"{float(hit['predicted_rul_seconds'].iloc[0])/3600:.2f} h",
+                        help="From the leave-one-bearing-out evaluation: predicted by a "
+                             "model fit on the other five bearings, never on this one.",
+                    )
             if naive_model is not None:
                 pred_naive = predict_naive_baseline(df_bearing.iloc[[idx]], naive_model).iloc[0]
                 col2.metric(f"Naive prediction {'(selected)' if selected == 'naive' else ''}", f"{pred_naive/3600:.2f} h")
@@ -317,13 +461,19 @@ def main() -> None:
             st.caption(
                 "Uncertainty/confidence interval not implemented in this MVP - see docs/prd.md non-claims. "
                 "Model never retrained here; loaded from artifacts/models/*.joblib."
+                + (
+                    " On this deployment the ~104MB fitted forest is not bundled, so the "
+                    "ExtraTrees figure shown is its held-out prediction for this acquisition, "
+                    "read from the evaluation artifact."
+                    if _cloud_mode() else ""
+                )
             )
 
             # Trajectory over the whole bearing life. Deliberately NOT the cached
             # model above: that one was fit on all 6 learning bearings including
             # this one, so its curve would be in-sample. These come from the
             # leave-one-bearing-out run, where this bearing was the held-out fold.
-            lobo = _load_predictions("reports/metrics/rul_predictions.parquet")
+            lobo = _load_predictions(_artifact("reports/metrics/rul_predictions.parquet"))
             if lobo is not None:
                 track = lobo[
                     (lobo["model"] == "extra_trees") & (lobo["bearing_run_id"] == bearing_run_id)
@@ -352,9 +502,9 @@ def main() -> None:
             "Cross-bearing results, pooled over every held-out fold. This view is global, "
             "which is why the sidebar shows no bearing or window selector for it."
         )
-        evaluation = _load_metrics("reports/metrics/rul_evaluation.json")
-        hi_comparison = _load_metrics("reports/metrics/health_indicator_comparison.json")
-        predictions = _load_predictions("reports/metrics/rul_predictions.parquet")
+        evaluation = _load_metrics(_artifact("reports/metrics/rul_evaluation.json"))
+        hi_comparison = _load_metrics(_artifact("reports/metrics/health_indicator_comparison.json"))
+        predictions = _load_predictions(_artifact("reports/metrics/rul_predictions.parquet"))
 
         if evaluation is None:
             st.warning(
@@ -440,7 +590,7 @@ def main() -> None:
                         "it cannot extrapolate beyond the RUL range it was trained on."
                     )
 
-        hidden = _load_metrics("reports/metrics/hidden_set_evaluation.json")
+        hidden = _load_metrics(_artifact("reports/metrics/hidden_set_evaluation.json"))
         # results.official is the challenge's own ground-truth table; the
         # archive_derived variant exists only because Bearing1_4 disagrees
         # between the two (docs/decisions.md D17). Show the official one.
@@ -534,6 +684,17 @@ def main() -> None:
             "that the scripts produced earlier. No deep-learning model (LSTM/CNN/transformer) and "
             "no LLM or RAG layer is implemented in this repository."
         )
+        if _cloud_mode():
+            st.markdown(
+                "**This deployment specifically:** it serves a tracked snapshot "
+                "(`deploy_data/`, ~3.5 MB) of artifacts the pipeline produced offline - "
+                "three of the six FEMTO learning bearings, twelve genuinely measured raw "
+                "windows, the fitted health-indicator and naive models, and the evaluation "
+                "JSONs. The ~104 MB fitted ExtraTrees forest exceeds GitHub's file limit and "
+                "is not bundled, so the RUL view shows its leave-one-bearing-out prediction "
+                "from the evaluation artifact instead. Nothing is trained, downloaded or "
+                "measured while the page runs."
+            )
 
         st.subheader("Non-claims (docs/prd.md)")
         st.markdown(

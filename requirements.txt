@@ -7,7 +7,7 @@ duckdb
 joblib
 matplotlib
 plotly
-streamlit
+streamlit==1.62.0
 py7zr
 pytest
 reportlab

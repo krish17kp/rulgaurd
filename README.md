@@ -88,6 +88,48 @@ They need the feature batches (`scripts/build_features.py`) to exist first.
 
 The dashboard loads cached artifacts only — it never trains on page load. `scripts/audit_data.py` is not yet written; the M0/M1 dataset audit was done via direct inspection and is recorded in `docs/dataset-audit.md`, independently re-verified by the adapters' own tests.
 
+## Deploying to Streamlit Community Cloud
+
+The app is deployable from a fresh clone with no extra setup.
+
+| Setting | Value |
+|---|---|
+| Repository | `krish17kp/rulgaurd` |
+| Branch | `main` |
+| Main file path | `streamlit_app.py` |
+| Python version | 3.12 (set under *Advanced settings*) |
+
+`streamlit_app.py` puts `src/` on `sys.path` and calls the existing dashboard, so
+Community Cloud needs no `PYTHONPATH`. Dependencies come from the root
+`requirements.txt` (Streamlit is pinned to the verified 1.62.0).
+
+**How it runs without the local data.** Community Cloud has none of the gitignored
+local artifacts, so `dashboard._cloud_mode()` detects the missing
+`config/data_paths.toml` and reads the tracked `deploy_data/` snapshot instead
+(~3.5 MB). That snapshot is built from real pipeline outputs by:
+
+```bash
+PYTHONPATH=src python scripts/build_deploy_snapshot.py --config config/data_paths.toml
+```
+
+It contains three FEMTO bearings (one per operating condition) with their complete
+feature history, twelve genuinely measured raw waveforms, the fitted health-indicator
+and naive models, and the evaluation JSONs. Nothing is recomputed, downloaded or
+synthesised at page load, and the app says so on screen.
+
+Two deliberate differences in cloud mode, both stated in the app:
+
+- The fitted ExtraTrees forest is ~104 MB, over GitHub's 100 MB file limit, so it is
+  not bundled. The RUL view shows that model's **leave-one-bearing-out** prediction
+  read from `rul_predictions.parquet` — out-of-sample, unlike the frozen model's own
+  prediction for a bearing it was trained on.
+- Only the bundled acquisitions offer a raw waveform, so the window control lists
+  those (healthy / mid-life / late). The Health Indicator curve still covers every
+  acquisition of the bearing.
+
+Local runs are unaffected: with `config/data_paths.toml` present the app uses the
+full pipeline exactly as before.
+
 ## Test
 
 ```bash
