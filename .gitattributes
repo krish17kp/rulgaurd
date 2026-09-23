@@ -1,0 +1,3 @@
+# Deployment branch: line-ending hygiene only. No Git LFS rules here on
+# purpose - this branch carries no raw datasets (see README).
+* text=auto eol=lf

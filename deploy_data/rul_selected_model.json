@@ -1,0 +1,4 @@
+{
+  "selected": "extra_trees",
+  "reason": "lower mean leave-one-bearing-out MAE (reports/metrics/rul_evaluation.json)"
+}

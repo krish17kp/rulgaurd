@@ -1,0 +1,275 @@
+{
+  "femto_lobo": [
+    {
+      "model": "naive",
+      "held_out_bearing": "femto:Bearing1_1",
+      "mae_seconds": 12429.509097395647,
+      "rmse_seconds": 13895.53052272662,
+      "median_abs_error_seconds": 14010.0,
+      "mean_signed_error_seconds": -12425.745986443097,
+      "n": 2803,
+      "n_overestimates": 2,
+      "n_underestimates": 2800,
+      "overestimate_rate": 0.0007135212272565109
+    },
+    {
+      "model": "extra_trees",
+      "held_out_bearing": "femto:Bearing1_1",
+      "mae_seconds": 8001.753585444166,
+      "rmse_seconds": 9769.593430257628,
+      "median_abs_error_seconds": 6651.3,
+      "mean_signed_error_seconds": -6680.70420977524,
+      "n": 2803,
+      "n_overestimates": 645,
+      "n_underestimates": 2158,
+      "overestimate_rate": 0.23011059579022475
+    },
+    {
+      "model": "naive",
+      "held_out_bearing": "femto:Bearing1_2",
+      "mae_seconds": 4616.0,
+      "rmse_seconds": 4616.0,
+      "median_abs_error_seconds": 4616.0,
+      "mean_signed_error_seconds": 4616.0,
+      "n": 871,
+      "n_overestimates": 871,
+      "n_underestimates": 0,
+      "overestimate_rate": 1.0
+    },
+    {
+      "model": "extra_trees",
+      "held_out_bearing": "femto:Bearing1_2",
+      "mae_seconds": 4910.315269804822,
+      "rmse_seconds": 6290.605568381,
+      "median_abs_error_seconds": 4042.1000000000004,
+      "mean_signed_error_seconds": 4826.067049368542,
+      "n": 871,
+      "n_overestimates": 839,
+      "n_underestimates": 32,
+      "overestimate_rate": 0.9632606199770379
+    },
+    {
+      "model": "naive",
+      "held_out_bearing": "femto:Bearing2_1",
+      "mae_seconds": 4136.0,
+      "rmse_seconds": 4136.0,
+      "median_abs_error_seconds": 4136.0,
+      "mean_signed_error_seconds": 4136.0,
+      "n": 911,
+      "n_overestimates": 911,
+      "n_underestimates": 0,
+      "overestimate_rate": 1.0
+    },
+    {
+      "model": "extra_trees",
+      "held_out_bearing": "femto:Bearing2_1",
+      "mae_seconds": 2396.611855104281,
+      "rmse_seconds": 2974.4344400168393,
+      "median_abs_error_seconds": 2054.7999999999993,
+      "mean_signed_error_seconds": -806.9209659714599,
+      "n": 911,
+      "n_overestimates": 337,
+      "n_underestimates": 574,
+      "overestimate_rate": 0.3699231613611416
+    },
+    {
+      "model": "naive",
+      "held_out_bearing": "femto:Bearing2_2",
+      "mae_seconds": 5504.0,
+      "rmse_seconds": 5504.0,
+      "median_abs_error_seconds": 5504.0,
+      "mean_signed_error_seconds": 5504.0,
+      "n": 797,
+      "n_overestimates": 797,
+      "n_underestimates": 0,
+      "overestimate_rate": 1.0
+    },
+    {
+      "model": "extra_trees",
+      "held_out_bearing": "femto:Bearing2_2",
+      "mae_seconds": 2479.0631116687578,
+      "rmse_seconds": 3523.7602025865062,
+      "median_abs_error_seconds": 1702.3000000000002,
+      "mean_signed_error_seconds": 2356.7092848180678,
+      "n": 797,
+      "n_overestimates": 706,
+      "n_underestimates": 91,
+      "overestimate_rate": 0.8858218318695107
+    },
+    {
+      "model": "naive",
+      "held_out_bearing": "femto:Bearing3_1",
+      "mae_seconds": 8888.0,
+      "rmse_seconds": 8888.0,
+      "median_abs_error_seconds": 8888.0,
+      "mean_signed_error_seconds": 8888.0,
+      "n": 515,
+      "n_overestimates": 515,
+      "n_underestimates": 0,
+      "overestimate_rate": 1.0
+    },
+    {
+      "model": "extra_trees",
+      "held_out_bearing": "femto:Bearing3_1",
+      "mae_seconds": 8411.229902912622,
+      "rmse_seconds": 8815.39601658834,
+      "median_abs_error_seconds": 8249.5,
+      "mean_signed_error_seconds": 8411.229902912622,
+      "n": 515,
+      "n_overestimates": 515,
+      "n_underestimates": 0,
+      "overestimate_rate": 1.0
+    },
+    {
+      "model": "naive",
+      "held_out_bearing": "femto:Bearing3_2",
+      "mae_seconds": 3935.023824068418,
+      "rmse_seconds": 4126.8754574046125,
+      "median_abs_error_seconds": 4576.0,
+      "mean_signed_error_seconds": -3935.023824068418,
+      "n": 1637,
+      "n_overestimates": 0,
+      "n_underestimates": 1636,
+      "overestimate_rate": 0.0
+    },
+    {
+      "model": "extra_trees",
+      "held_out_bearing": "femto:Bearing3_2",
+      "mae_seconds": 4167.168112400733,
+      "rmse_seconds": 4801.41465333839,
+      "median_abs_error_seconds": 4018.6000000000004,
+      "mean_signed_error_seconds": 191.41246182040328,
+      "n": 1637,
+      "n_overestimates": 874,
+      "n_underestimates": 763,
+      "overestimate_rate": 0.5339034819792303
+    }
+  ],
+  "femto_lobo_mean_mae_by_model": {
+    "extra_trees": 5061.023639555897,
+    "naive": 6584.755486910678
+  },
+  "femto_lobo_overall_by_model": {
+    "extra_trees": {
+      "mae_seconds": 5577.165410140695,
+      "rmse_seconds": 7265.630847661223,
+      "median_abs_error_seconds": 4366.65,
+      "mean_signed_error_seconds": -1159.3033713830632,
+      "n": 7534,
+      "n_overestimates": 3916,
+      "n_underestimates": 3618,
+      "overestimate_rate": 0.5197770108839925
+    },
+    "naive": {
+      "mae_seconds": 7702.945049110698,
+      "rmse_seconds": 9416.68568390414,
+      "median_abs_error_seconds": 4616.0,
+      "mean_signed_error_seconds": -3254.3881072471463,
+      "n": 7534,
+      "n_overestimates": 3096,
+      "n_underestimates": 4436,
+      "overestimate_rate": 0.41093708521369793
+    }
+  },
+  "college_walk_forward": [
+    {
+      "model": "naive",
+      "fold": 1,
+      "mae_seconds": 0.0,
+      "rmse_seconds": 0.0,
+      "median_abs_error_seconds": 0.0,
+      "mean_signed_error_seconds": 0.0,
+      "n": 1008,
+      "n_overestimates": 0,
+      "n_underestimates": 0,
+      "overestimate_rate": 0.0
+    },
+    {
+      "model": "extra_trees",
+      "fold": 1,
+      "mae_seconds": 116657.03085813491,
+      "rmse_seconds": 133459.47203658684,
+      "median_abs_error_seconds": 86471.7875,
+      "mean_signed_error_seconds": 116657.03085813491,
+      "n": 1008,
+      "n_overestimates": 1008,
+      "n_underestimates": 0,
+      "overestimate_rate": 1.0
+    },
+    {
+      "model": "naive",
+      "fold": 2,
+      "mae_seconds": 0.0,
+      "rmse_seconds": 0.0,
+      "median_abs_error_seconds": 0.0,
+      "mean_signed_error_seconds": 0.0,
+      "n": 1007,
+      "n_overestimates": 0,
+      "n_underestimates": 0,
+      "overestimate_rate": 0.0
+    },
+    {
+      "model": "extra_trees",
+      "fold": 2,
+      "mae_seconds": 118904.38548162859,
+      "rmse_seconds": 130682.84917665867,
+      "median_abs_error_seconds": 107856.93,
+      "mean_signed_error_seconds": 118904.38548162859,
+      "n": 1007,
+      "n_overestimates": 1007,
+      "n_underestimates": 0,
+      "overestimate_rate": 1.0
+    },
+    {
+      "model": "naive",
+      "fold": 3,
+      "mae_seconds": 0.0,
+      "rmse_seconds": 0.0,
+      "median_abs_error_seconds": 0.0,
+      "mean_signed_error_seconds": 0.0,
+      "n": 1008,
+      "n_overestimates": 0,
+      "n_underestimates": 0,
+      "overestimate_rate": 0.0
+    },
+    {
+      "model": "extra_trees",
+      "fold": 3,
+      "mae_seconds": 131762.3845138889,
+      "rmse_seconds": 153330.20849529008,
+      "median_abs_error_seconds": 130340.235,
+      "mean_signed_error_seconds": 131762.3845138889,
+      "n": 1008,
+      "n_overestimates": 1008,
+      "n_underestimates": 0,
+      "overestimate_rate": 1.0
+    }
+  ],
+  "college_mean_mae_by_model": {
+    "extra_trees": 122441.26695121748,
+    "naive": 0.0
+  },
+  "college_overall_by_model": {
+    "extra_trees": {
+      "mae_seconds": 122442.43694177968,
+      "rmse_seconds": 139525.33931495677,
+      "median_abs_error_seconds": 117241.17499999999,
+      "mean_signed_error_seconds": 122442.43694177968,
+      "n": 3023,
+      "n_overestimates": 3023,
+      "n_underestimates": 0,
+      "overestimate_rate": 1.0
+    },
+    "naive": {
+      "mae_seconds": 0.0,
+      "rmse_seconds": 0.0,
+      "median_abs_error_seconds": 0.0,
+      "mean_signed_error_seconds": 0.0,
+      "n": 3023,
+      "n_overestimates": 0,
+      "n_underestimates": 0,
+      "overestimate_rate": 0.0
+    }
+  },
+  "college_naive_caveat": "College rul_seconds = run_end_timestamp - event_timestamp, and the naive baseline predicts mean_total_life - elapsed. On an expanding window that always starts at the true t=0 those are algebraically the same formula, so naive scores MAE=0.0 by construction (docs/decisions.md D10). It is an oracle with access to the true total run length, not a fair comparison for ExtraTrees."
+}
