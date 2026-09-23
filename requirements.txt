@@ -5,7 +5,7 @@
 # Deliberately absent: pytest and ruff (development only), matplotlib, plotly,
 # py7zr, reportlab and scipy-for-the-pipeline (used by the offline build
 # scripts, which never run here - this app only reads cached artifacts).
-streamlit==1.62.0
+streamlit==1.64.0
 pandas==3.0.5
 numpy==2.5.2
 pyarrow==25.0.1
