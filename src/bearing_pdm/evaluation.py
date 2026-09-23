@@ -33,32 +33,91 @@ def assert_no_leakage(df: pd.DataFrame, allowed_roles: set[str] = ALLOWED_FIT_RO
 
 
 def _metrics(y_true: pd.Series, y_pred: pd.Series) -> dict[str, float]:
-    mae = float(mean_absolute_error(y_true, y_pred))
-    rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
-    return {"mae_seconds": mae, "rmse_seconds": rmse, "n": len(y_true)}
+    """Error magnitude *and* direction.
+
+    MAE alone hides which way a model is wrong. Over-predicting RUL claims more
+    remaining life than the bearing actually has, so maintenance gets scheduled
+    after the failure it was meant to prevent; under-predicting only wastes
+    remaining life. That is the same asymmetry `phm2012_score` encodes for the
+    hidden set, reported here for every split.
+
+    Sign convention matches `score_hidden_set`: positive error = over-estimate.
+    """
+    error = np.asarray(y_pred, dtype=float) - np.asarray(y_true, dtype=float)
+    n = int(len(error))
+    n_over = int((error > 0).sum())
+    return {
+        "mae_seconds": float(mean_absolute_error(y_true, y_pred)),
+        "rmse_seconds": float(np.sqrt(mean_squared_error(y_true, y_pred))),
+        "median_abs_error_seconds": float(np.median(np.abs(error))),
+        "mean_signed_error_seconds": float(error.mean()),
+        "n": n,
+        "n_overestimates": n_over,
+        "n_underestimates": int((error < 0).sum()),
+        "overestimate_rate": float(n_over / n) if n else float("nan"),
+    }
 
 
-def leave_one_bearing_out_femto(df_learning: pd.DataFrame) -> pd.DataFrame:
+def _prediction_rows(
+    split: str, model: str, test: pd.DataFrame, y_pred: pd.Series
+) -> pd.DataFrame:
+    """Per-row held-out predictions, kept so the dashboard can plot actual vs
+    predicted from the very evaluation that produced the headline metrics,
+    rather than re-running a second, differently-split one."""
+    return pd.DataFrame({
+        "model": model,
+        "split": split,
+        "bearing_run_id": test["bearing_run_id"].to_numpy(),
+        "sequence_index": test["sequence_index"].to_numpy(),
+        "actual_rul_seconds": test["rul_seconds"].to_numpy(dtype=float),
+        "predicted_rul_seconds": np.asarray(y_pred, dtype=float),
+    })
+
+
+def summarize_predictions(predictions: pd.DataFrame) -> dict[str, dict[str, float]]:
+    """Pooled metrics per model over every held-out row of a split scheme.
+
+    The per-fold table reports each fold on its own terms; this is the single
+    overall figure per model, computed from the same held-out predictions so
+    the two can never drift apart."""
+    return {
+        str(model): _metrics(g["actual_rul_seconds"], g["predicted_rul_seconds"])
+        for model, g in predictions.groupby("model")
+    }
+
+
+def leave_one_bearing_out_femto(
+    df_learning: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit naive + tree baselines on 5 bearings, evaluate on the 6th held-out
-    bearing, repeated for each of the 6 learning bearings. Returns one row
-    per (model, held-out bearing)."""
+    bearing, repeated for each of the 6 learning bearings.
+
+    Returns `(metrics, predictions)`: one metrics row per (model, held-out
+    bearing), and every held-out prediction that produced them."""
     assert_no_leakage(df_learning, allowed_roles={"learning"})
 
     bearings = sorted(df_learning["bearing_run_id"].unique())
     rows = []
+    predictions = []
     for held_out in bearings:
         train = df_learning[df_learning["bearing_run_id"] != held_out]
         test = df_learning[df_learning["bearing_run_id"] == held_out]
 
         naive_model = fit_naive_baseline(train)
-        naive_pred = predict_naive_baseline(test, naive_model)
-        rows.append({"model": "naive", "held_out_bearing": held_out, **_metrics(test["rul_seconds"], naive_pred)})
-
         tree_model = fit_tree_baseline(train)
-        tree_pred = predict_tree_baseline(test, tree_model)
-        rows.append({"model": "extra_trees", "held_out_bearing": held_out, **_metrics(test["rul_seconds"], tree_pred)})
+        fold = {
+            "naive": predict_naive_baseline(test, naive_model),
+            "extra_trees": predict_tree_baseline(test, tree_model),
+        }
+        for model_name, y_pred in fold.items():
+            rows.append({
+                "model": model_name,
+                "held_out_bearing": held_out,
+                **_metrics(test["rul_seconds"], y_pred),
+            })
+            predictions.append(_prediction_rows(held_out, model_name, test, y_pred))
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows), pd.concat(predictions, ignore_index=True)
 
 
 def score_hidden_set(
@@ -172,11 +231,16 @@ def summarize_hidden_set(scored: pd.DataFrame) -> dict[str, dict[str, float]]:
     return summary
 
 
-def college_walk_forward(df_college: pd.DataFrame, n_folds: int = 4) -> pd.DataFrame:
+def college_walk_forward(
+    df_college: pd.DataFrame, n_folds: int = 4
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Expanding-window backtest: fold i trains on the first `i` quantile
     slice (chronological, by sequence_index) and tests on the next slice.
     Runtime-asserts every fold is strictly chronological (train max index <
-    test min index) - no shuffled/random splitting of the single run."""
+    test min index) - no shuffled/random splitting of the single run.
+
+    Returns `(metrics, predictions)`, same shape as
+    `leave_one_bearing_out_femto`."""
     assert_no_leakage(df_college, allowed_roles={"college_run"})
 
     df_college = df_college.sort_values("sequence_index").reset_index(drop=True)
@@ -184,6 +248,7 @@ def college_walk_forward(df_college: pd.DataFrame, n_folds: int = 4) -> pd.DataF
     edges = np.linspace(0, n, n_folds + 1, dtype=int)
 
     rows = []
+    predictions = []
     for i in range(1, n_folds):
         train = df_college.iloc[: edges[i]]
         test = df_college.iloc[edges[i] : edges[i + 1]]
@@ -195,11 +260,13 @@ def college_walk_forward(df_college: pd.DataFrame, n_folds: int = 4) -> pd.DataF
         )
 
         naive_model = fit_naive_baseline(train)
-        naive_pred = predict_naive_baseline(test, naive_model)
-        rows.append({"model": "naive", "fold": i, **_metrics(test["rul_seconds"], naive_pred)})
-
         tree_model = fit_tree_baseline(train)
-        tree_pred = predict_tree_baseline(test, tree_model)
-        rows.append({"model": "extra_trees", "fold": i, **_metrics(test["rul_seconds"], tree_pred)})
+        fold = {
+            "naive": predict_naive_baseline(test, naive_model),
+            "extra_trees": predict_tree_baseline(test, tree_model),
+        }
+        for model_name, y_pred in fold.items():
+            rows.append({"model": model_name, "fold": i, **_metrics(test["rul_seconds"], y_pred)})
+            predictions.append(_prediction_rows(f"fold {i}", model_name, test, y_pred))
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows), pd.concat(predictions, ignore_index=True)

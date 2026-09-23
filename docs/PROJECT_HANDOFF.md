@@ -28,7 +28,7 @@ datasets/college/*.csv (Git LFS)         --> college.py --> canonical feature-ro
                                                               |
                                         evaluation.py (leave-one-bearing-out / walk-forward / hidden-set)
                                                               |
-                                 dashboard.py (Streamlit: signal/FFT/HI/RUL/stage/metrics/limits tabs)
+                                 dashboard.py (Streamlit: signal/FFT/HI/RUL/stage/metrics/limits views)
                                                               |
                                                     [deferred] FAISS retrieval --> Ollama/template report (M7)
 ```

@@ -55,15 +55,36 @@ cp config/data_paths.example.toml config/data_paths.toml
 
 ## Run
 
+Run every command from the repository root, in this order. `PYTHONPATH=src`
+makes the checkout you are standing in the one that executes: this project is
+installed editable, so without it `bearing_pdm` may resolve to a different
+clone on the same machine and you would silently run someone else's code.
+
 ```bash
+export PYTHONPATH=src
+
 python scripts/build_features.py --dataset femto --config config/data_paths.toml
 python scripts/build_features.py --dataset college --config config/data_paths.toml
-python scripts/build_health.py --config config/data_paths.toml
+python scripts/build_health.py --config config/data_paths.toml      # -> health_indicator_comparison.json
 python scripts/train_models.py --config config/data_paths.toml
-python scripts/evaluate_models.py --config config/data_paths.toml
-python scripts/score_hidden_set.py --config config/data_paths.toml   # post-freeze only, FEMTO hidden set (M4b)
+python scripts/evaluate_models.py --config config/data_paths.toml   # -> rul_evaluation.json + rul_predictions.parquet
+python scripts/score_hidden_set.py --config config/data_paths.toml  # post-freeze only, FEMTO hidden set (M4b)
 python scripts/run_dashboard.py
 ```
+
+### Regenerating just the dashboard's metrics
+
+Everything under `reports/metrics/` and `artifacts/models/` is a **generated,
+gitignored artifact**. A fresh clone has none of them, which is why the
+dashboard's Model Evaluation view reports a missing file until these two have
+been run at least once:
+
+```bash
+PYTHONPATH=src python scripts/build_health.py    --config config/data_paths.toml
+PYTHONPATH=src python scripts/evaluate_models.py --config config/data_paths.toml
+```
+
+They need the feature batches (`scripts/build_features.py`) to exist first.
 
 The dashboard loads cached artifacts only — it never trains on page load. `scripts/audit_data.py` is not yet written; the M0/M1 dataset audit was done via direct inspection and is recorded in `docs/dataset-audit.md`, independently re-verified by the adapters' own tests.
 

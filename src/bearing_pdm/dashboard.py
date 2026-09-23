@@ -88,6 +88,22 @@ def _load_joblib(path: str):
     return joblib.load(p)
 
 
+@st.cache_data
+def _load_metrics(path: str) -> dict | None:
+    """Same missing-artifact contract as _load_joblib: None, never a traceback."""
+    p = Path(path)
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+@st.cache_data
+def _load_predictions(path: str) -> pd.DataFrame | None:
+    """Per-row held-out predictions written by scripts/evaluate_models.py - the
+    same ones the headline MAE is computed from, so a plot built here cannot
+    disagree with the reported metric."""
+    p = Path(path)
+    return pd.read_parquet(p) if p.exists() else None
+
+
 def _load_raw_femto_row(row: pd.Series) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     source = _resolve_source(row["source_file_path"])
     bearing_dir = source.parent
@@ -131,56 +147,62 @@ def main() -> None:
         "(no training on page load). See docs/prd.md for explicit non-claims."
     )
 
+    VIEWS = ["Signal & FFT", "Health Indicator", "RUL Prediction",
+             "Model Evaluation", "Architecture & Limitations"]
+    view = st.sidebar.radio("View", VIEWS)
+
+    # Only the first three views are about one specific bearing and window.
+    # Model Evaluation is cross-bearing and Architecture is static, so their
+    # controls are not rendered at all rather than shown and silently ignored.
+    needs_selection = view in VIEWS[:3]
+
     batches = _list_batches()
     if batches.empty:
         st.error("No feature batches found. Run scripts/build_features.py first.")
         return
 
-    dataset_id = st.sidebar.selectbox("Dataset", sorted(batches["dataset_id"].unique()))
-    dataset_batches = batches[batches["dataset_id"] == dataset_id].reset_index(drop=True)
+    if needs_selection:
+        dataset_id = st.sidebar.selectbox("Dataset", sorted(batches["dataset_id"].unique()))
+        dataset_batches = batches[batches["dataset_id"] == dataset_id].reset_index(drop=True)
 
-    # Default to the batch carrying ground-truth RUL rather than merely the
-    # newest one (D15); let the user switch when several batches exist.
-    preferred = _PREFERRED_ROLE.get(dataset_id)
-    default_idx = next(
-        (i for i, r in enumerate(dataset_batches["roles"]) if preferred and preferred in r.split(",")),
-        0,
-    )
-    if len(dataset_batches) > 1:
-        labels = [
-            f"{r.roles} | {r.row_count} rows | {r.feature_batch_id[:8]}"
-            for r in dataset_batches.itertuples()
-        ]
-        choice = st.sidebar.selectbox("Feature batch (role)", labels, index=default_idx)
-        batch_row = dataset_batches.iloc[labels.index(choice)]
-    else:
-        batch_row = dataset_batches.iloc[default_idx]
-
-    st.sidebar.caption(
-        f"batch {batch_row['feature_batch_id'][:8]}... | role(s) {batch_row['roles']} | "
-        f"{batch_row['row_count']} rows | code {batch_row['code_version']} | {batch_row['created_at']}"
-    )
-    if "learning" not in str(batch_row["roles"]).split(",") and dataset_id == "femto":
-        st.sidebar.warning(
-            f"This batch holds role(s) '{batch_row['roles']}', which have no ground-truth "
-            "RUL (censored by design). Predictions are shown without a true value to "
-            "compare against - see the Model Evaluation tab for scored results."
+        # Default to the batch carrying ground-truth RUL rather than merely the
+        # newest one (D15); let the user switch when several batches exist.
+        preferred = _PREFERRED_ROLE.get(dataset_id)
+        default_idx = next(
+            (i for i, r in enumerate(dataset_batches["roles"]) if preferred and preferred in r.split(",")),
+            0,
         )
-    if dataset_id == "college":
-        st.sidebar.info("College batch is a representative sample (command.md section 26.8), not the full 129-file run - see docs/decisions.md.")
+        if len(dataset_batches) > 1:
+            labels = [
+                f"{r.roles} | {r.row_count} rows | {r.feature_batch_id[:8]}"
+                for r in dataset_batches.itertuples()
+            ]
+            choice = st.sidebar.selectbox("Feature batch (role)", labels, index=default_idx)
+            batch_row = dataset_batches.iloc[labels.index(choice)]
+        else:
+            batch_row = dataset_batches.iloc[default_idx]
 
-    df = _load_batch(batch_row["parquet_path"])
-    bearing_run_id = st.sidebar.selectbox("Bearing / run", sorted(df["bearing_run_id"].unique()))
-    df_bearing = df[df["bearing_run_id"] == bearing_run_id].sort_values("sequence_index").reset_index(drop=True)
+        st.sidebar.caption(
+            f"batch {batch_row['feature_batch_id'][:8]}... | role(s) {batch_row['roles']} | "
+            f"{batch_row['row_count']} rows | code {batch_row['code_version']} | {batch_row['created_at']}"
+        )
+        if "learning" not in str(batch_row["roles"]).split(",") and dataset_id == "femto":
+            st.sidebar.warning(
+                f"This batch holds role(s) '{batch_row['roles']}', which have no ground-truth "
+                "RUL (censored by design). Predictions are shown without a true value to "
+                "compare against - see the Model Evaluation view for scored results."
+            )
+        if dataset_id == "college":
+            st.sidebar.info("College batch is a representative sample (command.md section 26.8), not the full 129-file run - see docs/decisions.md.")
 
-    idx = st.sidebar.slider("Acquisition / window index", 0, len(df_bearing) - 1, 0)
-    row = df_bearing.iloc[idx]
+        df = _load_batch(batch_row["parquet_path"])
+        bearing_run_id = st.sidebar.selectbox("Bearing / run", sorted(df["bearing_run_id"].unique()))
+        df_bearing = df[df["bearing_run_id"] == bearing_run_id].sort_values("sequence_index").reset_index(drop=True)
 
-    tab_signal, tab_health, tab_rul, tab_metrics, tab_limits = st.tabs(
-        ["Signal & FFT", "Health Indicator", "RUL Prediction", "Model Evaluation", "Architecture & Limitations"]
-    )
+        idx = st.sidebar.slider("Acquisition / window index", 0, len(df_bearing) - 1, 0)
+        row = df_bearing.iloc[idx]
 
-    with tab_signal:
+    if view == "Signal & FFT":
         st.subheader(f"Row {idx}/{len(df_bearing)-1} - {_resolve_source(row['source_file_path'])}")
         try:
             if dataset_id == "femto":
@@ -206,7 +228,7 @@ def main() -> None:
 
         st.dataframe(row[[c for c in df.columns if c.startswith("vibration_") or c.startswith("bearing_temp") or c.startswith("ambient_temp")]].to_frame("value"))
 
-    with tab_health:
+    if view == "Health Indicator":
         if dataset_id != "femto":
             st.info(
                 "The cached HI models (artifacts/models/*_hi_*.joblib) were fit only on FEMTO learning "
@@ -267,12 +289,12 @@ def main() -> None:
                     "usable range collapsed to ~2% on Bearing3_1. Neither is used for staging."
                 )
 
-    with tab_rul:
+    if view == "RUL Prediction":
         if dataset_id != "femto":
             st.info(
                 "The cached RUL models (artifacts/models/rul_*.joblib) were fit only on FEMTO learning "
                 "bearings (scripts/train_models.py) - same out-of-domain concern as the Health Indicator tab. "
-                "College's real RUL evidence is the walk-forward evaluation in the Model Evaluation tab, "
+                "College's real RUL evidence is the walk-forward evaluation in the Model Evaluation view, "
                 "which fits fresh models inside each fold on college's own data (src/bearing_pdm/evaluation.py)."
             )
         else:
@@ -297,19 +319,222 @@ def main() -> None:
                 "Model never retrained here; loaded from artifacts/models/*.joblib."
             )
 
-    with tab_metrics:
-        for label, path in [
-            ("RUL evaluation (leave-one-bearing-out / walk-forward)", "reports/metrics/rul_evaluation.json"),
-            ("Health indicator comparison", "reports/metrics/health_indicator_comparison.json"),
-        ]:
-            st.subheader(label)
-            p = Path(path)
-            if p.exists():
-                st.json(json.loads(p.read_text()))
-            else:
-                st.info(f"{path} not found - run the corresponding script first.")
+            # Trajectory over the whole bearing life. Deliberately NOT the cached
+            # model above: that one was fit on all 6 learning bearings including
+            # this one, so its curve would be in-sample. These come from the
+            # leave-one-bearing-out run, where this bearing was the held-out fold.
+            lobo = _load_predictions("reports/metrics/rul_predictions.parquet")
+            if lobo is not None:
+                track = lobo[
+                    (lobo["model"] == "extra_trees") & (lobo["bearing_run_id"] == bearing_run_id)
+                ].sort_values("sequence_index")
+                if not track.empty:
+                    st.markdown("**Predicted vs actual RUL across this bearing's life**")
+                    st.line_chart(
+                        pd.DataFrame({
+                            "actual RUL (h)": track["actual_rul_seconds"].to_numpy() / 3600.0,
+                            "predicted RUL (h)": track["predicted_rul_seconds"].to_numpy() / 3600.0,
+                        }, index=track["sequence_index"].to_numpy()),
+                        x_label="acquisition index", y_label="RUL (hours)",
+                    )
+                    err_h = float(
+                        (track["predicted_rul_seconds"] - track["actual_rul_seconds"]).abs().mean()
+                    ) / 3600.0
+                    st.caption(
+                        f"Out-of-sample: every point was predicted by a model fit on the other "
+                        f"five bearings only (MAE {err_h:.2f} h over {len(track)} acquisitions). "
+                        "Where the predicted line sits above the actual line, the model is "
+                        "claiming more remaining life than the bearing had."
+                    )
 
-    with tab_limits:
+    if view == "Model Evaluation":
+        st.caption(
+            "Cross-bearing results, pooled over every held-out fold. This view is global, "
+            "which is why the sidebar shows no bearing or window selector for it."
+        )
+        evaluation = _load_metrics("reports/metrics/rul_evaluation.json")
+        hi_comparison = _load_metrics("reports/metrics/health_indicator_comparison.json")
+        predictions = _load_predictions("reports/metrics/rul_predictions.parquet")
+
+        if evaluation is None:
+            st.warning(
+                "`reports/metrics/rul_evaluation.json` not found. It is a generated "
+                "artifact (gitignored), so a fresh checkout has to build it once:\n\n"
+                "```\nPYTHONPATH=src python scripts/evaluate_models.py "
+                "--config config/data_paths.toml\n```"
+            )
+        else:
+            st.subheader("FEMTO - leave-one-bearing-out (out-of-sample)")
+            overall = evaluation.get("femto_lobo_overall_by_model", {})
+            tree, naive = overall.get("extra_trees"), overall.get("naive")
+            if tree and naive:
+                c1, c2, c3 = st.columns(3)
+                c1.metric(
+                    "ExtraTrees MAE (FEMTO)", f"{tree['mae_seconds']/3600:.2f} h",
+                    delta=f"{(tree['mae_seconds']-naive['mae_seconds'])/3600:.2f} h vs naive",
+                    delta_color="inverse",
+                    help="Mean absolute error over all 7,534 held-out rows. Lower is better.",
+                )
+                c2.metric("Naive baseline MAE (FEMTO)", f"{naive['mae_seconds']/3600:.2f} h")
+                c3.metric(
+                    "ExtraTrees over-estimate rate (FEMTO)",
+                    f"{100*tree['overestimate_rate']:.1f}%",
+                    help="Share of held-out rows predicted to have MORE life left than "
+                         "they actually had - the unsafe direction.",
+                )
+                st.caption(
+                    f"n = {tree['n']} held-out rows, 6 bearings, each scored by a model that "
+                    f"never saw it. Median absolute error {tree['median_abs_error_seconds']/3600:.2f} h; "
+                    f"mean signed error {tree['mean_signed_error_seconds']/3600:+.2f} h "
+                    "(negative = conservative on average)."
+                )
+
+            femto_folds = pd.DataFrame(evaluation.get("femto_lobo", []))
+            if not femto_folds.empty:
+                st.markdown("**Per-bearing error - ExtraTrees vs naive baseline**")
+                mae_by_bearing = (
+                    femto_folds.pivot(index="held_out_bearing", columns="model", values="mae_seconds") / 3600.0
+                )
+                st.bar_chart(mae_by_bearing, y_label="MAE (hours)", x_label="held-out bearing")
+                st.caption(
+                    "The mean hides the spread: ExtraTrees loses to naive on "
+                    f"{int((mae_by_bearing['extra_trees'] > mae_by_bearing['naive']).sum())} "
+                    "of 6 bearings. Reported rather than averaged away."
+                )
+
+                st.markdown("**Which direction is each model wrong in?**")
+                signed = (
+                    femto_folds.pivot(
+                        index="held_out_bearing", columns="model", values="mean_signed_error_seconds"
+                    ) / 3600.0
+                )
+                st.bar_chart(signed, y_label="mean signed error (hours)", x_label="held-out bearing")
+                st.warning(
+                    "**Bars above zero are the unsafe direction.** A positive signed error means "
+                    "the model predicted more remaining life than the bearing actually had, so "
+                    "maintenance would be scheduled after the failure it was meant to prevent. "
+                    "An equally large negative error only retires a bearing early. This is why "
+                    "MAE alone is not a sufficient summary, and why the hidden-set score "
+                    "(`phm2012_score`) penalises over-prediction ~4x harder."
+                )
+
+            if predictions is not None:
+                femto_pred = predictions[
+                    (predictions["dataset_id"] == "femto") & (predictions["model"] == "extra_trees")
+                ]
+                if not femto_pred.empty:
+                    st.markdown("**Actual vs predicted RUL (ExtraTrees, held-out rows only)**")
+                    scatter = pd.DataFrame({
+                        "actual RUL (h)": femto_pred["actual_rul_seconds"] / 3600.0,
+                        "predicted (h)": femto_pred["predicted_rul_seconds"] / 3600.0,
+                        "perfect prediction (h)": femto_pred["actual_rul_seconds"] / 3600.0,
+                    })
+                    st.scatter_chart(
+                        scatter, x="actual RUL (h)",
+                        y=["predicted (h)", "perfect prediction (h)"], height=360,
+                    )
+                    st.caption(
+                        f"All {len(femto_pred)} held-out predictions. The straight line is "
+                        "y = x (a perfect model); points above it are over-predictions. "
+                        "Flattening at the extremes is the expected tree-ensemble behaviour - "
+                        "it cannot extrapolate beyond the RUL range it was trained on."
+                    )
+
+        hidden = _load_metrics("reports/metrics/hidden_set_evaluation.json")
+        # results.official is the challenge's own ground-truth table; the
+        # archive_derived variant exists only because Bearing1_4 disagrees
+        # between the two (docs/decisions.md D17). Show the official one.
+        hidden_official = (
+            (hidden or {}).get("results", {}).get("official", {}).get("summary_by_model", {})
+        )
+        if hidden_official.get("extra_trees"):
+            st.subheader("FEMTO hidden set - the only fully out-of-sample result")
+            h = hidden_official["extra_trees"]
+            c1, c2, c3 = st.columns(3)
+            c1.metric("ExtraTrees MAE (hidden set)", f"{h['mae_seconds']/3600:.2f} h")
+            c2.metric(
+                "PHM 2012 score", f"{h['phm2012_score']:.4f}",
+                help="Official challenge metric, in (0, 1], higher is better. It penalises "
+                     "predicting too much remaining life about 4x harder than too little.",
+            )
+            c3.metric(
+                "Over-estimates", f"{h['n_overestimates']}/{h['n_bearings']} bearings",
+                help="Bearings predicted to have more life left than they actually had.",
+            )
+            st.caption(
+                "11 bearings the models have never seen, scored once against the challenge's "
+                "own continuation archive after the pipeline was frozen. n = 11 predictions, "
+                "one per bearing at the end of its censored prefix - small by construction, "
+                "and reported as-is (docs/decisions.md D16/D17)."
+            )
+
+        if evaluation is not None:
+            college_overall = evaluation.get("college_overall_by_model", {})
+            if college_overall:
+                st.subheader("College rig - chronological walk-forward")
+                ct = college_overall.get("extra_trees", {})
+                c1, c2 = st.columns(2)
+                c1.metric("ExtraTrees MAE (college)", f"{ct.get('mae_seconds', float('nan'))/3600:.2f} h")
+                c2.metric("Over-estimate rate (college)", f"{100*ct.get('overestimate_rate', float('nan')):.1f}%")
+                st.error(
+                    "**Every single held-out college prediction is an over-prediction.** On this "
+                    "one run ExtraTrees is optimistic 100% of the time, by "
+                    f"{ct.get('mae_seconds', 0)/3600:.1f} h on average. Reported because it is the "
+                    "finding, not a failure to hide."
+                )
+                st.info(evaluation.get("college_naive_caveat", ""))
+
+        st.subheader("Health indicator comparison")
+        if hi_comparison is None:
+            st.warning(
+                "`reports/metrics/health_indicator_comparison.json` not found. Generate it with:\n\n"
+                "```\nPYTHONPATH=src python scripts/build_health.py "
+                "--config config/data_paths.toml\n```"
+            )
+        else:
+            lobo = hi_comparison.get("reference_hi", {}).get("leave_one_bearing_out", {})
+            per_bearing = pd.DataFrame(lobo.get("per_bearing", []))
+            if not per_bearing.empty and "spearman" in per_bearing:
+                st.bar_chart(
+                    per_bearing.set_index("bearing_run_id")["spearman"],
+                    y_label="Spearman(HI, life progression)", x_label="bearing",
+                )
+                st.caption(
+                    f"Selected HI: **{hi_comparison.get('selected', 'unknown')}**, calibrated "
+                    "leave-one-bearing-out. Negative is correct - the HI should fall as the "
+                    "bearing ages. Bearing3_1 and Bearing3_2 are weak because their degradation "
+                    "is flat-then-cliff, not gradual (see the Limitations tab)."
+                )
+
+        with st.expander("Raw metric files"):
+            if evaluation is not None:
+                st.json(evaluation)
+            if hi_comparison is not None:
+                st.json(hi_comparison)
+
+    if view == "Architecture & Limitations":
+        st.subheader("What this system actually is")
+        st.markdown(
+            "```\n"
+            "bearing vibration + temperature CSVs   (FEMTO/PRONOSTIA, college rig)\n"
+            "  -> dataset adapters                  femto.py / college.py\n"
+            "  -> windowing + feature extraction    features.py  (time-domain stats, FFT/spectral)\n"
+            "  -> feature table                     Parquet + DuckDB lineage (storage.py)\n"
+            "  -> health indicator                  health.py    (reference HI, per-bearing baseline)\n"
+            "  -> degradation stage                 stages.py    (severity band on the HI)\n"
+            "  -> RUL regression                    modeling.py  (ExtraTrees + naive baseline)\n"
+            "  -> leakage-safe evaluation           evaluation.py (leave-one-bearing-out / walk-forward)\n"
+            "  -> this dashboard                    dashboard.py (reads cached artifacts only)\n"
+            "```"
+        )
+        st.markdown(
+            "Everything above is batch and local. There is **no** backend service, HTTP API, "
+            "database server, message queue, cloud component, or live sensor feed. The "
+            "dashboard never fits a model - it reads Parquet, DuckDB and `artifacts/models/*.joblib` "
+            "that the scripts produced earlier. No deep-learning model (LSTM/CNN/transformer) and "
+            "no LLM or RAG layer is implemented in this repository."
+        )
+
         st.subheader("Non-claims (docs/prd.md)")
         st.markdown(
             "- No guaranteed physical root-cause diagnosis (stage != fault type)\n"

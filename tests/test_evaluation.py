@@ -9,6 +9,7 @@ from bearing_pdm.evaluation import (
     phm2012_score,
     score_hidden_set,
     summarize_hidden_set,
+    summarize_predictions,
 )
 from bearing_pdm.modeling import fit_naive_baseline, predict_naive_baseline
 
@@ -56,7 +57,7 @@ def test_assert_no_leakage_raises_for_full_test_role():
 
 def test_leave_one_bearing_out_femto_covers_every_bearing_as_holdout():
     df = _femto_learning_df(n_bearings=3)
-    results = leave_one_bearing_out_femto(df)
+    results, predictions = leave_one_bearing_out_femto(df)
 
     held_out = set(results["held_out_bearing"])
     assert held_out == {"femto:BearingX_0", "femto:BearingX_1", "femto:BearingX_2"}
@@ -73,7 +74,7 @@ def test_leave_one_bearing_out_femto_refuses_hidden_roles():
 
 def test_college_walk_forward_is_chronological_and_produces_folds():
     df = _bearing_df("college:nsk6205", "college_run", total_life_s=1000.0, n=200)
-    results = college_walk_forward(df, n_folds=4)
+    results, predictions = college_walk_forward(df, n_folds=4)
 
     assert set(results["model"]) == {"naive", "extra_trees"}
     assert results["fold"].nunique() == 3  # n_folds-1 test folds in an expanding-window scheme
@@ -237,3 +238,69 @@ def test_score_hidden_set_attaches_a_phm2012_score_per_bearing():
     scored = score_hidden_set(df, {"Bearing1_3": 1000.0}, {"m": _constant_predictor(1100.0)})
     assert scored.iloc[0]["phm2012_score"] == pytest.approx(0.25)
     assert summarize_hidden_set(scored)["m"]["phm2012_score"] == pytest.approx(0.25)
+
+
+# ---------------------------------------------------------------------------
+# Error-direction metrics: MAE alone hides the unsafe direction
+# ---------------------------------------------------------------------------
+
+
+def test_lobo_metrics_count_overestimates_in_the_unsafe_direction():
+    """Positive signed error must mean 'predicted MORE life than the bearing
+    had'. If this sign ever flips, every safety statement on the dashboard
+    inverts while the MAE column looks unchanged."""
+    df = _femto_learning_df(n_bearings=3)
+    results, predictions = leave_one_bearing_out_femto(df)
+
+    for column in ["median_abs_error_seconds", "mean_signed_error_seconds",
+                   "n_overestimates", "n_underestimates", "overestimate_rate"]:
+        assert column in results.columns
+
+    assert (results["n_overestimates"] + results["n_underestimates"] <= results["n"]).all()
+    assert ((results["overestimate_rate"] >= 0) & (results["overestimate_rate"] <= 1)).all()
+
+    # Recompute independently from the returned predictions.
+    for row in results.itertuples():
+        g = predictions[
+            (predictions["model"] == row.model) & (predictions["split"] == row.held_out_bearing)
+        ]
+        error = g["predicted_rul_seconds"] - g["actual_rul_seconds"]
+        assert row.n_overestimates == int((error > 0).sum())
+        assert row.mean_signed_error_seconds == pytest.approx(error.mean())
+
+
+def test_lobo_predictions_cover_every_held_out_row_exactly_once_per_model():
+    """The scatter plotted on the dashboard must be the same held-out data the
+    headline MAE came from - no row dropped, none counted twice."""
+    df = _femto_learning_df(n_bearings=3)
+    results, predictions = leave_one_bearing_out_femto(df)
+
+    assert len(predictions) == len(df) * 2  # every row held out once, per model
+    for model, g in predictions.groupby("model"):
+        assert len(g) == len(df)
+        assert g["split"].nunique() == df["bearing_run_id"].nunique()
+        # A bearing's predictions are only ever produced while it is held out.
+        assert (g["split"] == g["bearing_run_id"]).all()
+
+
+def test_summarize_predictions_agrees_with_the_per_fold_table():
+    """The pooled figure and the per-fold table are two views of one set of
+    predictions; they must not be able to disagree."""
+    df = _femto_learning_df(n_bearings=3)
+    results, predictions = leave_one_bearing_out_femto(df)
+    overall = summarize_predictions(predictions)
+
+    for model, g in results.groupby("model"):
+        assert overall[model]["n"] == int(g["n"].sum())
+        assert overall[model]["n_overestimates"] == int(g["n_overestimates"].sum())
+
+
+def test_college_walk_forward_predictions_stay_chronological():
+    """Fold k's predictions must all sit after fold k-1's - the whole point of
+    an expanding-window backtest on a single run."""
+    df = _bearing_df("college:nsk6205", "college_run", total_life_s=1000.0, n=200)
+    results, predictions = college_walk_forward(df, n_folds=4)
+
+    tree = predictions[predictions["model"] == "extra_trees"]
+    bounds = tree.groupby("split")["sequence_index"].agg(["min", "max"]).sort_index()
+    assert (bounds["min"].to_numpy()[1:] > bounds["max"].to_numpy()[:-1]).all()

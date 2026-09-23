@@ -254,3 +254,62 @@ Resolution: added `stages.UNKNOWN` (deliberately excluded from `STAGE_ORDER` - n
 **8. SECURITY MEDIUM - review deliverables directory had no `.gitignore` coverage.** `deliverables/review/` holds `REVIEW2_STATUS.md` (tracked, generated, meant to be committed) alongside several untracked large binaries and study material (two PPTX, a PDF, markdown explainers, `diagrams/`, `study_pdfs/` - none currently staged, but nothing prevented an accidental `git add` from picking them up). Added `deliverables/review/*` with `!deliverables/review/REVIEW2_STATUS.md` to `.gitignore` - narrow to that one directory, keeps the one file that should be tracked, does not touch or untrack anything else.
 
 **Not addressed, recorded as post-review technical debt:** `resolve_stored_path`'s `../` handling (flagged separately from this review) was left as-is - it is read-only, exercised only against paths this project itself writes into DuckDB/Parquet (`config/data_paths.toml`, feature-batch paths), and not on the Review 2 execution path. Revisit before treating this project's path handling as hardened against untrusted input.
+
+## D21: MAE alone hid that ExtraTrees over-predicts RUL on every college row (2026-09-23, found while completing the Streamlit Model Evaluation tab)
+
+`reports/metrics/rul_evaluation.json` reported only `mae_seconds`, `rmse_seconds` and
+`n` per fold. Those are magnitude-only: they say how far a prediction is from the truth,
+never which side of it. For RUL that distinction is the whole safety argument — predicting
+more remaining life than a bearing has schedules maintenance after the failure it was meant
+to prevent, while predicting less only retires the bearing early. The hidden-set path
+already encoded the asymmetry (`phm2012_score`, D17), but the two split schemes that produce
+the headline numbers did not.
+
+`_metrics()` in `evaluation.py` — the single helper both `leave_one_bearing_out_femto` and
+`college_walk_forward` use — now also returns `median_abs_error_seconds`,
+`mean_signed_error_seconds`, `n_overestimates`, `n_underestimates` and `overestimate_rate`.
+Sign convention matches `score_hidden_set`: positive error = over-estimate.
+
+What that exposed, on data that was already there:
+
+- **College walk-forward: ExtraTrees over-predicts 3023 of 3023 held-out rows — an
+  over-estimate rate of 1.000 in all three folds**, mean signed error +122,442 s (+34.0 h).
+  The MAE (122,442 s) was unchanged by this work and had been reported for weeks; nothing
+  in it revealed that the error is entirely one-directional, and the unsafe direction.
+- FEMTO leave-one-bearing-out is far better behaved: ExtraTrees over-estimates 3916 of 7534
+  held-out rows (0.520) with a mean signed error of −1,159 s, i.e. slightly conservative on
+  average. Naive over-estimates less often (0.411) but has a worse MAE (7,703 s vs 5,577 s).
+  ExtraTrees still loses to naive on 2 of 6 bearings.
+
+No metric moved: MAE and RMSE reproduce to full float precision before and after, confirming
+the refactor changed reporting only, not computation. The two split functions now return
+`(metrics, predictions)` instead of a single frame, and `evaluate_models.py` additionally
+writes `reports/metrics/rul_predictions.parquet` — the per-row held-out predictions the
+metrics were computed from, so the dashboard's actual-vs-predicted plot and the reported MAE
+cannot drift apart.
+
+Also fixed while verifying this: running `python scripts/*.py` from this clone imported
+`bearing_pdm` from a *different* clone of the same repository (the editable install's
+`.pth` points elsewhere), so scripts and `pytest` — which uses `pythonpath=["src"]` — were
+executing different source trees. Documented in the README as `PYTHONPATH=src`; no code
+change, since only one of the two clones can own the editable install.
+
+## D22: dashboard navigation moved from `st.tabs` to a sidebar radio so the controls can be context-sensitive (2026-09-23)
+
+The sidebar rendered a dataset, feature-batch, bearing and acquisition-index control on
+every view, including the two that ignore all four: Model Evaluation is pooled across every
+held-out fold, and Architecture & Limitations is static text. Moving a bearing selector and
+watching a cross-bearing MAE not change invites exactly the wrong conclusion about what the
+number means.
+
+Streamlit renders every `st.tabs` body on every script run - tabs are a CSS show/hide, not
+lazy-loaded - so the script cannot know which tab is in front and cannot vary the sidebar
+for it. The five views are therefore a `st.sidebar.radio`, and the bearing/window controls
+are built only when the selected view actually consumes them (`needs_selection`). The five
+view bodies are otherwise unchanged.
+
+Consequence for tests: `tests/test_dashboard.py` previously relied on one `.run()`
+exercising all five tab bodies at once, and asserted `len(at.tabs) == 5`. Each test now
+selects its view explicitly via `_open(view)`, and the count assertion became an assertion
+on the radio's five options. Two tests were added: one that the two cross-bearing views
+render no data selectors, and one that the data views still do.
