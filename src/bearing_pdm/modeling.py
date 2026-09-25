@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 from sklearn.ensemble import ExtraTreesRegressor
 
@@ -72,22 +73,64 @@ class TreeBaseline:
 
 
 def fit_tree_baseline(
-    df_train: pd.DataFrame, n_estimators: int = 100, max_nan_fraction: float = 0.2
+    df_train: pd.DataFrame, n_estimators: int = 100, max_nan_fraction: float = 0.2,
+    feature_columns: list[str] | None = None, target: str = TARGET_COLUMN,
+    sample_weight: np.ndarray | None = None,
 ) -> TreeBaseline:
     """ExtraTreesRegressor - documented reproduction-adjacent choice
     (command.md section 4/12.1), small n_estimators, fixed seed. Candidate
     columns with a high NaN rate are excluded (same fabrication concern as
-    docs/decisions.md D7 for health.py's PCA HI)."""
-    feature_columns = tuple(candidate_feature_columns(df_train, max_nan_fraction=max_nan_fraction))
+    docs/decisions.md D7 for health.py's PCA HI).
+
+    `feature_columns` pins an explicit feature list/order (the cross-dataset
+    experiments pin the frozen model's 44 columns so a refit is the same model);
+    `target`/`sample_weight` serve the life-fraction model below."""
+    if feature_columns is None:
+        feature_columns = candidate_feature_columns(df_train, max_nan_fraction=max_nan_fraction)
+    feature_columns = tuple(feature_columns)
     median_fill = df_train[list(feature_columns)].median().to_dict()
     x_train = df_train[list(feature_columns)].fillna(median_fill)
-    y_train = df_train[TARGET_COLUMN]
+    y_train = df_train[target]
 
     model = ExtraTreesRegressor(n_estimators=n_estimators, random_state=SEED, n_jobs=-1)
-    model.fit(x_train, y_train)
+    model.fit(x_train, y_train, sample_weight=sample_weight)
     return TreeBaseline(feature_columns=feature_columns, model=model, median_fill=median_fill)
 
 
 def predict_tree_baseline(df: pd.DataFrame, model: TreeBaseline) -> pd.Series:
     x = df[list(model.feature_columns)].fillna(model.median_fill)
     return pd.Series(model.model.predict(x), index=df.index)
+
+
+# ---------------------------------------------------------------------------
+# Life-fraction target (cross-domain model, docs/cross-dataset.md)
+# ---------------------------------------------------------------------------
+
+LIFE_FRACTION_COLUMN = "life_fraction"
+# A predicted fraction below this is floored before converting to seconds:
+# elapsed * (1 - f) / f diverges as f -> 0.
+MIN_LIFE_FRACTION = 0.05
+
+
+def bearing_balanced_weights(df: pd.DataFrame) -> np.ndarray:
+    """1 / (rows of that bearing): every training bearing gets equal total
+    weight. Recording counts differ 150x across datasets (XJTU Bearing2_4: 42,
+    IMS test 3: 6,324) - unweighted, the longest record would define the model."""
+    counts = df["bearing_run_id"].map(df["bearing_run_id"].value_counts())
+    return (1.0 / counts).to_numpy(dtype=float)
+
+
+def fraction_to_rul(life_fraction: np.ndarray, elapsed_s: np.ndarray) -> np.ndarray:
+    """RUL (s) implied by a life-fraction estimate at a known elapsed time:
+    total = elapsed / f, so RUL = elapsed * (1 - f) / f.
+
+    Elapsed time since installation is known online (the naive baseline uses it
+    too); f is predicted from self-normalised features only - elapsed never
+    enters the feature matrix (health.NON_FEATURE_COLUMNS). Exact when f is
+    exact, but convex and divergent as f -> 0, so a small error in an early-life
+    fraction becomes a large error in seconds. That is why cross-domain skill is
+    judged in life-fraction units first (docs/decisions.md D24, which also
+    records the rejected log-ratio target).
+    """
+    f = np.clip(np.asarray(life_fraction, dtype=float), MIN_LIFE_FRACTION, 1.0)
+    return np.asarray(elapsed_s, dtype=float) * (1.0 - f) / f

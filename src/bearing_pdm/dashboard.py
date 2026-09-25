@@ -76,7 +76,7 @@ def _list_batches() -> pd.DataFrame:
         ])
 
     paths = _load_paths()
-    con = get_connection(paths.duckdb_path)
+    con = get_connection(paths.duckdb_path, read_only=True)
     try:
         batches = con.execute(
             "SELECT dataset_id, feature_batch_id, parquet_path, row_count, code_version, created_at "
@@ -239,8 +239,22 @@ def main() -> None:
         )
 
     VIEWS = ["Signal & FFT", "Health Indicator", "RUL Prediction",
-             "Model Evaluation", "Architecture & Limitations"]
+             "Model Evaluation", "Architecture & Limitations",
+             "Universal Machine Analysis", "Cross-Dataset Validation"]
     view = st.sidebar.radio("View", VIEWS)
+
+    # The cross-dataset pages (dashboard_cross.py) carry their own dataset and
+    # bearing selectors and read their own artifacts, not the legacy batches.
+    if view in ("Universal Machine Analysis", "Cross-Dataset Validation"):
+        from bearing_pdm import dashboard_cross
+        if _cloud_mode():
+            st.info("The cross-dataset artifacts are not part of the deployment snapshot; "
+                    "run the pipeline locally (docs/cross-dataset.md).")
+        if view == "Universal Machine Analysis":
+            dashboard_cross.render_universal()
+        else:
+            dashboard_cross.render_validation()
+        return
 
     # Only the first three views are about one specific bearing and window.
     # Model Evaluation is cross-bearing and Architecture is static, so their
@@ -675,6 +689,14 @@ def main() -> None:
             "  -> RUL regression                    modeling.py  (ExtraTrees + naive baseline)\n"
             "  -> leakage-safe evaluation           evaluation.py (leave-one-bearing-out / walk-forward)\n"
             "  -> this dashboard                    dashboard.py (reads cached artifacts only)\n"
+            "```\n"
+            "Cross-dataset path (FEMTO, college, IMS, XJTU-SY; docs/cross-dataset.md):\n"
+            "```\n"
+            "any dataset folder -> profiler.py (profile, quality) -> adapters.py (canonical recording)\n"
+            "  -> pipeline.canonical_feature_row (0.1 s windows, real sampling rate)\n"
+            "  -> domain.py (self-normalised features) -> applicability.py (HIGH/MEDIUM/LOW)\n"
+            "  -> HI + stage | RUL + conformal interval (uncertainty.py)\n"
+            "  -> routing.py: RUL available / experimental / SUPPRESSED (health always shown)\n"
             "```"
         )
         st.markdown(

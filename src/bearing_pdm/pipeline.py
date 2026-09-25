@@ -16,11 +16,13 @@ from collections.abc import Iterator
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from bearing_pdm.college import CollegeFile, read_college_chunks
 from bearing_pdm.features import (
     frequency_domain_features,
+    signal_quality,
     temperature_features,
     time_domain_features,
 )
@@ -199,3 +201,107 @@ def build_femto_feature_rows(
             row.update(temperature_features(pd.Series([], dtype="float64").to_numpy(), "bearing_temp"))
 
         yield row
+
+
+# ---------------------------------------------------------------------------
+# Canonical (cross-dataset) feature rows - docs/cross-dataset.md
+# ---------------------------------------------------------------------------
+
+CANONICAL_SCHEMA_VERSION = "canonical-v1"
+
+# Every vibration feature is computed on windows of the SAME PHYSICAL DURATION,
+# whatever the source's sampling rate or recording length, then the per-window
+# values are aggregated by their median. 0.1 s is FEMTO's native acquisition
+# length, so a FEMTO recording is exactly one window and its canonical features
+# are identical to build_femto_feature_rows'. Duration matters because
+# kurtosis / crest factor / peak count how many impacts a window captures: a
+# 78 s college file and a 0.1 s FEMTO snapshot are not comparable otherwise.
+# Median over windows also makes one transient in a long recording harmless.
+CANONICAL_WINDOW_S = 0.1
+
+
+def _vibration_features(x: np.ndarray, sample_rate_hz: float, prefix: str,
+                        window_s: float) -> tuple[dict[str, float], int]:
+    """(median features over fixed-duration windows, number of windows).
+    Non-finite samples are treated as not recorded (NaN) - features.py drops
+    NaN, and an inf would otherwise poison every moment."""
+    x = np.where(np.isfinite(x), x, np.nan)
+    n_win = int(round(window_s * sample_rate_hz))
+    starts = range(0, len(x) - n_win + 1, n_win) if len(x) >= n_win else [0]
+    per_window = [
+        {**time_domain_features(x[s:s + n_win], prefix),
+         **frequency_domain_features(x[s:s + n_win], sample_rate_hz, prefix)}
+        for s in starts
+    ]
+    return pd.DataFrame(per_window).median().to_dict(), len(per_window)
+
+
+def canonical_feature_row(rec, window_s: float = CANONICAL_WINDOW_S) -> dict:
+    """One feature row for one canonical `adapters.Recording`. Same column names
+    as the existing FEMTO/college rows, so the frozen models can consume it;
+    a vibration channel the source lacks yields NaN features (never filled)."""
+    run = rec.run
+    fs = run.sampling_rate_hz
+    row: dict = {
+        "dataset_id": run.dataset_id,
+        "bearing_run_id": run.run_id,
+        "role": run.role,
+        "recording_id": rec.recording_id,
+        "source_file_path": Path(rec.source_path).as_posix(),
+        "sequence_index": rec.sequence_index,
+        "elapsed_s": float(rec.elapsed_s),
+        "event_timestamp": rec.timestamp,
+        "sample_rate_hz": fs,
+        "rpm": run.rpm,
+        "radial_load_n": run.radial_load_n,
+        "operating_condition": run.operating_condition,
+        "recording_interval_s": run.recording_interval_s,
+        "run_to_failure": run.run_to_failure,
+        "schema_version": CANONICAL_SCHEMA_VERSION,
+    }
+    n_windows = 0
+    for ch in ("vibration_x", "vibration_y"):
+        x = rec.signals.get(ch)
+        if x is None:
+            row.update(time_domain_features(np.array([]), ch))
+            row.update(frequency_domain_features(np.array([]), fs, ch))
+            row.update(signal_quality(np.array([]), ch))
+            continue
+        feats, n = _vibration_features(np.asarray(x, dtype="float64"), fs, ch, window_s)
+        row.update(feats)
+        row.update(signal_quality(x, ch))
+        n_windows = max(n_windows, n)
+    row["n_windows"] = n_windows
+    row["n_samples"] = max((len(v) for v in rec.signals.values()), default=0)
+
+    bearing_t = rec.signals.get("temperature_bearing", np.array([]))
+    ambient_t = rec.signals.get("temperature_ambient", np.array([]))
+    row.update(temperature_features(bearing_t, "bearing_temp"))
+    if len(ambient_t):
+        row.update(temperature_features(ambient_t, "ambient_temp"))
+        row.update(temperature_features(bearing_t - ambient_t, "bearing_minus_ambient_temp"))
+    return row
+
+
+def build_canonical_features(adapter, run, window_s: float = CANONICAL_WINDOW_S) -> pd.DataFrame:
+    """All recordings of one bearing -> feature frame with labels.
+
+    RUL is defined identically for every dataset: time from this recording to
+    the bearing's LAST recording (`rul_seconds`), and `life_fraction` =
+    elapsed / that total. Both are NaN unless the run is a complete
+    run-to-failure record - a censored FEMTO prefix or an IMS survivor has no
+    known end of life, and inventing one would be a fabricated label.
+    (The legacy college rows add one file duration, +78 s, to the end time;
+    the canonical definition does not, so all datasets share one convention.)
+    """
+    df = pd.DataFrame([canonical_feature_row(r, window_s) for r in adapter.recordings(run)])
+    if df.empty:
+        return df
+    total = float(df["elapsed_s"].max())
+    if run.run_to_failure and total > 0:
+        df["rul_seconds"] = total - df["elapsed_s"]
+        df["life_fraction"] = df["elapsed_s"] / total
+    else:
+        df["rul_seconds"] = np.nan
+        df["life_fraction"] = np.nan
+    return df

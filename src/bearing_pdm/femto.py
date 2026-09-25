@@ -191,6 +191,7 @@ def find_nearest_temperature_index(
     acc_index: int,
     temp_time_index: dict[int, float] | None = None,
     tolerance_s: float = DEFAULT_TEMP_ALIGN_TOLERANCE_S,
+    acc_time_s: float | None = None,
 ) -> int | None:
     """Nearest-wall-clock-time temp file index for a given acc file, within
     tolerance_s. Returns None (temp_available=False) if no temp files exist
@@ -209,8 +210,11 @@ def find_nearest_temperature_index(
     if not temp_time_index:
         return None
 
-    acc_first_row = read_acceleration(bearing_dir, acc_index).iloc[0]
-    acc_t = _seconds_of_day(acc_first_row)
+    # Callers that already hold the acc file pass its time (`acc_time_s`) to
+    # avoid reading it a second time.
+    if acc_time_s is None:
+        acc_time_s = _seconds_of_day(read_acceleration(bearing_dir, acc_index).iloc[0])
+    acc_t = acc_time_s
 
     best_idx, best_diff = None, None
     for t_idx, t_time in temp_time_index.items():

@@ -176,3 +176,39 @@ def temperature_features(temp: np.ndarray, prefix: str) -> dict[str, float]:
         f"{prefix}_mean": mean, f"{prefix}_min": t_min, f"{prefix}_max": t_max,
         f"{prefix}_std": std, f"{prefix}_slope": slope,
     }
+
+
+# A saturated/clipped sensor sits on its rail for many consecutive samples. For
+# a genuine signal only a handful of samples come within 0.1% of the absolute
+# peak, so >= 0.1% of ALL samples sitting there is the saturation signature.
+CLIP_PEAK_TOLERANCE = 1e-3
+CLIP_FRACTION_LIMIT = 1e-3
+
+
+def signal_quality(x: np.ndarray, prefix: str) -> dict[str, float]:
+    """Data-quality descriptors for one raw channel (never used as model
+    features - the `qc_` prefix keeps them out of health.candidate_feature_columns).
+
+    NaN = not recorded; +/-inf counted separately as non-finite corruption.
+    `constant` covers both a dead channel (all-equal) and an all-missing one.
+    """
+    x = np.asarray(x, dtype="float64")
+    n = int(x.size)
+    finite = x[np.isfinite(x)]
+    nan_fraction = float(np.isnan(x).mean()) if n else 1.0
+    nonfinite = int(np.isinf(x).sum())
+    if finite.size == 0:
+        constant, clip_fraction = 1.0, float("nan")
+    else:
+        constant = float(np.ptp(finite) == 0)
+        peak = float(np.max(np.abs(finite)))
+        clip_fraction = (
+            float(np.mean(np.abs(finite) >= peak * (1 - CLIP_PEAK_TOLERANCE))) if peak > 0 else 0.0
+        )
+    return {
+        f"qc_{prefix}_n_samples": float(n),
+        f"qc_{prefix}_nan_fraction": nan_fraction,
+        f"qc_{prefix}_nonfinite": float(nonfinite),
+        f"qc_{prefix}_constant": constant,
+        f"qc_{prefix}_clip_fraction": clip_fraction,
+    }

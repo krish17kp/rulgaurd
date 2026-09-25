@@ -167,3 +167,14 @@ def load_data_paths(config_path: str | Path) -> DataPaths:
         interim_dir=Path(output["interim_dir"]),
         duckdb_path=Path(output["duckdb_path"]),
     )
+
+
+def dataset_root(paths: DataPaths, dataset: str, role: str | None = None) -> Path:
+    """Configured raw-data root for FEMTO (per role) and the college run. External
+    datasets (IMS, XJTU-SY) have no config entry - pass their root explicitly."""
+    if dataset == "college":
+        return paths.college_raw_dir
+    if dataset == "femto":
+        return {"learning": paths.femto_training_dir, "test_censored": paths.femto_test_dir,
+                "full_test": paths.femto_validation_dir}[role or "learning"]
+    raise ValueError(f"no configured root for dataset '{dataset}' - pass --root")

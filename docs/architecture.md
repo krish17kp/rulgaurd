@@ -25,6 +25,13 @@ flowchart LR
     SVC --> UI
 ```
 
+## Cross-dataset path (M10)
+
+Any supported dataset goes `adapter -> canonical Recording -> canonical_feature_row -> SN
+features -> applicability -> HI/RUL -> conformal interval -> routing`; unknown folders stop
+after `profiler.profile_folder`. Full diagram, dataset differences and limitations:
+`docs/cross-dataset.md`.
+
 ## Trust boundaries
 - Raw archives (`datasets/femto/*.zip`, `datasets/college/*.csv`) are read-only inputs, published in this repo via Git LFS, never modified by the pipeline.
 - `context/` is local-only input (papers, literature draft), never a runtime dependency of the shipped app.

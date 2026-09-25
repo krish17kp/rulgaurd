@@ -313,3 +313,143 @@ exercising all five tab bodies at once, and asserted `len(at.tabs) == 5`. Each t
 selects its view explicitly via `_open(view)`, and the count assertion became an assertion
 on the radio's five options. Two tests were added: one that the two cross-bearing views
 render no data selectors, and one that the data views still do.
+
+## D23: cross-dataset architecture - adapters, one canonical recording, fixed-duration windows, self-normalised features (2026-09-25)
+
+The goal was to run the pipeline on bearing datasets other than FEMTO without scattering
+`if dataset == ...` through the code. Decisions, each with its reason:
+
+- **Adapters, not a second pipeline.** `adapters.py` maps each source (FEMTO, college, IMS,
+  XJTU-SY) onto one `BearingRun`/`Recording` format; the parsing modules stay
+  dataset-specific. `pipeline.canonical_feature_row` reuses the existing `features.py`
+  formulas, so the frozen FEMTO model sees exactly the inputs it was trained on: verified
+  bit-identical against the legacy builder on all 7,534 learning rows x 49 feature columns
+  during development, and on the fixture in `tests/test_cross_dataset.py`.
+- **Fixed physical window (0.1 s) at the real sampling rate, median over windows.** Kurtosis
+  and crest factor depend on how many impacts a window contains, so a 78 s college file and a
+  0.1 s FEMTO snapshot are not comparable as single windows. 0.1 s is FEMTO's native length,
+  which is what keeps the legacy features identical.
+- **No resampling.** IMS is 20 kHz; FFT features use each recording's own rate.
+- **Self-normalised (SN) features for cross-domain work** (`domain.py`): log-ratio / difference
+  to the bearing's own early reference window. Unit-invariant (the college unit is not stated)
+  and causal; per-dataset reference windows fixed a priori from acquisition cadence.
+- **One RUL convention**: time to the bearing's last recording. The legacy college rows add one
+  file duration (+78 s); the canonical rows do not, so all four datasets share one rule.
+- Found and fixed while building it: XJTU-SY uses the same `BearingC_N` folder names as FEMTO,
+  so the FEMTO adapter recognised XJTU bearings as FEMTO. The adapter now also requires
+  `acc_NNNNN.csv` acquisitions (test added). The profiler's IMS file detection missed every
+  file because timestamp names such as `2004.02.12.10.32.39` have the "suffix" `.39` (fixed,
+  tested).
+- Also fixed: the dashboard opened DuckDB read-write, so it failed on a read-only mount (7 of
+  143 tests failed there); it now uses `get_connection(..., read_only=True)`.
+
+## D24: cross-domain target - life fraction, judged against a constant guess; log-ratio rejected (2026-09-25)
+
+The SN model needs a time-scale-free target, because lives differ ~1000x across datasets
+(FEMTO 1-8 h, IMS days). First version: regress life fraction f and convert with
+`RUL = elapsed * (1 - f) / f`. In the first cross-dataset run (FEMTO + college only) this
+over-estimated RUL on almost every college recording: the conversion is convex and diverges
+as f -> 0, so averaging an uncertain f and then converting biases RUL upward.
+
+Hypothesis tested: regress y = log(RUL/elapsed) = -logit(f) instead, so trees average in log
+space. **Rejected on evidence**: it was worse in seconds and in life-fraction units on every
+split (`scripts/compare_cross_domain_targets.py` -> `reports/metrics/
+cross_domain_target_comparison.json`). The same comparison exposed the real issue: on most
+FEMTO held-out bearings **neither** target beats a label-free constant guess f = 0.5 (the
+constant scores ~0.23-0.25 life-fraction MAE; both targets score ~0.18-0.33), even though
+the ranking signal is real (Spearman 0.29-0.71 on five of six bearings). During FEMTO's long
+flat healthy phase nothing observable distinguishes 20% from 70% of life.
+
+Resolution: keep the life-fraction target (bounded error, slightly better); report every
+model's skill in life-fraction units as `1 - MAE / MAE(constant 0.5)` alongside seconds; and
+make routing refuse any model whose own out-of-fold validation shows no skill (routing.py).
+
+## D25: IMS set 3 truncated at its documented end (2026-09-25)
+
+The official NASA archive's set-3 folder (`4th_test/txt`) holds 6,324 files running to
+2004-04-18 02:42:55. The readme documents set 3 as 4,448 files ending 2004-04-04 19:01:57,
+and file #4,448 on disk is exactly that timestamp: the readme describes a prefix of the
+archive, and 1,876 later files (13.3 days) are undocumented. Labelling them as the approach to
+the documented outer-race failure of bearing 3 would move every set-3 RUL label by 13 days on
+no evidence. `ims.IMS_DOCUMENTED_END` truncates set 3 at the documented end (test added);
+sets 1 and 2 match the readme exactly. The first full cross-dataset run used all 6,324 files;
+it was discarded and re-run after this fix.
+
+## D27: routing corrections - causal per-recording decisions, no in-sample applicability, per-dataset skill (2026-09-25, independent review + own verification)
+
+Three defects in the first routing implementation, each of which made the system look more
+confident than the evidence allows:
+
+1. **Non-causal decision** (found by the independent methodology review). Applicability was
+   assessed over a bearing's *entire* record and one status was stamped on every recording,
+   so the decision shown for recording k depended on recordings after k. Fix:
+   `applicability.causal_levels` (expanding-median shift, expanding missing-feature fraction,
+   cumulative life-scale flag) and per-recording routing (`rul_status`, `rul_model`). The
+   whole-run assessment is kept only as a labelled retrospective summary; at the last
+   recording the two agree (tested). Test: dropping later recordings leaves every earlier
+   decision and prediction unchanged.
+2. **In-sample applicability** (found when every college/IMS/XJTU bearing came out
+   `RUL_AVAILABLE`). Out-of-fold *predictions* were already used for bearings inside a
+   model's training set, but their *applicability* was still measured against a reference
+   containing the same bearing - distance ~0, always HIGH. Fix: `exclude_bearing` drops the
+   bearing's reference rows and its own in-domain distance before assessing it (tested).
+3. **One global skill number.** A model was eligible if it beat the constant guess on average
+   over all datasets, although its skill differs by dataset (the multi-dataset model is
+   negative on college). Fix: `Candidate.skill_by_dataset` - the held-out skill measured on
+   that dataset, and for a machine type never seen, the evidence that actually applies to one:
+   mean zero-shot skill (raw FEMTO model) or mean leave-one-domain-out skill (multi-dataset
+   model). Values are written to `cross_dataset.json["routing_skill_by_dataset"]`.
+
+Also from the review: a stale `cross_dataset.json` made the dashboard raise `KeyError`; the
+file now carries `schema_version` and the dashboard asks for regeneration instead. Partly
+missing model features (10-50% of recordings) now cap applicability at MEDIUM, because
+missing values sit at the training median inside the distance (no current bearing is in that
+band, so no reported number moved).
+
+## D26: health indicator across datasets - FEMTO cadence constants removed; fused SN HI misses the college failure; amplitude SN HI added (2026-09-25)
+
+Found by plotting the college HI: the FEMTO-fit HI stayed "healthy" through the college
+bearing's failure. Two causes, one of them a bug.
+
+1. **Bug: FEMTO-cadence counts applied to every dataset.** The trailing HI smoothing (11
+   recordings) and the stage persistence (5 recordings) were calibrated on FEMTO, where a
+   recording is one noisy 0.1 s snapshot every 10 s: 110 s and 50 s. On the hourly college
+   data they meant 11 hours and 5 hours, longer than its ~4-hour terminal cliff, so the
+   cliff was smoothed away and a stage change could never commit. Fix (a priori, from data
+   geometry, not from results): smooth over ~11 fixed 0.1 s windows in total - FEMTO keeps
+   11 and 5; IMS, XJTU-SY and college recordings are already medians of 10-780 windows, so
+   both counts are 1 (`adapters.DatasetAdapter.hi_smooth_window` / `stage_persistence`,
+   tested). The legacy FEMTO HI and stages are unchanged.
+2. **Finding: the college failure is not impulsive.** Its vibration RMS drifts slowly *down*
+   for ~120 of 128 hours, then rises ~4-5x in the last ~4 hours while bearing temperature
+   passes 85 °C; kurtosis, crest, impulse and clearance factors *fall* toward failure and the
+   late spectrum is broadband (`reports/figures/college_feature_trends.png`,
+   `college_fft.png`). A fused HI that averages amplitude with impulsiveness cancels itself on
+   this machine.
+
+Resolution: a second cross-domain HI on SN log-RMS and log-peak-to-peak only
+(`experiments.CROSS_DOMAIN_HIS["amplitude_hi"]`) - energy growth, the generic degradation
+signature - chosen **after** seeing the college result, so all three HIs are always reported
+(`docs/cross-dataset-results.md`, "Health indicator across datasets"). Mean Spearman(HI,
+elapsed), amplitude vs fused SN HI: FEMTO -0.259 vs -0.717 (amplitude is worse), IMS -0.682 vs
+-0.341, XJTU-SY -0.636 vs -0.408 (amplitude is better); prognosability FEMTO 0.729 vs 0.898,
+IMS 0.482 vs 0.366, XJTU-SY 0.766 vs 0.438. Routing uses the amplitude HI for the displayed
+degradation stage because it is the one that detects failure on the three non-FEMTO machines:
+on college its stage reaches DEGRADING three recordings (~3 h) and CRITICAL one recording
+before the end of the run (the fused HI never reaches CRITICAL there).
+
+No single HI is best everywhere, and on college **no** HI is monotone over the whole life -
+Spearman(HI, elapsed) is positive (0.363 / 0.463 / 0.479) because vibration genuinely falls for
+most of the run. The HI is therefore a late-failure detector on that machine, not a
+degradation-progress gauge; reported as such.
+
+Stage sensitivity, measured after this change (amplitude-HI stage,
+`reports/metrics/cross_dataset_health.parquet`): among recordings before 80% of each bearing's
+life, the share already flagged DEGRADING or CRITICAL is college 21.4% (n = 103), FEMTO 31.7%
+(n = 6,024, its own training domain, persistence 5), IMS 38.8% (n = 7,206), XJTU-SY 23.4%
+(n = 7,365). "Before 80% of life" is not ground truth for "healthy" (several bearings degrade
+early), so these are not all false alarms, but the conclusion stands: DEGRADING is a
+sensitive early flag, not a failure prediction. On college specifically, the FEMTO-fit
+healthy-band edge (HI 0.928) lies inside the machine's own hour-to-hour variation, so the stage
+flickers during the first ~35% of life; the thresholds are deliberately not re-tuned on the one
+college run.

@@ -45,3 +45,6 @@ Thumbs.db
 # tracked
 deliverables/review/*
 !deliverables/review/REVIEW2_STATUS.md
+
+# local run logs
+logs/

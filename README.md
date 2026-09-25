@@ -7,19 +7,22 @@ Research capstone project. Estimates rolling-bearing degradation state and Remai
 - **Accelerated review MVP (deadline 2026-07-25): DONE.** Milestones M0-M4 plus a minimal M8 (Streamlit dashboard) are complete, each backed by a real-data run with evidence under `artifacts/evidence/REVIEW-M*/`.
 - **Post-review work continued: M4b and M5 are also DONE (2026-08-30).** M4b scored the FEMTO hidden set (`Full_Test_Set`) for the first genuinely out-of-sample result; M5 added degradation-stage classification (HEALTHY/DEGRADING/CRITICAL) on top of a corrected health indicator. See `docs/decisions.md` D13-D20.
 - **M6 (optional 1D-CNN-over-HI), M7 (RAG/local-LLM report generation), and M9 (final reproducibility/scientific audit) remain deferred** — no work has started on them. See `docs/milestone.md` and `TODO.md` for the authoritative per-task status.
+- **Cross-dataset framework (M10, 2026-09-25): DONE on branch `cross-dataset`.** Dataset adapters for FEMTO, the college rig, IMS (NASA) and XJTU-SY map every source onto one canonical recording format; a dataset profiler handles unknown folders; a model-applicability (OOD) layer returns HIGH/MEDIUM/LOW with reasons; RUL comes with conformal prediction intervals and is **suppressed** when no validated model is applicable. Zero-shot, calibrated, within-domain and multi-dataset experiments are reported in `docs/cross-dataset-results.md` (generated); design and limitations in `docs/cross-dataset.md`; dataset provenance in `docs/external-datasets.md`.
 - Do not read "review-ready" as "feature-complete." It means the reviewed subset is real, tested, and honestly reported — not that every planned capability exists yet.
 
 ## Known limitations (stated up front, not buried)
 
 1. The college dataset is a **single bearing run-to-failure trajectory** (129 hourly files, one NSK 6205 bearing). There is no cross-bearing generalization claim from it.
 2. College's naive RUL baseline scores a mathematically trivial `MAE=0.0` — this is an identity of how the label is defined on an uncensored single run, **not evidence of a working predictor**. See `docs/decisions.md` D10. Only the `extra_trees` college numbers are real evidence.
-3. FEMTO-trained models (fit only on the 6 FEMTO `Learning_set` bearings) are **never applied to college data** — the dashboard explicitly gates on dataset and shows a domain-mismatch message instead of a silently-wrong number (`docs/decisions.md` D11).
+3. FEMTO-trained models are applied to college, IMS and XJTU-SY **only as labelled zero-shot experiments**; they fail where the machine's life time-scale differs from FEMTO's, the applicability layer marks those bearings LOW, and routing suppresses RUL for them (`docs/cross-dataset.md`). The legacy HI/RUL dashboard tabs keep their FEMTO gate (D11).
 4. No physical fault-type diagnosis (inner/outer race, ball, lubrication) is claimed anywhere — this is RUL regression, not fault diagnosis, and bearing-frequency (BPFO/BPFI/BSF/FTF) claims require verified geometry this project does not have.
 5. College feature extraction currently uses a 1-in-5 file sample (26/129 files) for the review run, not the full archive — see `reports/verification/review-readiness.md` for why and what a full run would need.
 6. `Validation_Set/Full_Test_Set` (FEMTO's hidden RUL continuation) **has been scored** (M4b, 2026-08-30): ExtraTrees MAE 4,555s vs. naive 5,204s (~1.14x better), PHM2012 score 0.068 vs. 0.029. It beats the naive baseline out-of-sample, but absolute accuracy is poor and 8/11 predictions err in the unsafe (over-estimate) direction. See `docs/decisions.md` D16/D17/D20.
 7. Degradation stages (M5) are a severity band on the health indicator, not a fault type, and warning lead time varies enormously across bearings (14,740s down to 120s) because FEMTO degradation is flat-then-cliff — reported, not hidden. See `docs/decisions.md` D18/D19.
 
 ## Architecture
+
+Cross-dataset path (M10): `adapters.py` -> canonical recording -> quality checks -> fixed-duration-window features + self-normalised features -> applicability/OOD -> HI / RUL -> conformal uncertainty -> deterministic routing (RUL or health-only). Diagram and rationale: `docs/cross-dataset.md`.
 
 Two independent adapters (`femto.py`, `college.py`) normalize into one canonical feature-row contract (`docs/data-contract.md`), features land in Parquet with DuckDB lineage/metadata (never raw high-frequency rows), then health indicator -> RUL model (+ degradation-stage classification) -> Streamlit dashboard. Full diagram and trust boundaries in `docs/architecture.md`.
 

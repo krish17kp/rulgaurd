@@ -28,7 +28,21 @@ NON_FEATURE_COLUMNS = {
     # listed so that persisting them later can never turn a model output into a
     # RUL input (.claude/rules/ml-data.md: no target-derived features).
     "health_indicator", "hi_degradation_score",
+    # Canonical cross-dataset metadata (pipeline.canonical_feature_row).
+    # `elapsed_s` and `life_fraction` are time/target-derived: a tree given
+    # elapsed time learns the label's own definition (docs/decisions.md D10).
+    # Operating metadata (rpm, load, rate) is used by the applicability layer,
+    # never as a RUL feature - across datasets it would just encode dataset
+    # identity.
+    "recording_id", "elapsed_s", "life_fraction", "rpm", "radial_load_n",
+    "operating_condition", "recording_interval_s", "run_to_failure", "n_windows",
+    # Experiment bookkeeping (experiments.prepare). `total_life_s` is a
+    # function of the bearing's end of life - pure future.
+    "total_life_s", "evaluable",
 }
+
+# Data-quality descriptors (features.signal_quality) are never model inputs.
+QUALITY_COLUMN_PREFIX = "qc_"
 
 TRANSPARENT_HI_FEATURES = [
     "vibration_x_rms", "vibration_y_rms", "vibration_x_kurtosis", "vibration_y_kurtosis",
@@ -43,7 +57,8 @@ def candidate_feature_columns(df: pd.DataFrame, max_nan_fraction: float = 1.0) -
     would fabricate a signal for a sensor that was never present, not fill
     a rare small gap. `max_nan_fraction` (used by fit_pca_hi) filters those
     out structurally instead of silently median-filling them."""
-    cols = [c for c in df.columns if c not in NON_FEATURE_COLUMNS]
+    cols = [c for c in df.columns
+            if c not in NON_FEATURE_COLUMNS and not c.startswith(QUALITY_COLUMN_PREFIX)]
     if max_nan_fraction >= 1.0:
         return cols
     return [c for c in cols if df[c].isna().mean() <= max_nan_fraction]
@@ -445,7 +460,11 @@ def fit_reference_hi(
     )
 
 
-def apply_reference_hi(df: pd.DataFrame, model: ReferenceHIModel) -> pd.Series:
+def apply_reference_hi(
+    df: pd.DataFrame, model: ReferenceHIModel,
+    reference_window: tuple[int, int] | None = None,
+    smooth_window: int | None = None,
+) -> pd.Series:
     """HI in the OPEN interval (0, 1): ~0.95 at the bearing's own healthy
     reference, ~0.05 at the failure anchor.
 
@@ -456,11 +475,18 @@ def apply_reference_hi(df: pd.DataFrame, model: ReferenceHIModel) -> pd.Series:
     from train; the per-bearing healthy reference is recomputed here from this
     frame's own leading window, so a bearing the model has never seen is
     normalised against itself, not against the training population's level.
+
+    `reference_window` = (skip, n) overrides the FEMTO-fit window for a dataset
+    with a different acquisition cadence (adapters.DatasetAdapter.reference_window):
+    50 FEMTO acquisitions are ~8 minutes, 50 college recordings ~40% of its run.
+    `smooth_window` likewise overrides the trailing-median width
+    (adapters.DatasetAdapter.hi_smooth_window).
     """
+    skip, n_ref = reference_window or (model.reference_skip, model.reference_n)
     matrix = _reference_hi_matrix(df, model.features, model.log_features)
-    centered = _per_bearing_reference(df, matrix, model.reference_skip, model.reference_n)
+    centered = _per_bearing_reference(df, matrix, skip, n_ref)
     score = _degradation_score(
-        df, centered, list(model.features), model.scales, model.smooth_window
+        df, centered, list(model.features), model.scales, smooth_window or model.smooth_window
     )
     midpoint = 0.5 * (model.healthy_score + model.failure_score)
     # /6 puts the healthy anchor near 0.95 and the failure anchor near 0.05.
@@ -505,3 +531,53 @@ def reference_hi_diagnostics(df: pd.DataFrame, hi: pd.Series) -> pd.DataFrame:
             "monotonicity": float(np.abs(np.mean(np.sign(diffs)))) if diffs.size else float("nan"),
         })
     return pd.DataFrame(rows)
+
+
+def prognostic_metrics(df: pd.DataFrame, hi: pd.Series, end_fraction: float = 0.05) -> dict:
+    """HI suitability over complete runs (Coble & Hines 2009 definitions),
+    for comparing one HI across datasets. Evaluation only - nothing is fit.
+
+    monotonicity   |#(dHI>0) - #(dHI<0)| / (n-1) per bearing, averaged
+    trendability   min over bearings of |Spearman(HI, elapsed)| - the worst
+                   bearing, since an HI must trend on every bearing to be usable
+    prognosability exp(-std(HI at failure) / mean|HI at start - HI at failure|)
+                   across bearings: 1 = every bearing fails at the same HI level
+    spearman_rul   Spearman(HI, RUL) per bearing (positive = HI falls as life runs out)
+    Start/end values are medians over the first/last `end_fraction` of each run.
+    """
+    tmp = df.assign(_hi=np.asarray(hi, dtype=float))
+    rows, starts, ends = [], [], []
+    time_col = "elapsed_s" if "elapsed_s" in tmp else "sequence_index"
+    for bearing, g in tmp.sort_values("sequence_index").groupby("bearing_run_id"):
+        v = g["_hi"].to_numpy()
+        ok = np.isfinite(v)
+        if ok.sum() < 3:
+            continue
+        v, t = v[ok], g[time_col].to_numpy()[ok]
+        d = np.diff(v)
+        k = max(1, int(len(v) * end_fraction))
+        starts.append(float(np.median(v[:k])))
+        ends.append(float(np.median(v[-k:])))
+        rul = g["rul_seconds"].to_numpy()[ok] if "rul_seconds" in g else np.full(len(v), np.nan)
+        rows.append({
+            "bearing_run_id": bearing, "n": int(len(v)),
+            "monotonicity": float(abs((d > 0).sum() - (d < 0).sum()) / max(1, len(d))),
+            "spearman_elapsed": float(pd.Series(v).corr(pd.Series(t), method="spearman")),
+            "spearman_rul": float(pd.Series(v).corr(pd.Series(rul), method="spearman"))
+            if np.isfinite(rul).sum() > 2 else float("nan"),
+            "hi_start": starts[-1], "hi_end": ends[-1],
+        })
+    per = pd.DataFrame(rows)
+    if per.empty:
+        return {"per_bearing": [], "n_bearings": 0}
+    spread = np.mean(np.abs(np.array(starts) - np.array(ends)))
+    prognosability = float(np.exp(-np.std(ends) / spread)) if len(ends) > 1 and spread > 0 else float("nan")
+    return {
+        "n_bearings": int(len(per)),
+        "monotonicity_mean": float(per["monotonicity"].mean()),
+        "trendability_min_abs_spearman": float(per["spearman_elapsed"].abs().min()),
+        "spearman_elapsed_mean": float(per["spearman_elapsed"].mean()),
+        "spearman_rul_mean": float(per["spearman_rul"].mean()),
+        "prognosability": prognosability,
+        "per_bearing": per.to_dict(orient="records"),
+    }

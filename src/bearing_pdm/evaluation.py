@@ -18,7 +18,10 @@ from bearing_pdm.modeling import (
     predict_tree_baseline,
 )
 
-ALLOWED_FIT_ROLES = {"learning", "college_run"}
+# `run_to_failure` = a complete external record (IMS failed bearing, XJTU-SY).
+# `test_censored`, `full_test` (FEMTO hidden set) and `survivor` (IMS bearing
+# that never failed - no end of life) are never fit on.
+ALLOWED_FIT_ROLES = {"learning", "college_run", "run_to_failure"}
 
 
 def assert_no_leakage(df: pd.DataFrame, allowed_roles: set[str] = ALLOWED_FIT_ROLES) -> None:

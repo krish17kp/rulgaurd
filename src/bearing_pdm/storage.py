@@ -51,8 +51,13 @@ _ACQUISITION_COLUMNS = [
 ]
 
 
-def get_connection(duckdb_path: str | Path) -> duckdb.DuckDBPyConnection:
+def get_connection(duckdb_path: str | Path, read_only: bool = False) -> duckdb.DuckDBPyConnection:
+    """`read_only=True` is for readers (the dashboard): no schema DDL, no write
+    lock, and it works on a read-only mount or while a pipeline run holds the
+    writer lock."""
     path = Path(duckdb_path)
+    if read_only:
+        return duckdb.connect(str(path), read_only=True)
     path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(path))
     for stmt in _DDL_STATEMENTS:

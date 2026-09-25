@@ -89,5 +89,16 @@ Evidence: `artifacts/evidence/REVIEW-M8/`.
 ## M9 - reproducibility and final capstone audit (post-review)
 Clean-environment run-through, final Ponytail-style simplicity pass, final scientific audit, no stale docs.
 
+## M10 - cross-dataset / adaptive framework (DONE 2026-09-25, branch `cross-dataset`)
+Adapters (FEMTO, college, IMS, XJTU-SY) onto one canonical recording; dataset profiler and
+full data-quality audit; fixed-duration-window common features with real sampling rates;
+self-normalised cross-domain features; model applicability (HIGH/MEDIUM/LOW + reasons);
+tree-spread diagnostic and weighted split-conformal intervals; deterministic, causal
+per-recording routing that suppresses RUL; zero-shot / calibrated / within-domain /
+multi-dataset experiments; two new dashboard pages. Acceptance: legacy features reproduced
+bit-identically through the adapter path; bearing-level leakage guards tested; every metric
+generated (`docs/cross-dataset-results.md` from `reports/metrics/cross_dataset.json`); full
+suite green. Design: `docs/cross-dataset.md`; decisions D23-D26.
+
 ## Stop conditions (any milestone)
 Archive corruption, schema materially differs from `Description.txt`, units unknown affecting targets, Full_Test_Set RUL derivation mismatch, leakage detected, unsupported fault claim required, third failed implementation attempt, unsafe disk/memory.

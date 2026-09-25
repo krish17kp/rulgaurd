@@ -35,6 +35,7 @@ def test_dashboard_offers_all_five_views():
     assert at.sidebar.radio[0].options == [
         "Signal & FFT", "Health Indicator", "RUL Prediction",
         "Model Evaluation", "Architecture & Limitations",
+        "Universal Machine Analysis", "Cross-Dataset Validation",
     ]
 
 
@@ -138,3 +139,29 @@ def test_model_evaluation_tab_keeps_the_college_naive_oracle_caveat():
     at = _open("Model Evaluation")
     rendered = " ".join([i.value for i in at.info] + [e.value for e in at.error])
     assert "oracle" in rendered
+
+
+def test_cross_dataset_pages_render_without_exception():
+    """Both pages degrade to an explanatory message when their artifacts are
+    missing and render real tables when present - never a traceback."""
+    for view in ["Universal Machine Analysis", "Cross-Dataset Validation"]:
+        at = _open(view)
+        assert not at.exception
+
+
+def test_status_banner_names_suppression_explicitly():
+    from bearing_pdm.dashboard_cross import status_banner
+    level, title, body = status_banner({"status": "RUL_SUPPRESSED", "model": None, "level": "LOW"})
+    assert level == "error" and "LOW MODEL APPLICABILITY" in title
+    assert "Unavailable: validated RUL prediction" in body
+    assert status_banner({"status": "RUL_AVAILABLE", "model": "raw_seconds",
+                          "level": "HIGH"})[0] == "success"
+    assert status_banner({"status": "RUL_EXPERIMENTAL", "model": "m",
+                          "level": "MEDIUM"})[0] == "warning"
+
+
+def test_profile_box_refuses_paths_outside_known_roots(tmp_path):
+    from bearing_pdm.dashboard_cross import is_within
+    assert is_within(tmp_path / "a" / "b", [tmp_path])
+    assert not is_within(tmp_path.parent / "elsewhere", [tmp_path])
+    assert not is_within(tmp_path / ".." / "..", [tmp_path])
