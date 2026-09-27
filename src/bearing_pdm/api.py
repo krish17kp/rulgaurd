@@ -348,11 +348,43 @@ def predict_hi(request: HiRequest) -> HiResponse:
             ),
         )
 
+    import numpy as np
     import pandas as pd
+
+    feature_cols = list(reference_model.features)
+    non_finite = [
+        c for c in feature_cols
+        if any(not np.isfinite(row[c]) for row in request.rows)
+    ]
+    if non_finite:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Non-finite (NaN/inf) feature values are not allowed: {non_finite}",
+        )
 
     df = pd.DataFrame(request.rows)
     df["bearing_run_id"] = "uploaded_run"  # single synthetic run - only grouping key these functions need
     df = df.sort_values("sequence_index").reset_index(drop=True)
+
+    # apply_reference_hi assumes the reference window (see health.py's
+    # _per_bearing_reference) is a genuine healthy baseline. A window that is
+    # exactly constant across every feature isn't evidence of health - it's
+    # degenerate input (a stuck sensor, a synthetic/placeholder upload) that
+    # the model cannot distinguish from "healthy," and it was silently scored
+    # as HEALTHY in review (a run of 60+ constant rows). Reject instead of
+    # guessing.
+    skip, n_ref = reference_model.reference_skip, reference_model.reference_n
+    window = df.iloc[skip:skip + n_ref]
+    if all(window[c].nunique() <= 1 for c in feature_cols):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Rows {skip}-{skip + n_ref - 1} (the reference window) are constant across "
+                "every feature. The model normalises against this window as the healthy "
+                "baseline; a constant window carries no evidence of actual healthy "
+                "variation and cannot be scored meaningfully."
+            ),
+        )
 
     hi = apply_reference_hi(df, reference_model)
     stage = assign_stages(df, hi, thresholds)

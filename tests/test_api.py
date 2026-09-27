@@ -174,7 +174,6 @@ def test_predict_hi_rejects_rows_missing_feature_columns():
 
 
 @pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
-@pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
 def test_predict_hi_rejects_a_run_shorter_than_the_reference_window():
     hi_model = api._load_joblib("reference_hi_model.joblib")
     min_rows = hi_model.reference_skip + hi_model.reference_n
@@ -188,6 +187,46 @@ def test_predict_hi_rejects_a_run_shorter_than_the_reference_window():
     assert "reference window" in response.json()["detail"].lower()
 
 
+@pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
+def test_predict_hi_rejects_constant_reference_window_even_when_long_enough():
+    """The exact case review found fail-open: enough rows to pass the
+    min-length gate, but every row identical, so the model can't tell
+    'healthy' from 'stuck sensor' - was silently scored 100% HEALTHY."""
+    hi_model = api._load_joblib("reference_hi_model.joblib")
+    min_rows = hi_model.reference_skip + hi_model.reference_n
+    rows = [
+        {"sequence_index": i, **{f: 1000.0 for f in hi_model.features}}
+        for i in range(min_rows)
+    ]
+    response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
+    assert response.status_code == 422
+    assert "constant" in response.json()["detail"].lower()
+
+
+@pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
+def test_predict_hi_rejects_non_finite_feature_values():
+    hi_model = api._load_joblib("reference_hi_model.joblib")
+    min_rows = hi_model.reference_skip + hi_model.reference_n
+    rows = [
+        {"sequence_index": i, **{f: 1.0 + i * 0.01 for f in hi_model.features}}
+        for i in range(min_rows)
+    ]
+    rows[-1][hi_model.features[0]] = float("inf")
+    # Python's json.dumps allows Infinity by default (non-standard but valid
+    # for this test's purpose: exercising what api.py does once a value is a
+    # float('inf')) - build the body manually since httpx's own client-side
+    # encoder is stricter than that.
+    import json as json_module
+
+    body = json_module.dumps({"dataset_id": "femto", "rows": rows})
+    response = client.post(
+        "/predict/hi", content=body, headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 422
+    assert "non-finite" in response.json()["detail"].lower()
+
+
+@pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
 def test_predict_hi_returns_declining_health_indicator():
     hi_model = api._load_joblib("reference_hi_model.joblib")
     n = 60
