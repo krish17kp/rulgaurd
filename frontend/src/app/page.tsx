@@ -24,19 +24,11 @@ export default function Home() {
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-16">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">RULGuard</h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            Bearing degradation and Remaining Useful Life estimation from vibration data.
-          </p>
-        </div>
-        <nav className="flex gap-4 text-sm">
-          <Link className="underline" href="/upload">Upload</Link>
-          <Link className="underline" href="/degradation">Degradation</Link>
-          <Link className="underline" href="/predict">Predict</Link>
-          <Link className="underline" href="/evaluation">Reliability</Link>
-        </nav>
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">RULGuard</h1>
+        <p className="mt-1 text-sm text-zinc-500">
+          Bearing degradation and Remaining Useful Life estimation from vibration data.
+        </p>
       </header>
 
       <section className="rounded-lg border border-zinc-200 p-5 dark:border-zinc-800">
