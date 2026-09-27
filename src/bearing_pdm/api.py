@@ -28,6 +28,7 @@ from typing import Any
 import joblib
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from bearing_pdm.health import apply_reference_hi
@@ -144,10 +145,16 @@ _MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 2 * 1024 * 1024
 
 @app.middleware("http")
 async def _log_requests(request: Request, call_next):
+    # Only catches a request that declares its size via Content-Length. A
+    # chunked request with no Content-Length isn't covered here - it still
+    # relies on /dataset/inspect's own chunked-read loop (MAX_UPLOAD_BYTES)
+    # to reject an oversized body after the fact, same as before this check.
     content_length = request.headers.get("content-length")
-    if content_length is not None and content_length.isdigit() and int(content_length) > _MAX_REQUEST_BYTES:
-        from fastapi.responses import JSONResponse
-
+    if (
+        content_length is not None
+        and content_length.isdigit()
+        and int(content_length) > _MAX_REQUEST_BYTES
+    ):
         return JSONResponse(
             status_code=413,
             content={"detail": f"Request body exceeds {_MAX_REQUEST_BYTES // (1024 * 1024)}MB."},
