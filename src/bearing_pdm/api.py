@@ -15,20 +15,33 @@ with 422 rather than silently returning a wrong number.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import joblib
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = REPO_ROOT / "artifacts" / "models"
 
+# Frontend origin(s) allowed to call this API, e.g. "https://rulguard.vercel.app,http://localhost:3000".
+# No default beyond localhost dev - a production origin must be set explicitly, never wildcarded.
+_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
+
 app = FastAPI(
     title="RULGuard prediction service",
     description="Read-only inference over cached bearing_pdm artifacts. Never fits a model.",
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 _MODEL_CACHE: dict[str, Any] = {}
