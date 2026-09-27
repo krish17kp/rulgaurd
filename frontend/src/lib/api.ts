@@ -78,3 +78,49 @@ export function predictRul(payload: PredictRulRequest): Promise<PredictRulRespon
     body: JSON.stringify(payload),
   });
 }
+
+export type Compatibility = "FULLY_SUPPORTED" | "ADAPTER_REQUIRED" | "UNSUPPORTED" | "INVALID_INPUT";
+
+export interface DatasetColumnProfile {
+  name: string;
+  canonical: string | null;
+  confidence: "high" | "low" | "unmapped";
+  numeric: boolean;
+  nan_fraction: number;
+  constant: boolean;
+}
+
+export interface DatasetProfileResponse {
+  compatibility: Compatibility;
+  reasons: string[];
+  profile: {
+    file: string;
+    readable: boolean;
+    has_header?: boolean;
+    n_columns?: number;
+    rows?: number;
+    rows_exact?: boolean;
+    warnings: string[];
+    columns?: DatasetColumnProfile[];
+  };
+}
+
+export async function inspectDataset(file: File): Promise<DatasetProfileResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  // No Content-Type here - the browser sets the multipart boundary itself.
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/dataset/inspect`, { method: "POST", body: form });
+  } catch {
+    throw new ApiError(0, `Could not reach the prediction service at ${API_BASE_URL}.`);
+  }
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail =
+      (body && typeof body === "object" && "detail" in body && String(body.detail)) ||
+      `Request failed with status ${response.status}`;
+    throw new ApiError(response.status, detail);
+  }
+  return body as DatasetProfileResponse;
+}
