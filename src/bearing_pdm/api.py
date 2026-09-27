@@ -15,15 +15,18 @@ with 422 rather than silently returning a wrong number.
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
+import time
+import uuid
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import joblib
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -119,6 +122,38 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+# Structured logging (goals.md: "monitoring and logging for prediction
+# requests, failures, and deployment issues"). Plain stdlib logging to
+# stdout/stderr - Vercel's Python runtime and any container platform capture
+# that automatically, so this needs no new service or credential. Never logs
+# request bodies (feature vectors, uploaded filenames go elsewhere) - only
+# method, path, status, latency, and a request id for correlation.
+logger = logging.getLogger("bearing_pdm.api")
+if not logger.handlers:
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+
+
+@app.middleware("http")
+async def _log_requests(request: Request, call_next):
+    request_id = uuid.uuid4().hex[:12]
+    start = time.monotonic()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception(
+            "request_id=%s method=%s path=%s status=500 (unhandled exception)",
+            request_id, request.method, request.url.path,
+        )
+        raise
+    duration_ms = (time.monotonic() - start) * 1000
+    log = logger.warning if response.status_code >= 500 else logger.info
+    log(
+        "request_id=%s method=%s path=%s status=%s duration_ms=%.1f",
+        request_id, request.method, request.url.path, response.status_code, duration_ms,
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 _MODEL_CACHE: dict[str, Any] = {}
 

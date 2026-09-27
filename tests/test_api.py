@@ -20,6 +20,14 @@ MODEL_PRESENT = (api.MODELS_DIR / "rul_extra_trees.joblib").exists()
 client = TestClient(api.app)
 
 
+def test_requests_get_a_request_id_header_and_are_logged(caplog):
+    with caplog.at_level("INFO", logger="bearing_pdm.api"):
+        response = client.get("/health")
+    assert response.status_code == 200
+    assert response.headers["X-Request-ID"]
+    assert any("path=/health" in r.message and "status=200" in r.message for r in caplog.records)
+
+
 def test_health_reports_model_status():
     response = client.get("/health")
     assert response.status_code == 200
