@@ -100,5 +100,42 @@ bit-identically through the adapter path; bearing-level leakage guards tested; e
 generated (`docs/cross-dataset-results.md` from `reports/metrics/cross_dataset.json`); full
 suite green. Design: `docs/cross-dataset.md`; decisions D23-D26.
 
+## M11 - FastAPI/Next.js production web app (IN PROGRESS, branch `overnight/capstone/goal-02-nextjs-frontend`, not merged to main)
+Not part of the original capstone scope (M0-M10) - added per a later product decision
+(`goals.md`, `prompts.md`, `model.md`, `START_CAPSTONE_OVERNIGHT.md`) to replace the Streamlit
+dashboard with a Next.js frontend and a separate FastAPI inference service, deployed to
+Vercel. Streamlit (`dashboard.py`) is kept as the production UI until this reaches parity -
+per that same plan's own instruction - and nothing in M0-M10 above is affected.
+
+Done, implemented and tested (each commit independently reviewed and PASSed by an Opus
+acceptance pass per `prompts.md`'s mandatory-verification rule, several after multiple fix
+cycles - see the branch's commit history for the specific defects found and fixed):
+- `src/bearing_pdm/api.py`: read-only FastAPI service (no `.fit()`, no training). `/health`,
+  `/models/info`, `/models/evaluation` (real `reports/metrics/rul_evaluation.json`, with the
+  D10 college-naive caveat carried alongside any college numbers), `/predict/rul`,
+  `/predict/hi` (FEMTO-gated, D11; rejects non-finite values and degenerate/constant
+  reference windows relative to the model's own fitted scale), `/dataset/inspect` (upload -
+  inspect - classify into FULLY_SUPPORTED/ADAPTER_REQUIRED/UNSUPPORTED/INVALID_INPUT,
+  fail-closed), `/predictions/history` (in-memory only, explicitly not durable). Request
+  logging middleware, Content-Length-based upload size rejection.
+- `frontend/`: Next.js 16 app (`/`, `/upload`, `/degradation`, `/predict`, `/evaluation`),
+  calls the backend only through a typed client, no client-side prediction math, honest
+  loading/error states, explicit scope/limitations panel.
+- `vercel.json`, `api/index.py`: Vercel build wiring, including the `/api`-prefix mount
+  Vercel's Python runtime actually requires (found and fixed during review).
+- `tests/test_api.py`, `tests/test_api_e2e.py`: unit tests plus one true end-to-end test
+  (real FEMTO fixture CSV -> `features.py`'s real extraction functions -> live
+  `/predict/rul`), independently sanity-checked against FEMTO Bearing1_1's known life.
+
+Explicitly NOT done, stated here rather than implied by silence:
+- **No live Vercel deployment.** No Vercel account/API token exists in this environment.
+- Trained artifacts (`artifacts/models/*.joblib`) are gitignored by this project's own
+  security policy, so a real Vercel deploy currently has no model to load - needs external
+  storage (Vercel Blob/S3/a GitHub Release asset), not implemented. See
+  `docs/vercel-deployment.md`.
+- No database-backed prediction history, no auth, no chunked large-file upload beyond the
+  64MB `/dataset/inspect` cap, no Codex/watchdog failover system - all need real
+  infrastructure or tooling not present in this environment.
+
 ## Stop conditions (any milestone)
 Archive corruption, schema materially differs from `Description.txt`, units unknown affecting targets, Full_Test_Set RUL derivation mismatch, leakage detected, unsupported fault claim required, third failed implementation attempt, unsafe disk/memory.
