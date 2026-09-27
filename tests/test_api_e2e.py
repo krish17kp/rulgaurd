@@ -58,11 +58,16 @@ def test_real_femto_acquisition_produces_a_prediction_through_the_live_api():
     assert response.status_code == 200
     body = response.json()
     assert body["features_missing"] == []
-    assert body["rul_seconds"] >= 0
+    # A loose sanity bound, not a precision check (this is a learning bearing
+    # the model trained on, so the number can't be cited as held-out evidence
+    # - see docs/decisions.md and ml-data.md). It rules out the failure mode
+    # the "missing == []" check alone can't: silently-wrong feature math that
+    # still produces *a* finite number, e.g. hours-scale FEMTO life coming
+    # back as seconds or as some absurd multi-year value.
+    assert 0 <= body["rul_seconds"] <= 7 * 24 * 3600  # FEMTO learning runs are minutes-to-hours, not days
     assert body["rul_hours"] == pytest.approx(body["rul_seconds"] / 3600.0)
 
 
-@pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
 def test_two_real_acquisitions_from_the_same_bearing_give_different_features():
     """Sanity check that the fixtures are actually two distinct real
     recordings, not duplicates - otherwise the e2e test above would pass
