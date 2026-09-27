@@ -1,8 +1,9 @@
 """Tests for the read-only prediction API (src/bearing_pdm/api.py).
 
-Uses the real cached artifacts under artifacts/models/ (small joblib files
-committed to the repo), same as the dashboard tests - no network, no full
-dataset needed.
+Uses the real cached artifacts under artifacts/models/ when present (they are
+gitignored, same as dashboard.py's artifacts - not committed). Tests that need
+the model skip cleanly on a checkout without them; health/gating tests do not
+depend on the artifact's presence.
 """
 
 from __future__ import annotations
@@ -53,13 +54,29 @@ def test_predict_rul_accepts_full_feature_row():
     assert body["features_missing"] == []
 
 
+def test_predict_rul_returns_503_when_model_artifact_missing(monkeypatch):
+    monkeypatch.setattr(api, "MODELS_DIR", api.MODELS_DIR.parent / "does-not-exist")
+    api._MODEL_CACHE.clear()
+    response = client.post("/predict/rul", json={"dataset_id": "femto", "features": {}})
+    assert response.status_code == 503
+    api._MODEL_CACHE.clear()
+
+
+@pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
+def test_predict_rul_rejects_mostly_missing_features():
+    response = client.post("/predict/rul", json={"dataset_id": "femto", "features": {}})
+    assert response.status_code == 422
+    assert "missing" in response.json()["detail"].lower()
+
+
 @pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
 def test_predict_rul_falls_back_to_median_for_missing_features():
     model = api._load_joblib("rul_extra_trees.joblib")
-    partial = dict(list(model.median_fill.items())[:5])
+    n_provided = len(model.feature_columns) - 2  # under the max_missing_fraction gate
+    partial = dict(list(model.median_fill.items())[:n_provided])
     response = client.post(
         "/predict/rul", json={"dataset_id": "femto", "features": partial}
     )
     assert response.status_code == 200
     body = response.json()
-    assert len(body["features_missing"]) == len(model.feature_columns) - 5
+    assert len(body["features_missing"]) == len(model.feature_columns) - n_provided

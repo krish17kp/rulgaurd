@@ -117,6 +117,17 @@ def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
         )
 
     missing = [c for c in model.feature_columns if c not in request.features]
+    max_missing_fraction = 0.5  # below this, too few real measurements to trust the prediction
+    if len(missing) / len(model.feature_columns) > max_missing_fraction:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{len(missing)}/{len(model.feature_columns)} required features are missing "
+                f"(max allowed {max_missing_fraction:.0%}). A prediction built mostly from "
+                "training medians would not reflect the submitted sample."
+            ),
+        )
+
     row = {
         c: request.features.get(c, model.median_fill.get(c))
         for c in model.feature_columns
