@@ -56,6 +56,25 @@ export function predictHi(payload: HiRequest): Promise<HiResponse> {
   });
 }
 
+export interface ModelMetrics {
+  mae_seconds: number;
+  rmse_seconds: number;
+  median_abs_error_seconds: number;
+  n: number;
+}
+
+export interface EvaluationResponse {
+  femto_lobo_mean_mae_by_model: Record<string, number>;
+  femto_lobo_overall_by_model: Record<string, ModelMetrics>;
+  femto_lobo: Array<ModelMetrics & { model: string; held_out_bearing: string }>;
+  college_mean_mae_by_model?: Record<string, number>;
+  college_naive_caveat: string;
+}
+
+export function getModelEvaluation(): Promise<EvaluationResponse> {
+  return request<EvaluationResponse>("/models/evaluation");
+}
+
 export interface PredictRulRequest {
   dataset_id: string;
   features: Record<string, number>;

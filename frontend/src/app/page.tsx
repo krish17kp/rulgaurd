@@ -35,6 +35,7 @@ export default function Home() {
           <Link className="underline" href="/upload">Upload</Link>
           <Link className="underline" href="/degradation">Degradation</Link>
           <Link className="underline" href="/predict">Predict</Link>
+          <Link className="underline" href="/evaluation">Reliability</Link>
         </nav>
       </header>
 

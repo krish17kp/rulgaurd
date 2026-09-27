@@ -28,6 +28,21 @@ def test_health_reports_model_status():
     assert body["models_loaded"]["rul_extra_trees"] == MODEL_PRESENT
 
 
+EVALUATION_PRESENT = (api.METRICS_DIR / "rul_evaluation.json").exists()
+
+
+@pytest.mark.skipif(not EVALUATION_PRESENT, reason="reports/metrics/rul_evaluation.json not present")
+def test_models_evaluation_returns_real_metrics_with_college_caveat():
+    response = client.get("/models/evaluation")
+    assert response.status_code == 200
+    body = response.json()
+    assert "femto_lobo_mean_mae_by_model" in body
+    assert "extra_trees" in body["femto_lobo_mean_mae_by_model"]
+    # D10: college naive's MAE=0.0 must never travel without its caveat.
+    assert "college_naive_caveat" in body
+    assert "oracle" in body["college_naive_caveat"].lower()
+
+
 def test_models_info_lists_femto_only():
     response = client.get("/models/info")
     assert response.status_code == 200
@@ -200,7 +215,38 @@ def test_predict_hi_rejects_constant_reference_window_even_when_long_enough():
     ]
     response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
     assert response.status_code == 422
-    assert "constant" in response.json()["detail"].lower()
+    assert "variation" in response.json()["detail"].lower()
+
+
+@pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
+def test_predict_hi_rejects_reference_window_with_only_float_jitter():
+    """Regression for the exact gap review found in the previous fix: exact
+    nunique()<=1 was defeated by a ~1e-7 perturbation, which is far below
+    the model's fitted per-feature scale and should still count as
+    'no real variation.'"""
+    hi_model = api._load_joblib("reference_hi_model.joblib")
+    min_rows = hi_model.reference_skip + hi_model.reference_n
+    rows = [
+        {"sequence_index": i, **{f: 1000.0 + (i % 2) * 1e-7 for f in hi_model.features}}
+        for i in range(min_rows)
+    ]
+    response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
+    assert response.status_code == 422
+    assert "variation" in response.json()["detail"].lower()
+
+
+@pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
+def test_predict_hi_rejects_reference_window_with_only_one_varying_feature():
+    hi_model = api._load_joblib("reference_hi_model.joblib")
+    min_rows = hi_model.reference_skip + hi_model.reference_n
+    rows = []
+    for i in range(min_rows):
+        row = {"sequence_index": i}
+        for j, f in enumerate(hi_model.features):
+            row[f] = 1000.0 + (i * 10.0 if j == 0 else 0.0)  # only the first feature moves
+        rows.append(row)
+    response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
+    assert response.status_code == 422
 
 
 @pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
@@ -234,8 +280,11 @@ def test_predict_hi_returns_declining_health_indicator():
     for i in range(n):
         row = {"sequence_index": i}
         for feature in hi_model.features:
-            # Healthy for the first 50 rows (the reference window), a clear
-            # jump afterwards - a real degradation signature, not noise.
+            # reference_skip=10, reference_n=50 -> reference window is rows
+            # [10, 60). Rows 50-59 fall inside that window AND get the jump,
+            # so the window itself has real variation (passes the
+            # degenerate-window check) while still producing a clear
+            # late-run degradation signature, not noise.
             row[feature] = 1.0 if i < 50 else 5.0
         rows.append(row)
     response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})

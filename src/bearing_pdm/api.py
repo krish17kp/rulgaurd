@@ -33,6 +33,7 @@ from bearing_pdm.stages import assign_stages
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = REPO_ROOT / "artifacts" / "models"
+METRICS_DIR = REPO_ROOT / "reports" / "metrics"
 
 # Hard cap on an uploaded file this service will read, independent of profile_file's
 # own sample_rows bound - python.md: "all raw reads are chunked", never a whole-file
@@ -179,6 +180,31 @@ def health() -> dict[str, Any]:
             "rul_naive": naive_model is not None,
         },
     }
+
+
+@app.get("/models/evaluation")
+def models_evaluation() -> dict[str, Any]:
+    """Real leave-one-bearing-out (FEMTO) and walk-forward (college) numbers,
+    read verbatim from reports/metrics/rul_evaluation.json - goals.md's
+    "provide confidence/validation/reliability information" requirement,
+    without hand-typing a metric (general.md: every number traces to a
+    generated file).
+
+    ml-data.md D10 is non-negotiable: college's naive baseline scores
+    MAE=0.0 by construction (it has access to the true total run length),
+    not because it predicts well. college_naive_caveat is returned alongside
+    the college numbers specifically so a client cannot show the college
+    naive/extra_trees comparison without also carrying that caveat - it must
+    never be presented as a fair comparison."""
+    path = METRICS_DIR / "rul_evaluation.json"
+    if not path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="reports/metrics/rul_evaluation.json missing. Run scripts/evaluate_models.py first.",
+        )
+    import json
+
+    return json.loads(path.read_text())
 
 
 @app.get("/models/info")
@@ -367,22 +393,36 @@ def predict_hi(request: HiRequest) -> HiResponse:
     df = df.sort_values("sequence_index").reset_index(drop=True)
 
     # apply_reference_hi assumes the reference window (see health.py's
-    # _per_bearing_reference) is a genuine healthy baseline. A window that is
-    # exactly constant across every feature isn't evidence of health - it's
-    # degenerate input (a stuck sensor, a synthetic/placeholder upload) that
-    # the model cannot distinguish from "healthy," and it was silently scored
-    # as HEALTHY in review (a run of 60+ constant rows). Reject instead of
-    # guessing.
+    # _per_bearing_reference) is a genuine healthy baseline. A window with no
+    # real variation isn't evidence of health - it's degenerate input (a
+    # stuck sensor, float jitter, a synthetic/placeholder upload) that the
+    # model cannot distinguish from "healthy." An earlier version of this
+    # check used exact nunique()<=1, which review defeated with a 1e-7
+    # perturbation (still scored 100% HEALTHY). Compare each feature's window
+    # spread against reference_model.scales - the same robust per-feature
+    # spread fitted from real training bearings - so "no real variation"
+    # means "negligible relative to the variation this model was calibrated
+    # on," not "not bit-for-bit identical." Also require more than one
+    # feature to show real variation: a single genuinely-varying sensor
+    # alongside seven stuck ones is not credible evidence of a real healthy
+    # reference either.
     skip, n_ref = reference_model.reference_skip, reference_model.reference_n
     window = df.iloc[skip:skip + n_ref]
-    if all(window[c].nunique() <= 1 for c in feature_cols):
+    degenerate_tolerance = 0.01  # window std must be >=1% of the model's fitted spread
+    varying = [
+        c for c in feature_cols
+        if reference_model.scales.get(c, 0) > 0
+        and float(window[c].std()) >= degenerate_tolerance * reference_model.scales[c]
+    ]
+    if len(varying) < 2:
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Rows {skip}-{skip + n_ref - 1} (the reference window) are constant across "
-                "every feature. The model normalises against this window as the healthy "
-                "baseline; a constant window carries no evidence of actual healthy "
-                "variation and cannot be scored meaningfully."
+                f"Rows {skip}-{skip + n_ref - 1} (the reference window) show negligible "
+                f"variation relative to this model's training scale in all but {len(varying)} "
+                "feature(s). The model normalises against this window as the healthy "
+                "baseline; a window this flat carries no evidence of actual healthy "
+                "variation (e.g. a stuck sensor) and cannot be scored meaningfully."
             ),
         )
 
