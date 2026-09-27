@@ -33,6 +33,7 @@ export default function Home() {
         </div>
         <nav className="flex gap-4 text-sm">
           <Link className="underline" href="/upload">Upload</Link>
+          <Link className="underline" href="/degradation">Degradation</Link>
           <Link className="underline" href="/predict">Predict</Link>
         </nav>
       </header>

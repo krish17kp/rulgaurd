@@ -26,8 +26,34 @@ export interface HealthResponse {
 export interface ModelsInfoResponse {
   selected_model: { selected: string; reason: string } | null;
   extra_trees_feature_columns: string[] | null;
+  hi_feature_columns: string[] | null;
   supported_datasets: string[];
   note: string;
+}
+
+export interface HiRequest {
+  dataset_id: string;
+  rows: Array<{ sequence_index: number } & Record<string, number>>;
+}
+
+export interface HiRow {
+  sequence_index: number;
+  health_indicator: number;
+  stage: "HEALTHY" | "DEGRADING" | "CRITICAL";
+}
+
+export interface HiResponse {
+  rows: HiRow[];
+  hi_warn_threshold: number;
+  hi_critical_threshold: number;
+  note: string;
+}
+
+export function predictHi(payload: HiRequest): Promise<HiResponse> {
+  return request<HiResponse>("/predict/hi", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export interface PredictRulRequest {
