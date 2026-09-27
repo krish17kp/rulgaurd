@@ -87,6 +87,42 @@ def test_dataset_inspect_fully_supported_for_clean_header_csv():
     assert body["reasons"] == []
 
 
+def test_dataset_inspect_invalid_for_non_numeric_vibration_column():
+    csv_bytes = b"vibration_x\nabc\ndef\n"
+    response = client.post("/dataset/inspect", files={"file": ("bad.csv", csv_bytes, "text/csv")})
+    assert response.status_code == 200
+    assert response.json()["compatibility"] == "INVALID_INPUT"
+
+
+def test_dataset_inspect_invalid_for_all_missing_vibration_column():
+    csv_bytes = b"vibration_x,vibration_y\n,0.1\n,0.2\n,0.3\n"
+    response = client.post("/dataset/inspect", files={"file": ("bad.csv", csv_bytes, "text/csv")})
+    assert response.status_code == 200
+    # vibration_x is 100% missing but vibration_y is fully usable - still supported.
+    assert response.json()["compatibility"] == "FULLY_SUPPORTED"
+
+
+def test_dataset_inspect_invalid_when_every_vibration_column_is_missing():
+    csv_bytes = b"vibration_x\n\n\n\n"
+    response = client.post("/dataset/inspect", files={"file": ("bad.csv", csv_bytes, "text/csv")})
+    assert response.status_code == 200
+    assert response.json()["compatibility"] == "INVALID_INPUT"
+
+
+def test_dataset_inspect_invalid_for_constant_vibration_column():
+    csv_bytes = b"vibration_x\n1.0\n1.0\n1.0\n"
+    response = client.post("/dataset/inspect", files={"file": ("bad.csv", csv_bytes, "text/csv")})
+    assert response.status_code == 200
+    assert response.json()["compatibility"] == "INVALID_INPUT"
+
+
+def test_dataset_inspect_invalid_for_header_only_file():
+    csv_bytes = b"vibration_x,vibration_y\n"
+    response = client.post("/dataset/inspect", files={"file": ("empty_rows.csv", csv_bytes, "text/csv")})
+    assert response.status_code == 200
+    assert response.json()["compatibility"] == "INVALID_INPUT"
+
+
 def test_dataset_inspect_unsupported_for_no_recognisable_sensor_columns():
     csv_bytes = b"foo,bar\n1,2\n3,4\n"
     response = client.post(
@@ -110,6 +146,46 @@ def test_vercel_app_mounts_routes_under_api_prefix():
     response = vercel_client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+HI_MODEL_PRESENT = (api.MODELS_DIR / "reference_hi_model.joblib").exists()
+
+
+def test_predict_hi_rejects_non_femto_dataset():
+    response = client.post("/predict/hi", json={"dataset_id": "college", "rows": [{"sequence_index": 0}]})
+    assert response.status_code == 422
+
+
+@pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
+def test_predict_hi_rejects_rows_missing_feature_columns():
+    response = client.post(
+        "/predict/hi", json={"dataset_id": "femto", "rows": [{"sequence_index": 0}]}
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
+def test_predict_hi_returns_declining_health_indicator():
+    hi_model = api._load_joblib("reference_hi_model.joblib")
+    n = 60
+    rows = []
+    for i in range(n):
+        row = {"sequence_index": i}
+        for feature in hi_model.features:
+            # Healthy for the first 50 rows (the reference window), a clear
+            # jump afterwards - a real degradation signature, not noise.
+            row[feature] = 1.0 if i < 50 else 5.0
+        rows.append(row)
+    response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["rows"]) == n
+    assert all(0.0 < r["health_indicator"] < 1.0 for r in body["rows"])
+    # Later (degraded) rows must score lower than the healthy reference rows.
+    early_hi = body["rows"][10]["health_indicator"]
+    late_hi = body["rows"][-1]["health_indicator"]
+    assert late_hi < early_hi
+    assert {r["stage"] for r in body["rows"]} <= {"HEALTHY", "DEGRADING", "CRITICAL"}
 
 
 def test_predict_rul_returns_503_when_model_artifact_missing(monkeypatch):

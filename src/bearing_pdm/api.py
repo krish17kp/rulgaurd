@@ -25,7 +25,9 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from bearing_pdm.health import apply_reference_hi
 from bearing_pdm.profiler import profile_file
+from bearing_pdm.stages import assign_stages
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = REPO_ROOT / "artifacts" / "models"
@@ -60,16 +62,31 @@ def _classify(profile: dict) -> tuple[str, list[str]]:
             "a dataset adapter (see src/bearing_pdm/adapters.py) is required"
         ]
 
-    mapped = {c["canonical"]: c["confidence"] for c in columns if c["canonical"] in _REQUIRED_ANY}
-    if not mapped:
+    vibration_cols = [c for c in columns if c["canonical"] in _REQUIRED_ANY]
+    if not vibration_cols:
         return UNSUPPORTED, [
             "no vibration channel recognised in the header "
             f"(saw: {[c['name'] for c in columns]})"
         ]
-    if any(conf == "low" for conf in mapped.values()):
+    if any(c["confidence"] == "low" for c in vibration_cols):
         return ADAPTER_REQUIRED, [
             f"vibration channel(s) matched only by a low-confidence name guess: "
-            f"{[c for c, conf in mapped.items() if conf == 'low']} - confirm before use"
+            f"{[c['name'] for c in vibration_cols if c['confidence'] == 'low']} - confirm before use"
+        ]
+
+    # Column-name mapping alone is fail-open: a column named vibration_x that is
+    # non-numeric, empty, constant, or mostly missing is still "mapped" by name
+    # but unusable as a signal - profile_file already flags exactly this.
+    if profile.get("rows", 0) == 0:
+        return INVALID_INPUT, ["file has a header but no data rows"]
+    usable = [c for c in vibration_cols if c["numeric"] and not c["constant"] and c["nan_fraction"] <= 0.5]
+    if not usable:
+        return INVALID_INPUT, [
+            f"{c['name']}: "
+            + ("non-numeric values" if not c["numeric"]
+               else "constant in the sampled rows" if c["constant"]
+               else f"{c['nan_fraction']:.0%} missing")
+            for c in vibration_cols
         ]
     return FULLY_SUPPORTED, []
 
@@ -149,11 +166,13 @@ def models_info() -> dict[str, Any]:
 
         selected = json.loads(selected_path.read_text())
     tree_model = _load_joblib("rul_extra_trees.joblib")
+    hi_model = _load_joblib("reference_hi_model.joblib")
     return {
         "selected_model": selected,
         "extra_trees_feature_columns": (
             list(tree_model.feature_columns) if tree_model is not None else None
         ),
+        "hi_feature_columns": list(hi_model.features) if hi_model is not None else None,
         "supported_datasets": ["femto"],
         "note": (
             "college and other adapters are not gated in behind a compatible model here - "
@@ -215,6 +234,86 @@ def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
         rul_hours=prediction / 3600.0,
         features_used=list(model.feature_columns),
         features_missing=missing,
+    )
+
+
+class HiRequest(BaseModel):
+    dataset_id: str = Field(..., description="Must be 'femto' - see docs/decisions.md D11.")
+    rows: list[dict[str, float]] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Feature rows for ONE bearing run, in acquisition order. Each row must include "
+            "sequence_index plus the reference HI model's feature columns "
+            "(see GET /models/info's hi_feature_columns)."
+        ),
+    )
+
+
+class HiRow(BaseModel):
+    sequence_index: int
+    health_indicator: float
+    stage: str
+
+
+class HiResponse(BaseModel):
+    rows: list[HiRow]
+    hi_warn_threshold: float
+    hi_critical_threshold: float
+    note: str = (
+        "Stage is a severity band on the health indicator, not a physical fault-type "
+        "diagnosis (no inner/outer-race/ball/cage claim)."
+    )
+
+
+@app.post("/predict/hi", response_model=HiResponse)
+def predict_hi(request: HiRequest) -> HiResponse:
+    """Mirrors dashboard.py's Health Indicator tab exactly: same
+    apply_reference_hi/assign_stages calls, same FEMTO-only domain gate
+    (D11 - a FEMTO-fit reference HI applied to college's feature scale is
+    out-of-domain, confirmed in dashboard.py's own history to swing outside
+    the HI's valid (0,1) range)."""
+    if request.dataset_id != "femto":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"dataset_id={request.dataset_id!r} is not supported for HI prediction. "
+                "The cached reference HI model is fit on FEMTO learning bearings only "
+                "(docs/decisions.md D11)."
+            ),
+        )
+
+    reference_model = _load_joblib("reference_hi_model.joblib")
+    thresholds = _load_joblib("stage_thresholds.joblib")
+    if reference_model is None or thresholds is None:
+        raise HTTPException(
+            status_code=503,
+            detail="HI artifacts missing. Run scripts/build_health.py first.",
+        )
+
+    missing = [c for c in reference_model.features if any(c not in row for row in request.rows)]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Every row must include all HI feature columns. Missing from at least one row: {missing}",
+        )
+
+    import pandas as pd
+
+    df = pd.DataFrame(request.rows)
+    df["bearing_run_id"] = "uploaded_run"  # single synthetic run - only grouping key these functions need
+    df = df.sort_values("sequence_index").reset_index(drop=True)
+
+    hi = apply_reference_hi(df, reference_model)
+    stage = assign_stages(df, hi, thresholds)
+
+    return HiResponse(
+        rows=[
+            HiRow(sequence_index=int(seq), health_indicator=float(h), stage=str(s))
+            for seq, h, s in zip(df["sequence_index"], hi, stage)
+        ],
+        hi_warn_threshold=float(thresholds.hi_warn),
+        hi_critical_threshold=float(thresholds.hi_critical),
     )
 
 
