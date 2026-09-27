@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections import deque
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -79,12 +81,16 @@ def _classify(profile: dict) -> tuple[str, list[str]]:
     # but unusable as a signal - profile_file already flags exactly this.
     if profile.get("rows", 0) == 0:
         return INVALID_INPUT, ["file has a header but no data rows"]
-    usable = [c for c in vibration_cols if c["numeric"] and not c["constant"] and c["nan_fraction"] <= 0.5]
+    usable = [
+        c for c in vibration_cols
+        if c["numeric"] and not c["constant"] and c["nan_fraction"] <= 0.5 and c["inf_count"] == 0
+    ]
     if not usable:
         return INVALID_INPUT, [
             f"{c['name']}: "
             + ("non-numeric values" if not c["numeric"]
                else "constant in the sampled rows" if c["constant"]
+               else f"{c['inf_count']} infinite values" if c["inf_count"]
                else f"{c['nan_fraction']:.0%} missing")
             for c in vibration_cols
         ]
@@ -114,6 +120,24 @@ app.add_middleware(
 )
 
 _MODEL_CACHE: dict[str, Any] = {}
+
+# In-process prediction history (goals.md: "add prediction history and result
+# tracking"). Deliberately NOT a database: this is an in-memory ring buffer
+# that resets on restart and is NOT shared across a serverless deployment's
+# concurrent/cold-started instances - a real deployment needs a persistent
+# store (Vercel Postgres/KV, etc.), which needs credentials this environment
+# doesn't have. Documented as a known limitation, not claimed as durable.
+_HISTORY_LIMIT = 200
+_prediction_history: deque[dict[str, Any]] = deque(maxlen=_HISTORY_LIMIT)
+
+
+def _record_history(kind: str, request_summary: dict[str, Any], result_summary: dict[str, Any]) -> None:
+    _prediction_history.append({
+        "timestamp": datetime.now(UTC).isoformat(),
+        "kind": kind,
+        "request": request_summary,
+        "result": result_summary,
+    })
 
 
 def _load_joblib(name: str) -> Any | None:
@@ -228,13 +252,19 @@ def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
     x = pd.DataFrame([row])[list(model.feature_columns)]
     prediction = float(model.model.predict(x)[0])
 
-    return PredictRulResponse(
+    response = PredictRulResponse(
         model_name="extra_trees",
         rul_seconds=prediction,
         rul_hours=prediction / 3600.0,
         features_used=list(model.feature_columns),
         features_missing=missing,
     )
+    _record_history(
+        "predict_rul",
+        {"dataset_id": request.dataset_id, "n_features_provided": len(request.features)},
+        {"rul_hours": response.rul_hours, "n_features_missing": len(missing)},
+    )
+    return response
 
 
 class HiRequest(BaseModel):
@@ -298,6 +328,26 @@ def predict_hi(request: HiRequest) -> HiResponse:
             detail=f"Every row must include all HI feature columns. Missing from at least one row: {missing}",
         )
 
+    # apply_reference_hi normalises each row against THIS run's own leading
+    # (reference_skip, reference_n) window, assuming that window is healthy.
+    # A run shorter than that window still "runs" (pandas doesn't error), but
+    # the reference and the scored rows overlap, so every row - degraded or
+    # not - is normalised against itself and comes back healthy. That's the
+    # goals.md fail-open case reported in review: a 5-row or 60-row-all-bad
+    # upload silently returned HEALTHY for every row. Refuse instead.
+    min_rows = reference_model.reference_skip + reference_model.reference_n
+    if len(request.rows) < min_rows:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"At least {min_rows} rows are required (the model's reference window: "
+                f"reference_skip={reference_model.reference_skip} + "
+                f"reference_n={reference_model.reference_n}) so the healthy-baseline rows "
+                "and the rows being scored don't overlap. Got "
+                f"{len(request.rows)}."
+            ),
+        )
+
     import pandas as pd
 
     df = pd.DataFrame(request.rows)
@@ -307,7 +357,7 @@ def predict_hi(request: HiRequest) -> HiResponse:
     hi = apply_reference_hi(df, reference_model)
     stage = assign_stages(df, hi, thresholds)
 
-    return HiResponse(
+    response = HiResponse(
         rows=[
             HiRow(sequence_index=int(seq), health_indicator=float(h), stage=str(s))
             for seq, h, s in zip(df["sequence_index"], hi, stage)
@@ -315,6 +365,24 @@ def predict_hi(request: HiRequest) -> HiResponse:
         hi_warn_threshold=float(thresholds.hi_warn),
         hi_critical_threshold=float(thresholds.hi_critical),
     )
+    _record_history(
+        "predict_hi",
+        {"dataset_id": request.dataset_id, "n_rows": len(request.rows)},
+        {"latest_hi": response.rows[-1].health_indicator, "latest_stage": response.rows[-1].stage},
+    )
+    return response
+
+
+@app.get("/predictions/history")
+def prediction_history() -> dict[str, Any]:
+    """Most recent predictions this process has served, newest first.
+    In-memory only - see the module-level note on _prediction_history for why
+    this is not a durable store."""
+    return {
+        "count": len(_prediction_history),
+        "limit": _HISTORY_LIMIT,
+        "predictions": list(reversed(_prediction_history)),
+    }
 
 
 @app.post("/dataset/inspect", response_model=DatasetProfileResponse)

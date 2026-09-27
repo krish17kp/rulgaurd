@@ -116,6 +116,15 @@ def test_dataset_inspect_invalid_for_constant_vibration_column():
     assert response.json()["compatibility"] == "INVALID_INPUT"
 
 
+def test_dataset_inspect_invalid_for_all_infinite_vibration_column():
+    csv_bytes = b"vibration_x\ninf\ninf\n-inf\ninf\n"
+    response = client.post("/dataset/inspect", files={"file": ("bad.csv", csv_bytes, "text/csv")})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["compatibility"] == "INVALID_INPUT"
+    assert "infinite" in " ".join(body["reasons"]).lower()
+
+
 def test_dataset_inspect_invalid_for_header_only_file():
     csv_bytes = b"vibration_x,vibration_y\n"
     response = client.post("/dataset/inspect", files={"file": ("empty_rows.csv", csv_bytes, "text/csv")})
@@ -165,6 +174,20 @@ def test_predict_hi_rejects_rows_missing_feature_columns():
 
 
 @pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
+@pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
+def test_predict_hi_rejects_a_run_shorter_than_the_reference_window():
+    hi_model = api._load_joblib("reference_hi_model.joblib")
+    min_rows = hi_model.reference_skip + hi_model.reference_n
+    too_few = min_rows - 1
+    rows = [
+        {"sequence_index": i, **{f: 1000.0 for f in hi_model.features}}
+        for i in range(too_few)
+    ]
+    response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
+    assert response.status_code == 422
+    assert "reference window" in response.json()["detail"].lower()
+
+
 def test_predict_hi_returns_declining_health_indicator():
     hi_model = api._load_joblib("reference_hi_model.joblib")
     n = 60
