@@ -39,7 +39,9 @@ go-ahead, per this project's "never push/deploy without asking" policy.
 
 - [x] Next.js frontend builds cleanly (`npm run build`, `npm run lint`).
 - [x] FastAPI backend importable as a Vercel Python function (`api/index.py`).
-- [x] `vercel.json` routing configured.
+- [x] `vercel.json` routing configured (`vercel_app` in `src/bearing_pdm/api.py` mounts the
+      real app under `/api`, matching how Vercel's Python runtime forwards the unstripped
+      request path - flagged by review as a real bug in the first version of this scaffold).
 - [ ] Model artifacts reachable at runtime without committing them to Git.
 - [ ] An actual `vercel deploy` (or `vercel dev`) run, verified against a live URL.
 - [ ] CORS `ALLOWED_ORIGINS` set to the real deployed frontend origin, not `localhost:3000`.
@@ -47,9 +49,8 @@ go-ahead, per this project's "never push/deploy without asking" policy.
 ## Running locally in the meantime
 
 ```bash
-# Backend
-cd /mnt/NewVolume/capstone/data/rlguard  # or this clone
-~/.venvs/rulguard/bin/uvicorn bearing_pdm.api:app --reload --port 8000
+# Backend - run from the repository root, with src/ on PYTHONPATH
+PYTHONPATH=src uvicorn bearing_pdm.api:app --reload --port 8000
 
 # Frontend
 cd frontend

@@ -8,6 +8,8 @@ depend on the artifact's presence.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -52,6 +54,62 @@ def test_predict_rul_accepts_full_feature_row():
     assert body["model_name"] == "extra_trees"
     assert body["rul_hours"] == pytest.approx(body["rul_seconds"] / 3600.0)
     assert body["features_missing"] == []
+
+
+FIXTURES = Path(__file__).resolve().parents[1] / "data" / "fixtures"
+
+
+def test_dataset_inspect_rejects_empty_file():
+    response = client.post(
+        "/dataset/inspect", files={"file": ("empty.csv", b"", "text/csv")}
+    )
+    assert response.status_code == 422
+
+
+def test_dataset_inspect_requires_adapter_for_headerless_femto_fixture():
+    path = FIXTURES / "femto" / "Bearing1_1" / "acc_00001.csv"
+    with open(path, "rb") as f:
+        response = client.post("/dataset/inspect", files={"file": (path.name, f, "text/csv")})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["compatibility"] == "ADAPTER_REQUIRED"
+    assert body["profile"]["has_header"] is False
+
+
+def test_dataset_inspect_fully_supported_for_clean_header_csv():
+    csv_bytes = b"vibration_x,vibration_y\n0.1,0.2\n0.3,0.4\n0.2,0.1\n"
+    response = client.post(
+        "/dataset/inspect", files={"file": ("clean.csv", csv_bytes, "text/csv")}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["compatibility"] == "FULLY_SUPPORTED"
+    assert body["reasons"] == []
+
+
+def test_dataset_inspect_unsupported_for_no_recognisable_sensor_columns():
+    csv_bytes = b"foo,bar\n1,2\n3,4\n"
+    response = client.post(
+        "/dataset/inspect", files={"file": ("unrelated.csv", csv_bytes, "text/csv")}
+    )
+    assert response.status_code == 200
+    assert response.json()["compatibility"] == "UNSUPPORTED"
+
+
+def test_dataset_inspect_rejects_oversized_upload(monkeypatch):
+    monkeypatch.setattr(api, "MAX_UPLOAD_BYTES", 10)
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("big.csv", b"vibration_x\n" + b"1.0\n" * 100, "text/csv")},
+    )
+    assert response.status_code == 413
+
+
+def test_vercel_app_mounts_routes_under_api_prefix():
+    vercel_client = TestClient(api.vercel_app)
+    response = vercel_client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
 
 
 def test_predict_rul_returns_503_when_model_artifact_missing(monkeypatch):

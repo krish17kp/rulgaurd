@@ -11,6 +11,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from bearing_pdm.api import app  # noqa: E402,F401
+from bearing_pdm.api import vercel_app as app  # noqa: E402,F401
 
 __all__ = ["app"]
