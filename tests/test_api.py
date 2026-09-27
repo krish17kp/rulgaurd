@@ -173,6 +173,16 @@ def test_dataset_inspect_rejects_oversized_upload(monkeypatch):
     assert response.status_code == 413
 
 
+def test_oversized_content_length_is_rejected_before_body_is_read():
+    huge = api._MAX_REQUEST_BYTES + 1
+    response = client.post(
+        "/predict/hi",
+        content=b"{}",
+        headers={"Content-Type": "application/json", "Content-Length": str(huge)},
+    )
+    assert response.status_code == 413
+
+
 def test_vercel_app_mounts_routes_under_api_prefix():
     vercel_client = TestClient(api.vercel_app)
     response = vercel_client.get("/api/health")

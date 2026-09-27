@@ -134,8 +134,25 @@ if not logger.handlers:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 
 
+# Reject an oversized body from its declared Content-Length before Starlette
+# buffers it into a spooled temp file - review noted the previous approach
+# (checking cumulative bytes read inside /dataset/inspect) only limits what's
+# processed, not what's received. A small margin over MAX_UPLOAD_BYTES covers
+# multipart boundary/header overhead for a file right at the limit.
+_MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 2 * 1024 * 1024
+
+
 @app.middleware("http")
 async def _log_requests(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length is not None and content_length.isdigit() and int(content_length) > _MAX_REQUEST_BYTES:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=413,
+            content={"detail": f"Request body exceeds {_MAX_REQUEST_BYTES // (1024 * 1024)}MB."},
+        )
+
     request_id = uuid.uuid4().hex[:12]
     start = time.monotonic()
     try:
