@@ -12,3 +12,6 @@ py7zr
 pytest
 reportlab
 ruff
+fastapi
+uvicorn[standard]
+httpx
