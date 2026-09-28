@@ -16,13 +16,15 @@ with 422 rather than silently returning a wrong number.
 from __future__ import annotations
 
 import codecs
+import hashlib
+import json
 import logging
 import os
 import tempfile
 import time
 import uuid
-from collections import deque
 from datetime import UTC, datetime
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +38,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from bearing_pdm.health import apply_reference_hi
+from bearing_pdm.history import configured_history_store
 from bearing_pdm.profiler import MAX_SAMPLING_RATE_HZ, profile_file, sampling_info
 from bearing_pdm.routing import MAX_NAN_FRACTION
 from bearing_pdm.stages import assign_stages
@@ -401,23 +404,84 @@ async def _log_requests(request: Request, call_next):
 
 _MODEL_CACHE: dict[str, Any] = {}
 
-# In-process prediction history (goals.md: "add prediction history and result
-# tracking"). Deliberately NOT a database: this is an in-memory ring buffer
-# that resets on restart and is NOT shared across a serverless deployment's
-# concurrent/cold-started instances - a real deployment needs a persistent
-# store (Vercel Postgres/KV, etc.), which needs credentials this environment
-# doesn't have. Documented as a known limitation, not claimed as durable.
-_HISTORY_LIMIT = 200
-_prediction_history: deque[dict[str, Any]] = deque(maxlen=_HISTORY_LIMIT)
+_history_store = configured_history_store()
+_MODEL_VERSIONS: dict[str, str] = {}
 
 
-def _record_history(kind: str, request_summary: dict[str, Any], result_summary: dict[str, Any]) -> None:
-    _prediction_history.append({
-        "timestamp": datetime.now(UTC).isoformat(),
-        "kind": kind,
-        "request": request_summary,
-        "result": result_summary,
-    })
+def _fingerprint(value: Any) -> str:
+    return "sha256:" + hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _track_prediction(kind: str, artifact: str):
+    def decorate(func):
+        @wraps(func)
+        def tracked(request):
+            record = {
+                "id": uuid.uuid4().hex,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "kind": kind,
+                "request": {"dataset_id": "femto" if request.dataset_id == "femto" else "other"},
+                "input_fingerprint": _fingerprint(request.model_dump()),
+                "model_version": None,
+                "feature_schema_version": None,
+                "compatibility_state": "UNSUPPORTED" if request.dataset_id != "femto" else "NOT_EVALUATED",
+                "status": "failed",
+                "warnings": [],
+                "result": None,
+            }
+            if kind == "predict_rul":
+                record["request"]["n_features_provided"] = len(request.features)
+            else:
+                record["request"]["n_rows"] = len(request.rows)
+            try:
+                response = func(request)
+                record["status"] = "succeeded"
+                record["compatibility_state"] = "FULLY_SUPPORTED"
+                if kind == "predict_rul":
+                    record["result"] = {
+                        "rul_hours": response.rul_hours,
+                        "n_features_missing": len(response.features_missing),
+                    }
+                    if response.features_missing:
+                        record["warnings"].append("MISSING_FEATURES_MEDIAN_FILLED")
+                else:
+                    record["result"] = {
+                        "latest_hi": response.rows[-1].health_indicator,
+                        "latest_stage": response.rows[-1].stage,
+                    }
+                    record["warnings"].append("HI_STAGE_IS_SEVERITY_NOT_FAULT_DIAGNOSIS")
+                return response
+            except ApiError as exc:
+                record["error_code"] = exc.code
+                if exc.status_code == 422 and exc.code != "UNSUPPORTED_DATASET":
+                    record["compatibility_state"] = "INVALID_INPUT"
+                raise
+            except Exception:
+                record["error_code"] = "INTERNAL_ERROR"
+                raise
+            finally:
+                if request.dataset_id == "femto":
+                    model = _MODEL_CACHE.get(artifact)
+                    columns = getattr(model, "feature_columns", getattr(model, "features", None))
+                    record["model_version"] = _MODEL_VERSIONS.get(artifact)
+                    if kind == "predict_hi":
+                        versions = [_MODEL_VERSIONS.get(name) for name in
+                                    (artifact, "stage_thresholds.joblib")]
+                        record["model_version"] = (
+                            _fingerprint(versions) if all(versions) else None
+                        )
+                    if columns is not None:
+                        record["feature_schema_version"] = _fingerprint(list(columns))
+                try:
+                    _history_store.append(record)
+                except Exception as exc:
+                    logger.error("history write failed type=%s", type(exc).__name__)
+                    raise ApiError(503, "HISTORY_UNAVAILABLE",
+                                   "Prediction history could not be saved.", retryable=True) from None
+        return tracked
+    return decorate
 
 
 def _load_joblib(name: str) -> Any | None:
@@ -428,6 +492,8 @@ def _load_joblib(name: str) -> Any | None:
     path = MODELS_DIR / name
     if not path.exists():
         return None
+    with path.open("rb") as stream:
+        _MODEL_VERSIONS[name] = "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest()
     model = joblib.load(path)
     _MODEL_CACHE[name] = model
     return model
@@ -512,6 +578,7 @@ def models_info() -> dict[str, Any]:
 
 
 @app.post("/predict/rul", response_model=PredictRulResponse)
+@_track_prediction("predict_rul", "rul_extra_trees.joblib")
 def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
     if request.dataset_id != "femto":
         raise ApiError(
@@ -562,11 +629,6 @@ def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
         features_used=list(model.feature_columns),
         features_missing=missing,
     )
-    _record_history(
-        "predict_rul",
-        {"dataset_id": request.dataset_id, "n_features_provided": len(request.features)},
-        {"rul_hours": response.rul_hours, "n_features_missing": len(missing)},
-    )
     return response
 
 
@@ -600,6 +662,7 @@ class HiResponse(BaseModel):
 
 
 @app.post("/predict/hi", response_model=HiResponse)
+@_track_prediction("predict_hi", "reference_hi_model.joblib")
 def predict_hi(request: HiRequest) -> HiResponse:
     """Mirrors dashboard.py's Health Indicator tab exactly: same
     apply_reference_hi/assign_stages calls, same FEMTO-only domain gate
@@ -709,24 +772,18 @@ def predict_hi(request: HiRequest) -> HiResponse:
         hi_warn_threshold=float(thresholds.hi_warn),
         hi_critical_threshold=float(thresholds.hi_critical),
     )
-    _record_history(
-        "predict_hi",
-        {"dataset_id": request.dataset_id, "n_rows": len(request.rows)},
-        {"latest_hi": response.rows[-1].health_indicator, "latest_stage": response.rows[-1].stage},
-    )
     return response
 
 
 @app.get("/predictions/history")
 def prediction_history() -> dict[str, Any]:
-    """Most recent predictions this process has served, newest first.
-    In-memory only - see the module-level note on _prediction_history for why
-    this is not a durable store."""
-    return {
-        "count": len(_prediction_history),
-        "limit": _HISTORY_LIMIT,
-        "predictions": list(reversed(_prediction_history)),
-    }
+    """Bounded prediction summaries, newest first, from the configured store."""
+    try:
+        records = _history_store.recent()
+    except Exception:
+        raise ApiError(503, "HISTORY_UNAVAILABLE",
+                       "Prediction history could not be read.", retryable=True) from None
+    return {"count": len(records), "limit": _history_store.limit, "predictions": records}
 
 
 _BINARY_SIGNATURES = (b"PK\x03\x04", b"%PDF", b"\x1f\x8b", b"\x89PNG")
