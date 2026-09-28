@@ -44,12 +44,13 @@ applicability (cached FEMTO-fit models are never applied to other datasets,
 `docs/decisions.md` D11). The `required_action` message for this state says
 so explicitly.
 
-### `RETRAIN_REQUIRED` is never emitted
+### `RETRAIN_REQUIRED` is never emitted (by this endpoint)
 
 `model.md` defines it (different machine domain, operating regime or feature
 schema; model not scientifically justified). That cannot be decided from a
 header-level check, and no heuristic is invented to fake it, so this endpoint
-never returns that state.
+never returns that state. `POST /models/compatibility` (below) does emit it,
+because it is given the dataset identity and feature schema it needs.
 
 ### Missing-value wording
 
@@ -120,3 +121,70 @@ instead of a classification: binary content is 415 `UNSUPPORTED_FILE_TYPE`, empt
 crash is 422 `MALFORMED_FILE`, and size limits are 413. Every error carries `code`,
 `retryable` and `message` alongside `detail`; see `docs/api-errors.md` for the full
 catalogue.
+
+# Model compatibility gate (`POST /models/compatibility`)
+
+Answers a different question from `/dataset/inspect`: not "is this file
+parseable" but "may the selected cached RUL model be used for this dataset".
+It takes metadata only and never produces a prediction
+(`prediction_produced` is always `false`).
+
+Request (JSON; no raw data, no feature values):
+
+```json
+{"dataset_id": "femto", "feature_names": ["vibration_x_rms", "..."], "sampling_rate_hz": 25600}
+```
+
+`sampling_rate_hz` is optional, must be finite, `> 0` and `<= 1,000,000`
+(same bounds as `/dataset/inspect`). A body that fails schema validation is
+422 `VALIDATION_ERROR`.
+
+## What it compares against
+
+| Check | Source (reused, not duplicated) |
+|---|---|
+| Selected model | `artifacts/models/rul_selected_model.json` (`selected`), loaded with `_load_joblib`. Only `extra_trees` has a feature schema; any other selection fails closed. |
+| Feature schema | The selected model's `feature_columns`, reported with the same `feature_schema_version` fingerprint as `/health` and prediction history. |
+| Trained domain | `femto` (`TRAINED_DATASET_ID` in `api.py`). The model artifact carries no domain field; every cached model is fit on FEMTO learning bearings only (`docs/decisions.md` D11). |
+| Registered adapters, sampling | `adapters.ADAPTERS` and each adapter's documented `sampling_rate_hz` (published dataset metadata, never inferred). |
+| Required signals | Canonical channels (`adapters.VIBRATION_CHANNELS`) that the model's feature names are computed from: `vibration_x`, `vibration_y`. |
+
+## Decision order and justification (model.md section 8)
+
+Rules are applied in this order; the first match wins.
+
+| # | Condition | State | `required_action.kind` | Why this state |
+|---|---|---|---|---|
+| 1 | Empty `dataset_id`, empty `feature_names`, an empty name, or duplicate names | `INVALID_INPUT` | `FIX_REQUEST` | The request does not describe a dataset; nothing can be compared. |
+| 2 | Selected-model metadata missing or unusable | 503 `MODEL_UNAVAILABLE` (retryable) | - | Fail closed: without the trained schema no state can be justified, so none is returned. |
+| 3 | `dataset_id` has no registered adapter | `UNSUPPORTED` | `UNSUPPORTED_DATASET` | Section 8 UNSUPPORTED: without an adapter the signals, units and sampling cannot be determined. Matching feature *names* do not change this: names say nothing about the machine, units or rate. |
+| 4 | Registered adapter, but not `femto` (`college`, `ims`, `xjtu`) | `RETRAIN_REQUIRED` | `RETRAIN_REQUIRED` | Section 8 RETRAIN_REQUIRED: a materially different machine/operating domain, and D11 forbids applying FEMTO-fit models elsewhere. Returned even when the feature schema matches exactly, so it is never `FULLY_SUPPORTED`. |
+| 5 | `femto`, `sampling_rate_hz` supplied and not equal (relative tolerance 1e-6) to the adapter's documented 25,600 Hz | `RETRAIN_REQUIRED` | `RETRAIN_REQUIRED` | 16 of the current model's 44 features are frequency-domain (spectral frequencies in Hz, band-energy fractions, spectral entropy/energy), computed from a spectrum whose axis depends on the rate; a different rate is a different signal regime the model has no validation for. |
+| 6 | `femto`, one or more model features not provided | `ADAPTER_REQUIRED` | `ADAPTER_REQUIRED` | Section 8 ADAPTER_REQUIRED: same physical problem and trained domain, but the schema/layout differs. The registered FEMTO adapter plus the project feature pipeline (`pipeline.canonical_feature_row`) deterministically produce exactly the trained schema from the raw recordings without changing model semantics. `missing` lists every absent feature and the required signals. The gate never median-fills; that `/predict/rul` tolerates up to 50% median-filled features is a separate, weaker prediction-time rule this gate does not endorse. |
+| 7 | `femto`, every model feature provided | `FULLY_SUPPORTED` | `NONE` | Section 8 FULLY_SUPPORTED: required channels present, units known for the FEMTO adapter (g), sampling compatible (supplied and equal, or the adapter's documented rate with `sampling.source: "adapter_metadata"`), trained schema reproduced, trained domain. Extra features are listed in `feature_schema.extra` and ignored: the model selects its columns by name, so they change nothing. |
+
+`RETRAIN_REQUIRED` is never softened to `ADAPTER_REQUIRED` for another dataset:
+an adapter already exists for college, IMS and XJTU-SY; what is missing is a
+model validated on their domain.
+
+## Response
+
+`compatibility`, `dataset_id` (trimmed, lower-cased), `reasons`,
+`required_action {kind, message, missing}`, `model {name, version,
+feature_schema_version, trained_dataset_id}`, `adapter {dataset_id,
+display_name, sampling_rate_hz}` (null if unregistered), `feature_schema
+{expected_count, provided_count, missing, extra}`, `required_signals`,
+`sampling {rate_hz, source, compatible}` and `prediction_produced: false`.
+The access log records the state as `compatibility` (stage
+`model_compatibility`); feature names are never logged.
+
+## Limitations
+
+- It trusts the caller's `dataset_id`; it does not verify that the data really
+  comes from that dataset. `/dataset/inspect` and the batch pipeline's quality
+  gate and applicability model (`routing.py`, `applicability.py`) check actual
+  data; this gate only checks metadata.
+- `FULLY_SUPPORTED` does not mean a given bearing is in-distribution; that
+  needs feature values and `applicability.assess`.
+- Units are not a request field: they are known only through a registered
+  adapter, which is why an unregistered dataset is `UNSUPPORTED`.

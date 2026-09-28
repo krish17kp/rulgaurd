@@ -20,6 +20,7 @@ import contextvars
 import hashlib
 import json
 import logging
+import math
 import os
 import tempfile
 import time
@@ -38,6 +39,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from bearing_pdm.adapters import ADAPTERS, VIBRATION_CHANNELS
 from bearing_pdm.health import apply_reference_hi
 from bearing_pdm.history import configured_history_store
 from bearing_pdm.profiler import MAX_SAMPLING_RATE_HZ, profile_file, sampling_info
@@ -56,6 +58,7 @@ UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 FULLY_SUPPORTED = "FULLY_SUPPORTED"
 ADAPTER_REQUIRED = "ADAPTER_REQUIRED"
+RETRAIN_REQUIRED = "RETRAIN_REQUIRED"
 UNSUPPORTED = "UNSUPPORTED"
 INVALID_INPUT = "INVALID_INPUT"
 
@@ -393,6 +396,7 @@ _STAGES = {
     "/predict/hi": "predict_hi",
     "/predictions/history": "prediction_history",
     "/dataset/inspect": "dataset_inspect",
+    "/models/compatibility": "model_compatibility",
 }
 _REQUEST_OBS: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "bearing_pdm_request_obs", default=None
@@ -847,6 +851,206 @@ def predict_hi(request: HiRequest) -> HiResponse:
         hi_critical_threshold=float(thresholds.hi_critical),
     )
     return response
+
+
+# Model-compatibility gate (docs/dataset-compatibility.md, "Model compatibility").
+# Every cached RUL model is fit on FEMTO learning bearings only (D11); the model
+# artifact itself carries no domain field, so the domain is stated here, once.
+TRAINED_DATASET_ID = "femto"
+# rul_selected_model.json's "selected" name -> the artifact holding its feature schema.
+_SELECTED_MODEL_ARTIFACTS = {"extra_trees": "rul_extra_trees.joblib"}
+# A supplied sampling rate must equal the adapter's documented rate: the model's
+# spectral features (Hz-valued, band fractions) are only defined at that rate.
+SAMPLING_RATE_REL_TOL = 1e-6
+
+
+class CompatibilityRequest(BaseModel):
+    dataset_id: str = Field(..., max_length=100, description="Adapter id, e.g. 'femto'.")
+    feature_names: list[str] = Field(
+        ..., max_length=10_000,
+        description="Feature column names the dataset provides (names only, never values).",
+    )
+    sampling_rate_hz: float | None = Field(
+        default=None, gt=0, le=MAX_SAMPLING_RATE_HZ, allow_inf_nan=False,
+        description="Acquisition rate of the recordings the features were computed from.",
+    )
+
+
+class CompatibilityResponse(BaseModel):
+    compatibility: str
+    dataset_id: str
+    reasons: list[str]
+    required_action: RequiredAction
+    model: dict[str, Any]
+    adapter: dict[str, Any] | None
+    feature_schema: dict[str, Any]
+    required_signals: list[str]
+    sampling: dict[str, Any]
+    prediction_produced: bool = False
+
+
+def _selected_rul_model() -> tuple[str, str, Any]:
+    """(model name, artifact, loaded model) for the selected RUL model, or a 503:
+    without its metadata nothing can be compared, so the gate fails closed."""
+    try:
+        name = json.loads((MODELS_DIR / "rul_selected_model.json").read_text())["selected"]
+    except (OSError, ValueError, KeyError, TypeError):
+        name = None
+    artifact = _SELECTED_MODEL_ARTIFACTS.get(name) if isinstance(name, str) else None
+    model = _load_joblib(artifact) if artifact else None
+    columns = getattr(model, "feature_columns", None)
+    if not columns or not all(isinstance(c, str) for c in columns):
+        raise ApiError(
+            503, "MODEL_UNAVAILABLE",
+            "Selected RUL model metadata (rul_selected_model.json and the model's feature "
+            "schema) is unavailable, so compatibility cannot be decided. Run "
+            "scripts/train_models.py first.",
+            retryable=True,
+        )
+    _note_model("predict_rul", artifact, name)
+    return name, artifact, model
+
+
+@app.post("/models/compatibility", response_model=CompatibilityResponse)
+def model_compatibility(request: CompatibilityRequest) -> CompatibilityResponse:
+    """Is a dataset compatible with the selected cached RUL model? Metadata only:
+    no raw data is accepted and no prediction is produced. The mapping of each
+    state to model.md section 8 is justified in docs/dataset-compatibility.md."""
+    dataset_id = request.dataset_id.strip().lower()
+    names = [n.strip() for n in request.feature_names]
+    user_rate = request.sampling_rate_hz
+
+    def respond(state: str, reasons: list[str], kind: str, message: str, missing: list[str],
+                **fields: Any) -> CompatibilityResponse:
+        _note(compatibility=state)
+        return CompatibilityResponse(
+            compatibility=state, dataset_id=dataset_id, reasons=reasons,
+            required_action=RequiredAction(kind=kind, message=message, missing=missing),
+            **fields,
+        )
+
+    invalid = []
+    if not dataset_id:
+        invalid.append("dataset_id is empty")
+    if not names:
+        invalid.append("feature_names is empty")
+    if any(not n for n in names):
+        invalid.append("feature_names contains an empty name")
+    duplicates = sorted({n for n in names if n and names.count(n) > 1})
+    if duplicates:
+        invalid.append(f"feature_names contains duplicates: {duplicates}")
+    if invalid:
+        return respond(
+            INVALID_INPUT, invalid, "FIX_REQUEST",
+            "The request does not describe a dataset; fix it and resubmit.",
+            ["a non-empty dataset_id and a non-empty list of unique, non-empty feature names"],
+            model={}, adapter=None, feature_schema={}, required_signals=[],
+            sampling={"rate_hz": user_rate, "source": "user" if user_rate else None,
+                      "compatible": None},
+        )
+
+    model_name, artifact, model = _selected_rul_model()
+    expected = list(model.feature_columns)
+    version, schema_version = _model_provenance("predict_rul", artifact)
+    provided, expected_set = set(names), set(expected)
+    missing = [c for c in expected if c not in provided]
+    extra = [n for n in names if n not in expected_set]
+    # Signals the model's features are computed from (canonical channel prefix).
+    required_signals = [ch for ch in VIBRATION_CHANNELS if any(c.startswith(f"{ch}_") for c in expected)]
+    fields: dict[str, Any] = {
+        "model": {"name": model_name, "version": version,
+                  "feature_schema_version": schema_version,
+                  "trained_dataset_id": TRAINED_DATASET_ID},
+        "feature_schema": {"expected_count": len(expected), "provided_count": len(names),
+                           "missing": missing, "extra": extra},
+        "required_signals": required_signals,
+    }
+
+    adapter = ADAPTERS.get(dataset_id)
+    if adapter is None:
+        return respond(
+            UNSUPPORTED,
+            [f"no registered adapter for dataset_id {dataset_id!r} "
+             f"(registered: {sorted(ADAPTERS)}); its signals, units and sampling are unknown"],
+            "UNSUPPORTED_DATASET",
+            "No validated adapter exists for this dataset, so its signals, units and sampling "
+            "cannot be established. A new adapter (src/bearing_pdm/adapters.py) and a model "
+            "trained and validated on this dataset are both required before any prediction.",
+            ["a registered dataset adapter", "a model trained and validated on this dataset"],
+            adapter=None,
+            sampling={"rate_hz": user_rate, "source": "user" if user_rate else None,
+                      "compatible": None},
+            **fields,
+        )
+
+    documented = adapter.sampling_rate_hz
+    fields["adapter"] = {"dataset_id": adapter.dataset_id, "display_name": adapter.display_name,
+                         "sampling_rate_hz": documented}
+    if user_rate is not None:
+        rate_ok = documented is not None and math.isclose(
+            user_rate, documented, rel_tol=SAMPLING_RATE_REL_TOL)
+        fields["sampling"] = {"rate_hz": user_rate, "source": "user", "compatible": rate_ok}
+    else:
+        rate_ok = documented is not None
+        fields["sampling"] = {"rate_hz": documented,
+                              "source": "adapter_metadata" if rate_ok else None,
+                              "compatible": True if rate_ok else None}
+
+    if dataset_id != TRAINED_DATASET_ID:
+        return respond(
+            RETRAIN_REQUIRED,
+            [f"the selected model is trained only on {TRAINED_DATASET_ID!r}; {dataset_id!r} "
+             "is a different machine/operating domain (docs/decisions.md D11), whatever its "
+             "feature schema"],
+            "RETRAIN_REQUIRED",
+            f"A registered adapter exists for {dataset_id!r}, but the cached model is fit on "
+            f"{TRAINED_DATASET_ID!r} only and is never applied to other datasets. A model must "
+            "be trained and validated on this dataset's domain first.",
+            [f"a model trained and validated on {dataset_id!r}"],
+            **fields,
+        )
+
+    if not rate_ok:
+        return respond(
+            RETRAIN_REQUIRED,
+            [f"sampling_rate_hz {user_rate:g} differs from the {dataset_id!r} adapter's "
+             f"documented {documented:g} Hz that the model was trained at; its "
+             "frequency-domain features are not comparable"],
+            "RETRAIN_REQUIRED",
+            "The recordings were not acquired at the rate the model was trained on. The model "
+            "must be retrained and validated at this rate, or the supplied rate corrected if "
+            "it was wrong.",
+            [f"recordings at {documented:g} Hz, or a model trained and validated at "
+             f"{user_rate:g} Hz"],
+            **fields,
+        )
+
+    if missing:
+        return respond(
+            ADAPTER_REQUIRED,
+            [f"{len(missing)}/{len(expected)} model features are not provided: {missing}"],
+            "ADAPTER_REQUIRED",
+            f"Same domain as the model, but the provided features do not reproduce its schema. "
+            f"Re-extract features from the raw recordings through the registered "
+            f"{dataset_id!r} adapter and the project feature pipeline, which produce exactly "
+            "this schema. This gate never fills missing features.",
+            [f"feature: {c}" for c in missing] + [f"signal: {s}" for s in required_signals],
+            **fields,
+        )
+
+    reasons = []
+    if extra:
+        reasons.append(f"{len(extra)} extra feature(s) are not used by the model "
+                       "(features are selected by name; no semantic change)")
+    return respond(
+        FULLY_SUPPORTED, reasons, "NONE",
+        "Dataset domain, sampling rate and feature schema match the selected model's training "
+        "metadata. This is a metadata check only: it does not check data quality or whether "
+        "the actual feature values lie inside the training distribution (applicability.py), "
+        "and it is not a validation of any prediction.",
+        [],
+        **fields,
+    )
 
 
 @app.get("/predictions/history")

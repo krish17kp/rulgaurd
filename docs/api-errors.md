@@ -35,7 +35,7 @@ Success responses are unchanged. Every error, including the two 413 paths and th
 | 422 | `DEGENERATE_REFERENCE_WINDOW` | no | HI reference window shows no real variation (e.g. stuck sensor). |
 | 400 | `MALFORMED_REQUEST` | no | Body that cannot be parsed at the HTTP level (e.g. corrupt multipart framing), if it is not reported as `VALIDATION_ERROR`. |
 | 404 / 405 | `NOT_FOUND` / `METHOD_NOT_ALLOWED` | no | Unknown route / wrong method. |
-| 503 | `MODEL_UNAVAILABLE` | yes | A cached model or HI artifact is not loadable on this instance. Retry with backoff; if it persists an operator must provide the artifact. |
+| 503 | `MODEL_UNAVAILABLE` | yes | A cached model or HI artifact is not loadable on this instance (for `POST /models/compatibility`: `rul_selected_model.json` or the selected model's feature schema is missing or unusable). Retry with backoff; if it persists an operator must provide the artifact. |
 | 503 | `METRICS_UNAVAILABLE` | yes | `reports/metrics/rul_evaluation.json` is missing. |
 | 503 | `STORAGE_UNAVAILABLE` | yes | The service could not spool the upload to temporary storage. |
 | 503 | `MEMORY_LIMIT_EXCEEDED` | no | Inspecting the file exhausted memory. Retrying the same file will fail again; upload a smaller one. Best effort: a hard platform OOM kill cannot be turned into JSON. |
@@ -53,6 +53,11 @@ header) is `200` with `compatibility: "INVALID_INPUT"` and
 `required_action.kind: "FIX_INPUT_FILE"`; unsupported schemas are `UNSUPPORTED` /
 `ADAPTER_REQUIRED` (see `docs/dataset-compatibility.md`). Those carry no `code`/`retryable`
 because they are results, not failures; use `required_action.kind`.
+
+`POST /models/compatibility` likewise answers `200` with a `compatibility` state for every
+well-formed request, including `UNSUPPORTED`, `RETRAIN_REQUIRED` and `INVALID_INPUT`
+(empty/duplicate names). Only a body that fails schema validation is 422 `VALIDATION_ERROR`,
+and missing model metadata is 503 `MODEL_UNAVAILABLE`.
 
 ## Timeouts
 
