@@ -88,3 +88,8 @@ rate, speed, load) and the life time-scale check (elapsed time). Neither is part
 - If an unexpected error happens while the block is being built, every part is withheld with a
   generic reason. The prediction is still returned, and the log records only the exception
   type.
+
+`POST /analyze/rul` reuses this same reliability block for the last complete raw acquisition,
+after its domain, units, preprocessing and schema checks. It does not create an additional
+confidence score. See [raw acquisition analysis](feature-analysis.md#raw-acquisition-prediction-post-analyzerul)
+for the request contract and fail-closed outcomes.

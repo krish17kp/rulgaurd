@@ -404,6 +404,7 @@ _STAGES = {
     "/dataset/inspect": "dataset_inspect",
     "/models/compatibility": "model_compatibility",
     "/analyze/features": "analyze_features",
+    "/analyze/rul": "analyze_rul",
 }
 _REQUEST_OBS: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "bearing_pdm_request_obs", default=None
@@ -1262,13 +1263,16 @@ class _StageTracker:
     """Explicit per-stage state: every stage starts `skipped` and is set exactly
     once, so a failure is attributed to the stage that raised it."""
 
-    def __init__(self) -> None:
+    def __init__(self, names: tuple[str, ...] = ANALYZE_STAGES) -> None:
         self._stages = {name: PipelineStage(name=name, status="skipped",
                                             detail="Not run: an earlier stage failed.")
-                        for name in ANALYZE_STAGES}
+                        for name in names}
 
     def ok(self, name: str, detail: str) -> None:
         self._stages[name] = PipelineStage(name=name, status="ok", detail=detail)
+
+    def skip(self, name: str, detail: str) -> None:
+        self._stages[name] = PipelineStage(name=name, status="skipped", detail=detail)
 
     def fail(self, name: str, status_code: int, code: str, detail: str,
              retryable: bool = False, **extra: Any) -> ApiError:
@@ -1509,6 +1513,164 @@ def _analyze_spooled(path: str, filename: str | None, stages: _StageTracker, *, 
         feature_names=list(extracted[0].features), non_finite_feature_values=non_finite,
         windows=windows,
     )
+
+
+# Code-owned contract for legacy artifacts without embedded preprocessing metadata.
+FEMTO_PREPROCESSING_VERSION = "femto-acquisition-v1"
+RUL_ANALYZE_STAGES = (*ANALYZE_STAGES, "model_compatibility", "health_indicator", "prediction")
+
+
+class AnalyzeRulResponse(BaseModel):
+    stages: list[PipelineStage]
+    compatibility: str
+    model: dict[str, Any]
+    preprocessing_version: str
+    rul_seconds: float
+    rul_hours: float
+    prediction_produced: bool = True
+    health_indicator_produced: bool
+    health: HiResponse | None
+    warnings: list[str]
+    reliability: dict[str, Any] | None
+    supporting: dict[str, Any]
+
+
+@app.post("/analyze/rul", response_model=AnalyzeRulResponse)
+async def analyze_rul(
+    file: UploadFile,
+    dataset_id: str = Query(..., min_length=1, max_length=100),
+    units: str = Query(..., min_length=1, max_length=40),
+    preprocessing_version: str = Query(..., min_length=1, max_length=100),
+    sampling_rate_hz: float | None = Query(
+        default=None, gt=0, le=MAX_SAMPLING_RATE_HZ, allow_inf_nan=False),
+    window_samples: int = Query(default=DEFAULT_WINDOW_SAMPLES, ge=2,
+                                le=MAX_WINDOW_SAMPLES),
+    overlap_samples: int = Query(default=0, ge=0, le=MAX_WINDOW_SAMPLES),
+) -> AnalyzeRulResponse:
+    """Ordered FEMTO acquisitions (two named axes, g) to the latest RUL.
+
+    Dataset/units are caller attestations, never inferred from signal shape.
+    Reuse the staged feature pipeline for each axis and public prediction paths;
+    never fit, fill a missing feature, or predict from a truncated run.
+    """
+    stages = _StageTracker(RUL_ANALYZE_STAGES)
+    try:
+        return await _analyze_upload(
+            file, stages, dataset_id=dataset_id, units=units,
+            preprocessing_version=preprocessing_version, sampling_rate_hz=sampling_rate_hz,
+            window_samples=window_samples, overlap_samples=overlap_samples)
+    except ApiError as exc:
+        exc.extra = {**(exc.extra or {}), "prediction_produced": False,
+                     "rul_seconds": None, "rul_hours": None}
+        raise
+
+
+async def _analyze_upload(file, stages, *, dataset_id, units, preprocessing_version,
+                          sampling_rate_hz, window_samples, overlap_samples):
+    with tempfile.NamedTemporaryFile(suffix=".csv") as tmp:
+        try:
+            written = await _spool_upload(file, tmp)
+        except ApiError as exc:
+            raise stages.fail("upload", exc.status_code, exc.code, exc.detail,
+                              exc.retryable) from None
+        stages.ok("upload", f"{written} bytes received; temporary upload deleted after analysis.")
+        axes = []
+        for axis in VIBRATION_CHANNELS:
+            # A failed second channel must not inherit successful later stages
+            # from the first. Only combine stage success once both have passed.
+            channel_stages = _StageTracker(RUL_ANALYZE_STAGES)
+            channel_stages.ok("upload", stages._stages["upload"].detail)
+            axes.append(_analyze_spooled(
+                tmp.name, file.filename, channel_stages, channel=axis,
+                user_rate=sampling_rate_hz, window_samples=window_samples,
+                overlap_samples=overlap_samples))
+        for name in ANALYZE_STAGES[1:]:
+            details = [next(s.detail for s in a.stages if s.name == name) for a in axes]
+            stages.ok(name, " | ".join(details))
+
+    rows = []
+    for index in range(axes[0].windows_returned):
+        row = {}
+        for axis in axes:
+            # The extractor prefixes with the source header, routing uses the
+            # canonical name resolved by the existing high-confidence mapper.
+            prefix = axis.channel["column"] + "_"
+            row.update({axis.channel["canonical"] + "_" + key[len(prefix):]: value
+                        for key, value in axis.windows[index].features.items()})
+        rows.append(row)
+
+    stage = "model_compatibility"
+    try:
+        gate = model_compatibility(CompatibilityRequest(
+            dataset_id=dataset_id, feature_names=list(rows[0]),
+            sampling_rate_hz=axes[0].sampling["rate_hz"]))
+    except ApiError as exc:
+        raise stages.fail(stage, exc.status_code, exc.code, exc.detail, exc.retryable) from None
+    if gate.compatibility != FULLY_SUPPORTED:
+        raise stages.fail(stage, 422, gate.required_action.kind, "; ".join(gate.reasons),
+                          compatibility=gate.compatibility,
+                          required_action=gate.required_action.model_dump(), model=gate.model)
+    if gate.model.get("name") != "extra_trees":
+        raise stages.fail(stage, 503, "MODEL_UNAVAILABLE",
+                          "No raw acquisition serving contract exists for the selected model.")
+    if units != "g":
+        raise stages.fail(stage, 422, "UNITS_MISMATCH",
+                          "Both FEMTO acceleration axes must be confirmed in g; no conversion "
+                          "or inferred units are supported.", compatibility=ADAPTER_REQUIRED)
+    if (preprocessing_version != FEMTO_PREPROCESSING_VERSION or window_samples != 2560
+            or overlap_samples != 0):
+        raise stages.fail(stage, 422, "PREPROCESSING_MISMATCH",
+                          "The cached FEMTO pipeline requires femto-acquisition-v1: complete "
+                          "2560-sample acquisitions, no overlap or prior signal transforms.",
+                          compatibility=ADAPTER_REQUIRED)
+    if any(a.truncated or a.signal["rows"] % 2560 for a in axes):
+        raise stages.fail(stage, 422, "INCOMPLETE_RUN",
+                          "Supply complete acquisitions within the returned-window limit; "
+                          "a truncated prefix cannot represent the latest recording.",
+                          compatibility=INVALID_INPUT)
+    if any(value is None or not math.isfinite(value) for row in rows for value in row.values()):
+        raise stages.fail(stage, 422, "NON_FINITE_FEATURES",
+                          "Every derived feature must be finite; no median filling is allowed.",
+                          compatibility=INVALID_INPUT)
+    stages.ok(stage, "FEMTO domain, two axes in g, sampling, feature schema and "
+                    "preprocessing contract match the selected cached model.")
+    warnings = list(gate.reasons)
+    health = None
+    try:
+        health = predict_hi(HiRequest(dataset_id="femto", rows=[
+            {**row, "sequence_index": index} for index, row in enumerate(rows)]))
+    except ApiError as exc:
+        if exc.code != "INSUFFICIENT_ROWS":
+            raise stages.fail("health_indicator", exc.status_code, exc.code, exc.detail,
+                              exc.retryable) from None
+        # RUL uses signal features, not HI; retain /predict/rul's independent
+        # contract while explicitly withholding health for a short history.
+        warnings.append("Health indicator unavailable: " + exc.detail)
+        stages.skip("health_indicator", warnings[-1])
+    else:
+        stages.ok("health_indicator", "Reference HI and severity stages computed by /predict/hi.")
+    try:
+        prediction = predict_rul(PredictRulRequest(dataset_id="femto", features=rows[-1]))
+    except ApiError as exc:
+        raise stages.fail("prediction", exc.status_code, exc.code, exc.detail,
+                          exc.retryable) from None
+    if not math.isfinite(prediction.rul_seconds) or prediction.rul_seconds < 0:
+        raise stages.fail("prediction", 503, "INVALID_MODEL_OUTPUT",
+                          "The cached model did not produce a finite non-negative RUL.")
+    stages.ok("prediction", "RUL for the last complete acquisition computed by /predict/rul.")
+    warnings.append("Dataset identity, units and acquisition order are caller declarations; "
+                    "schema matching does not establish machine provenance or held-out accuracy.")
+    return AnalyzeRulResponse(
+        stages=stages.as_list(), compatibility=gate.compatibility, model=gate.model,
+        preprocessing_version=FEMTO_PREPROCESSING_VERSION,
+        rul_seconds=prediction.rul_seconds, rul_hours=prediction.rul_hours,
+        health_indicator_produced=health is not None, health=health, warnings=warnings,
+        reliability=prediction.reliability,
+        supporting={"latest_features": rows[-1], "latest_sequence_index": len(rows) - 1,
+                    "recordings": len(rows), "sampling": axes[0].sampling,
+                    "window": axes[0].window, "units": units,
+                    "hi_model_version": _model_provenance(
+                        "predict_hi", "reference_hi_model.joblib")[0]})
 
 
 # Vercel's Python runtime forwards the original request path (e.g. /api/health)

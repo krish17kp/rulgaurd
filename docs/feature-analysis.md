@@ -64,3 +64,72 @@ are in the channel's recorded units, which this endpoint does not determine.
   upload is kept only in a temporary file that is deleted when the request ends.
 - A numeric timestamp column in unknown units is checked for ordering only; it does not
   supply a sampling rate.
+
+## Raw acquisition prediction: `POST /analyze/rul`
+
+This endpoint extends the same upload, detection, validation, framing and feature extraction
+code to both canonical vibration axes, then calls `/models/compatibility`, `/predict/hi`
+and `/predict/rul` internally. It never fits a model. `/analyze/features` remains unchanged.
+
+Send one headered CSV containing `vibration_x` and `vibration_y` (or unambiguous,
+high-confidence header aliases). Each consecutive block of 2560 rows must be one complete
+FEMTO acquisition, in acquisition order, from the same bearing. Headerless source files must
+be exported with the adapter's two acceleration column names; acquisition timestamp columns
+are not sample timestamps and should not be relabelled as such.
+
+Required query parameters are `dataset_id`, `units` and `preprocessing_version`.
+The only accepted prediction contract is `dataset_id=femto`, `units=g`,
+`preprocessing_version=femto-acquisition-v1`. Supply `sampling_rate_hz=25600` unless regular
+sample timestamps in seconds establish that rate. Optional `window_samples` and
+`overlap_samples` must be 2560 and 0 respectively. Other domains receive the existing
+compatibility outcome (`RETRAIN_REQUIRED` or `UNSUPPORTED`) and no prediction, even if their
+feature names match (D11).
+
+`femto-acquisition-v1` is a **code-owned serving contract** for the legacy FEMTO artifacts,
+which do not embed units or preprocessing metadata. It means the original acceleration in g,
+complete 2560-sample acquisitions at 25.6 kHz, and the existing `features.py` formulas, with
+no filtering, resampling, scaling, overlapping windows or prior signal transforms. It does
+not claim artifact-embedded provenance. The existing selected-model allowlist binds this
+contract to the cached ExtraTrees path; introducing another model requires a separately
+validated serving contract. Model version and feature schema version are the existing
+content/schema fingerprints, returned in `model` alongside the training domain.
+
+Dataset identity, units and acquisition ordering are caller declarations. CSV shape cannot
+prove machine provenance, healthy initial conditions or whether an upstream transform was
+applied. Do not label an arbitrary CSV as FEMTO to bypass D11. No support for arbitrary
+machines is implied by a `FULLY_SUPPORTED` metadata outcome.
+
+The response adds `model_compatibility`, `health_indicator` and `prediction` to `stages`.
+It returns the **last complete acquisition's** `rul_seconds` and `rul_hours`, `model`,
+`compatibility`, `preprocessing_version`, `warnings`, and the unchanged
+[reliability block](prediction-reliability.md). `supporting` contains that acquisition's
+canonical derived features, zero-based sequence index, acquisition count, units, window,
+sampling provenance and HI model version. Raw samples are not returned or logged.
+
+`health` contains the existing `/predict/hi` response, including per-recording severity
+stages and thresholds. HI is not an input to the cached RUL regressor. For fewer recordings
+than its reference window requires, HI alone is withheld (`health=null`,
+`health_indicator_produced=false`, the health stage is `skipped`, and an explicit warning).
+The independently supported RUL is still returned. This preserves the existing independent
+prediction contracts; it does not fabricate a healthy baseline or a severity stage. With a
+long enough history, every `/predict/hi` validation applies, including its degenerate-reference
+check; a failure suppresses the whole result. Its reference window must represent the actual
+beginning of the run, with the healthy-baseline assumption described by that endpoint.
+
+Failures use **HTTP 4xx/5xx**, never HTTP 200 prediction success. Staged failures contain the
+error code, explanation, failed stage, stages array, `prediction_produced=false` and null
+`rul_seconds` / `rul_hours`. Framework query validation errors retain the standard 422 error
+contract and contain no prediction. Missing selected-model metadata, RUL or HI artifacts
+produce 503 `MODEL_UNAVAILABLE`. Clients must require HTTP success and
+`prediction_produced=true` before showing a RUL; health availability is separate.
+
+Additional fail-closed checks reject incompatible units/preprocessing, any absent model
+feature, non-finite derived values, trailing partial acquisitions, and runs exceeding the
+200-window response limit. Unlike feature-only inspection, prediction never silently drops
+samples or reports a capped prefix as the latest acquisition. Both channels undergo the
+same full-file validation; failures in the second channel leave downstream stages skipped.
+
+Tests compare the real FEMTO fixture's raw CSV result against `/predict/rul` for independently
+extracted features with numerical tolerances. HI orchestration is compared with `/predict/hi`
+on an explicitly artificial history composed of the two fixture acquisitions. These are
+numerical integration checks, not held-out predictive performance evidence.
