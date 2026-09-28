@@ -454,6 +454,20 @@ healthy-band edge (HI 0.928) lies inside the machine's own hour-to-hour variatio
 flickers during the first ~35% of life; the thresholds are deliberately not re-tuned on the one
 college run.
 
+## Goal 21: Reliability information comes only from cached, traceable sources
+
+`/predict/rul` returns a `reliability` block (`docs/prediction-reliability.md`). Its parts are:
+
+- held-out leave-one-bearing-out error from `reports/metrics/rul_evaluation.json`;
+- tree disagreement, labelled as a diagnostic;
+- the conformal interval from the calibrator already cached in `cross_domain_bundle.joblib`;
+- `applicability.assess` against that bundle's cached applicability model.
+
+The API never fits a calibrator. A cached calibrator is applied only if the bundled model
+reproduces the served prediction, and no interval is reported for a LOW-applicability row,
+because the exchangeability assumption behind the coverage target fails there. Missing parts are
+null and carry a reason. No confidence score or probability is synthesised.
+
 ## Goal 12: Timestamp units and regularity
 
 The previous profiler treated every numeric timestamp alias as seconds and used

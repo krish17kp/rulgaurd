@@ -39,6 +39,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from bearing_pdm import reliability
 from bearing_pdm.adapters import ADAPTERS, VIBRATION_CHANNELS
 from bearing_pdm.health import apply_reference_hi
 from bearing_pdm.history import configured_history_store
@@ -569,6 +570,39 @@ class PredictRulResponse(BaseModel):
     rul_hours: float
     features_used: list[str]
     features_missing: list[str]
+    # Goal 21 (docs/prediction-reliability.md): held-out error, tree disagreement,
+    # conformal interval and applicability, each traced to a file or computation
+    # and null-with-reason when unavailable. Never a confidence or probability.
+    reliability: dict[str, Any] | None = None
+
+
+# The cross-domain bundle (~200MB) is cached per path, outside _MODEL_CACHE, so it
+# is read once per process. It supplies only the cached conformal calibrator and
+# applicability model; its models are never used for the served prediction.
+_BUNDLE_NAME = "cross_domain_bundle.joblib"
+_BUNDLE_CACHE: dict[Path, Any] = {}
+
+
+def _load_bundle() -> Any | None:
+    path = MODELS_DIR / _BUNDLE_NAME
+    if path not in _BUNDLE_CACHE:
+        if not path.exists():
+            return None
+        _BUNDLE_CACHE[path] = joblib.load(path)
+    return _BUNDLE_CACHE[path]
+
+
+def _reliability(model: Any, x: Any, features: dict[str, float], prediction: float) -> dict:
+    """Reliability block; an unexpected failure withholds it (with a reason)
+    rather than failing a prediction that was itself computed correctly."""
+    try:
+        return reliability.build(METRICS_DIR / "rul_evaluation.json", _load_bundle(), model,
+                                 "extra_trees", x, features, prediction)
+    except Exception as exc:
+        _note(exc_type=type(exc).__name__)
+        return reliability.unavailable(
+            "Reliability information could not be computed from the cached artifacts; "
+            "none is reported.")
 
 
 @app.get("/health")
@@ -705,6 +739,7 @@ def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
         rul_hours=prediction / 3600.0,
         features_used=list(model.feature_columns),
         features_missing=missing,
+        reliability=_reliability(model, x, request.features, prediction),
     )
     return response
 
