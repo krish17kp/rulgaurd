@@ -117,7 +117,10 @@ cycles - see the branch's commit history for the specific defects found and fixe
   reference windows relative to the model's own fitted scale), `/dataset/inspect` (upload -
   inspect - classify into FULLY_SUPPORTED/ADAPTER_REQUIRED/UNSUPPORTED/INVALID_INPUT,
   fail-closed), `/predictions/history` (in-memory only, explicitly not durable). Request
-  logging middleware, Content-Length-based upload size rejection.
+  logging middleware, request-size rejection (413 above 66MB: from a declared Content-Length
+  before reading, or, for chunked requests with no Content-Length, by counting bytes as they
+  arrive and aborting once the limit is passed; `/dataset/inspect` additionally caps the file
+  itself at 64MB).
 - `frontend/`: Next.js 16 app (`/`, `/upload`, `/degradation`, `/predict`, `/evaluation`),
   calls the backend only through a typed client, no client-side prediction math, honest
   loading/error states, explicit scope/limitations panel.
@@ -133,7 +136,7 @@ Explicitly NOT done, stated here rather than implied by silence:
   security policy, so a real Vercel deploy currently has no model to load - needs external
   storage (Vercel Blob/S3/a GitHub Release asset), not implemented. See
   `docs/vercel-deployment.md`.
-- No database-backed prediction history, no auth, no chunked large-file upload beyond the
+- No database-backed prediction history, no auth, no resumable/large-file upload beyond the
   64MB `/dataset/inspect` cap, no Codex/watchdog failover system - all need real
   infrastructure or tooling not present in this environment.
 

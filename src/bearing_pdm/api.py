@@ -111,12 +111,56 @@ class DatasetProfileResponse(BaseModel):
 # No default beyond localhost dev - a production origin must be set explicitly, never wildcarded.
 _ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
 
+# Upper bound on a whole request body: MAX_UPLOAD_BYTES plus a small margin for
+# multipart boundary/header overhead on a file right at the limit. Enforced two
+# ways: from a declared Content-Length before anything is read (_log_requests),
+# and by counting bytes as they arrive when there is no Content-Length
+# (_BodyLimitMiddleware), so a chunked request can't be buffered unbounded.
+_MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 2 * 1024 * 1024
+
+
+def _request_too_large_detail() -> str:
+    return f"Request body exceeds {_MAX_REQUEST_BYTES // (1024 * 1024)}MB."
+
+
+class _BodyLimitMiddleware:
+    """Pure-ASGI byte counter around `receive`. Raises HTTPException(413) as
+    soon as the running total passes _MAX_REQUEST_BYTES, so the rest of the
+    body is never requested from the server or buffered by Starlette. FastAPI's
+    body parsing re-raises HTTPException as-is (any other exception would be
+    rewritten to a 4xx parse error)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        received = 0
+
+        async def counting_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > _MAX_REQUEST_BYTES:
+                    raise HTTPException(status_code=413, detail=_request_too_large_detail())
+            return message
+
+        await self.app(scope, counting_receive, send)
+
+
 app = FastAPI(
     title="RULGuard prediction service",
     description="Read-only inference over cached bearing_pdm artifacts. Never fits a model.",
     version="0.1.0",
 )
 
+# Added before CORS so it sits inside it: the 413 then carries CORS headers and
+# a browser client can read it.
+app.add_middleware(_BodyLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
@@ -135,20 +179,13 @@ if not logger.handlers:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 
 
-# Reject an oversized body from its declared Content-Length before Starlette
-# buffers it into a spooled temp file - review noted the previous approach
-# (checking cumulative bytes read inside /dataset/inspect) only limits what's
-# processed, not what's received. A small margin over MAX_UPLOAD_BYTES covers
-# multipart boundary/header overhead for a file right at the limit.
-_MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 2 * 1024 * 1024
-
-
 @app.middleware("http")
 async def _log_requests(request: Request, call_next):
-    # Only catches a request that declares its size via Content-Length. A
-    # chunked request with no Content-Length isn't covered here - it still
-    # relies on /dataset/inspect's own chunked-read loop (MAX_UPLOAD_BYTES)
-    # to reject an oversized body after the fact, same as before this check.
+    # Fast path: reject an oversized body from its declared Content-Length
+    # before reading any of it. A request with no Content-Length (chunked) is
+    # covered by _BodyLimitMiddleware's running byte count instead;
+    # /dataset/inspect's own read loop (MAX_UPLOAD_BYTES) then limits the file
+    # itself, separately from the multipart overhead allowed here.
     content_length = request.headers.get("content-length")
     if (
         content_length is not None
@@ -157,7 +194,7 @@ async def _log_requests(request: Request, call_next):
     ):
         return JSONResponse(
             status_code=413,
-            content={"detail": f"Request body exceeds {_MAX_REQUEST_BYTES // (1024 * 1024)}MB."},
+            content={"detail": _request_too_large_detail()},
         )
 
     request_id = uuid.uuid4().hex[:12]

@@ -183,6 +183,100 @@ def test_oversized_content_length_is_rejected_before_body_is_read():
     assert response.status_code == 413
 
 
+def _multipart_body(csv_bytes: bytes) -> tuple[bytes, str]:
+    boundary = "testboundary123"
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="file"; filename="chunked.csv"\r\n'
+        "Content-Type: text/csv\r\n\r\n"
+    ).encode() + csv_bytes + f"\r\n--{boundary}--\r\n".encode()
+    return body, f"multipart/form-data; boundary={boundary}"
+
+
+def _chunks(body: bytes, size: int):
+    for i in range(0, len(body), size):
+        yield body[i : i + size]
+
+
+def test_chunked_upload_without_content_length_is_sent_chunked():
+    body, content_type = _multipart_body(b"vibration_x\n1.0\n2.0\n")
+    request = client.build_request(
+        "POST", "/dataset/inspect", content=_chunks(body, 16), headers={"Content-Type": content_type}
+    )
+    assert "content-length" not in request.headers
+    assert request.headers["transfer-encoding"] == "chunked"
+
+
+def test_oversized_chunked_upload_is_rejected_with_413(monkeypatch):
+    monkeypatch.setattr(api, "_MAX_REQUEST_BYTES", 1024)
+    body, content_type = _multipart_body(b"vibration_x\n" + b"1.0\n" * 2000)
+    response = client.post(
+        "/dataset/inspect",
+        content=_chunks(body, 256),
+        headers={"Content-Type": content_type},
+    )
+    assert response.status_code == 413
+    assert response.json() == {"detail": "Request body exceeds 0MB."}
+
+
+def test_small_chunked_upload_still_succeeds():
+    body, content_type = _multipart_body(b"vibration_x,vibration_y\n0.1,0.2\n0.3,0.4\n0.2,0.1\n")
+    response = client.post(
+        "/dataset/inspect",
+        content=_chunks(body, 16),
+        headers={"Content-Type": content_type},
+    )
+    assert response.status_code == 200
+    assert response.json()["compatibility"] == "FULLY_SUPPORTED"
+
+
+def test_oversized_chunked_body_stops_being_read_once_limit_is_exceeded(monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(api, "_MAX_REQUEST_BYTES", 1000)
+    body, content_type = _multipart_body(b"vibration_x\n" + b"1.0\n" * 10_000)
+    pulled = 0
+    total_chunks = len(body) // 100 + 1
+    chunks = list(_chunks(body, 100))
+
+    async def receive():
+        nonlocal pulled
+        chunk = chunks[pulled]
+        pulled += 1
+        return {"type": "http.request", "body": chunk, "more_body": pulled < len(chunks)}
+
+    sent: list[dict] = []
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/dataset/inspect",
+        "raw_path": b"/dataset/inspect",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"content-type", content_type.encode()),
+            (b"transfer-encoding", b"chunked"),
+            (b"host", b"testserver"),
+        ],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+        "state": {},
+    }
+    asyncio.run(api.app(scope, receive, send))
+
+    assert sent[0]["type"] == "http.response.start"
+    assert sent[0]["status"] == 413
+    assert pulled < total_chunks
+    assert pulled <= 1000 // 100 + 2
+
+
 def test_vercel_app_mounts_routes_under_api_prefix():
     vercel_client = TestClient(api.vercel_app)
     response = vercel_client.get("/api/health")
