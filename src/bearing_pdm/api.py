@@ -26,13 +26,13 @@ from pathlib import Path
 from typing import Any
 
 import joblib
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from bearing_pdm.health import apply_reference_hi
-from bearing_pdm.profiler import profile_file
+from bearing_pdm.profiler import MAX_SAMPLING_RATE_HZ, profile_file, sampling_info
 from bearing_pdm.routing import MAX_NAN_FRACTION
 from bearing_pdm.stages import assign_stages
 
@@ -176,6 +176,7 @@ class DatasetProfileResponse(BaseModel):
     reasons: list[str]
     profile: dict[str, Any]
     required_action: RequiredAction
+    sampling: dict[str, Any]
 
 # Frontend origin(s) allowed to call this API, e.g. "https://rulguard.vercel.app,http://localhost:3000".
 # No default beyond localhost dev - a production origin must be set explicitly, never wildcarded.
@@ -624,7 +625,12 @@ def prediction_history() -> dict[str, Any]:
 
 
 @app.post("/dataset/inspect", response_model=DatasetProfileResponse)
-async def inspect_dataset(file: UploadFile) -> DatasetProfileResponse:
+async def inspect_dataset(
+    file: UploadFile,
+    sampling_rate_hz: float | None = Query(
+        default=None, gt=0, le=MAX_SAMPLING_RATE_HZ, allow_inf_nan=False,
+    ),
+) -> DatasetProfileResponse:
     """Upload -> inspect -> classify (goals.md's dataset-detection step), before
     anything is validated/preprocessed/fed to a model. Column-mapping only -
     see docs/dataset-compatibility.md for what this does and does not check."""
@@ -644,12 +650,17 @@ async def inspect_dataset(file: UploadFile) -> DatasetProfileResponse:
             raise HTTPException(status_code=422, detail="Uploaded file is empty.")
 
         profile = profile_file(tmp.name)
+        sampling = sampling_info(profile, tmp.name)
+        if sampling_rate_hz is not None:
+            sampling.update(rate_hz=sampling_rate_hz, source="user", required=False,
+                            message="User-supplied sampling rate; this does not validate "
+                                    "timestamp regularity or dataset/model compatibility.")
         profile["file"] = file.filename or profile["file"]  # real name, not the temp path
 
     compatibility, reasons, required_action = _classify_detailed(profile)
     return DatasetProfileResponse(
         compatibility=compatibility, reasons=reasons, profile=profile,
-        required_action=RequiredAction(**required_action),
+        required_action=RequiredAction(**required_action), sampling=sampling,
     )
 
 

@@ -453,3 +453,15 @@ sensitive early flag, not a failure prediction. On college specifically, the FEM
 healthy-band edge (HI 0.928) lies inside the machine's own hour-to-hour variation, so the stage
 flickers during the first ~35% of life; the thresholds are deliberately not re-tuned on the one
 college run.
+
+## Goal 12: Timestamp units and regularity
+
+The previous profiler treated every numeric timestamp alias as seconds and used
+its median interval even when intervals were irregular. A numeric `time` column
+does not establish a unit. Sampling derivation now requires explicit seconds
+(`time_s` or `seconds`) or ISO date-time values, and at least three samples with
+all intervals positive, finite, and within 1% of their median. Unknown units
+require metadata. The existing synthetic profiler fixture now names its known
+seconds unit explicitly; its rate, provenance, and warning assertions remain.
+The upload endpoint accepts explicit user rates without claiming that they
+repair irregular timing or validate any trained model for the dataset.

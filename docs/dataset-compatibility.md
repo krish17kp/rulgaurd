@@ -38,7 +38,7 @@ unchanged.
 ### `FULLY_SUPPORTED` means "structurally parseable"
 
 It does **not** mean a trained model is validated for this machine, and
-sampling rate and units are not determined here. Whether an existing model
+sampling information is reported separately; sensor units are not determined here. Whether an existing model
 applies, or a retrain is needed, is decided downstream by routing and
 applicability (cached FEMTO-fit models are never applied to other datasets,
 `docs/decisions.md` D11). The `required_action` message for this state says
@@ -68,9 +68,7 @@ parses it. It does not:
   raw upload, and answers a different question ("is this bearing's behavior
   in-distribution for the trained model"), not "is this file structurally
   parseable."
-- Determine sampling rate or units — `profiler.py`'s own docstring is explicit
-  that a headerless file cannot be mapped by name, and this endpoint never
-  guesses one.
+- Guess sampling rates or sensor units. A headerless upload needs explicit metadata.
 - Decide `RETRAIN_REQUIRED` as a distinct state from `ADAPTER_REQUIRED` — that
   distinction needs to know whether an adapter *could* be written for the
   format (structural) versus whether the sensor set is present but the model
@@ -81,3 +79,34 @@ A `FULLY_SUPPORTED` result from this endpoint means the file's columns look
 usable — it is not a claim that the full pipeline (feature extraction → HI →
 RUL) has been run against it, and it is not a substitute for the
 `quality_gate`/applicability checks the batch pipeline runs downstream.
+
+## Sampling information
+
+Every inspection response includes `sampling` with `rate_hz` (number or null),
+`source` (`metadata`, `timestamps`, `user`, or `unknown`), `regular` (boolean or
+null), `required` (whether a rate still needs to be supplied), and `message`.
+This is separate from structural compatibility and does not authorize model use.
+
+Supply an explicit rate with the query parameter `sampling_rate_hz`. It must be
+finite, greater than zero, and at most 1,000,000 Hz (an input validation ceiling,
+not a claim of validated hardware support). Invalid values return HTTP 422.
+An explicit value takes precedence and is echoed with source `user`; it does
+not prove regular sampling, and any detected irregularity remains in `regular`.
+
+Without a user value, the shared profiler logic derives Hz only from a single
+recognized timestamp column with numeric seconds explicitly named `time_s` or
+`seconds`, or ISO date-time values with a date and time. Numeric `time`, `t`,
+and `timestamp` columns have ambiguous units and require metadata. At least
+three timestamps are required. Every uploaded interval must be finite, positive,
+and within 1% of the median interval (relative tolerance 0.01, absolute tolerance
+zero). The rate is the reciprocal of that median. The timestamp check reads all
+rows of the size-limited upload, including rows beyond the structural profile's
+sample. Missing, duplicate, reversed, or irregular timestamps yield a null rate.
+Absent or insufficient timing evidence yields `regular: null`.
+
+No rate is inferred from row counts, filenames, or a presumed dataset. A single
+raw upload has no validated adapter identity, so it cannot currently emit
+`metadata`; documented adapter rates remain available to folder profiling.
+A missing rate sets `required: true`: frequency analysis needs user or dataset
+metadata. Providing a rate does not repair irregular timestamps or establish
+sensor units, machine compatibility, or permission to use a cached FEMTO model.
