@@ -133,3 +133,35 @@ Tests compare the real FEMTO fixture's raw CSV result against `/predict/rul` for
 extracted features with numerical tolerances. HI orchestration is compared with `/predict/hi`
 on an explicitly artificial history composed of the two fixture acquisitions. These are
 numerical integration checks, not held-out predictive performance evidence.
+
+## Deployment/offline parity regression (Goal 35)
+
+`tests/test_parity.py` exercises the Vercel ASGI `/api` mount locally against the
+committed FEMTO acceleration acquisitions. Upload preparation adds canonical
+headers to the two acceleration columns while preserving their original decimal
+text. The offline reference independently reads the same acquisitions through
+`FemtoAdapter` and `pipeline.canonical_feature_row`. Temperature features are not
+compared because this raw-upload contract accepts acceleration only.
+
+The tests observe the actual arrays passed to feature extraction and the actual
+ordered DataFrame passed to the serving estimator, without replacing computation.
+Chunk sizes of 997 and 4096 exercise split-window and single-chunk parsing.
+Samples, window boundaries, feature names, model-column order, sequence indices,
+and severity stages must match exactly. Features, model inputs, and HI use
+relative and absolute tolerances of `1e-12`, allowing only float64 roundoff.
+RUL uses relative tolerance `1e-12` and absolute tolerance `1e-9` seconds to allow
+parallel tree-sum reduction order; hours use `1e-12` for both tolerances.
+These tolerances are numerical allowances, not accuracy or confidence claims.
+
+RUL is compared with `modeling.predict_tree_baseline` using an independently
+loaded artifact. HI and stages are compared with `health.apply_reference_hi`
+and `stages.assign_stages`. Single acquisitions must withhold HI. A fixed
+60-acquisition alternation of the two fixtures exercises HI history processing;
+this artificial sequence is only plumbing evidence, not a real bearing history,
+a validated healthy reference, or a held-out evaluation. No model is fitted.
+
+Artifact-dependent cases skip with the missing artifact names when the model
+mount is unavailable; preprocessing/feature cases still run. This coverage does
+not establish parity with a live deployment or validate non-FEMTO inference.
+Any unexplained mismatch blocks release and must be investigated rather than
+hidden by widening tolerances.
