@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 
 from bearing_pdm.health import apply_reference_hi
 from bearing_pdm.profiler import profile_file
+from bearing_pdm.routing import MAX_NAN_FRACTION
 from bearing_pdm.stages import assign_stages
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -53,59 +54,128 @@ INVALID_INPUT = "INVALID_INPUT"
 _REQUIRED_ANY = {"vibration_x", "vibration_y", "vibration_z"}
 
 
-def _classify(profile: dict) -> tuple[str, list[str]]:
-    """Compatibility state for the uploaded file, from profile_file's output
-    only - see goals.md's fail-closed dataset-state requirement. This is a
-    column/header-level check; it does not run the trained applicability
-    model in applicability.py (that needs parsed recordings from a known
-    adapter, not an arbitrary upload) - see docs/dataset-compatibility.md."""
+_STRUCTURAL_ONLY = (
+    "FULLY_SUPPORTED here means the file is structurally parseable (a header maps to at "
+    "least one usable vibration column). It does NOT mean a trained model is validated for "
+    "this machine, and sampling rate and units are not determined by this check. Whether an "
+    "existing model applies (or a retrain is needed) is decided downstream by routing and "
+    "applicability, never at this endpoint, so RETRAIN_REQUIRED is never emitted here."
+)
+
+
+def _action(kind: str, message: str, missing: list[str]) -> dict[str, Any]:
+    return {"kind": kind, "message": message, "missing": missing}
+
+
+def _classify_detailed(profile: dict) -> tuple[str, list[str], dict[str, Any]]:
+    """Compatibility state, reasons and the machine-readable required action for
+    the uploaded file, from profile_file's output only - see goals.md's
+    fail-closed dataset-state requirement. This is a column/header-level check;
+    it does not run the trained applicability model in applicability.py (that
+    needs parsed recordings from a known adapter, not an arbitrary upload) and
+    cannot decide RETRAIN_REQUIRED - see docs/dataset-compatibility.md."""
     if not profile.get("readable"):
-        return INVALID_INPUT, profile.get("warnings", ["file could not be read"])
+        return INVALID_INPUT, profile.get("warnings", ["file could not be read"]), _action(
+            "FIX_INPUT_FILE",
+            "The file could not be read as a delimited numeric table. Upload a non-empty, "
+            "readable CSV/TSV/whitespace-separated file.",
+            ["a readable, non-empty tabular file"],
+        )
 
     columns = profile.get("columns", [])
     if not profile.get("has_header"):
         return ADAPTER_REQUIRED, [
             "no header row: column meanings cannot be inferred from names; "
             "a dataset adapter (see src/bearing_pdm/adapters.py) is required"
-        ]
+        ], _action(
+            "ADAPTER_REQUIRED",
+            "Without a header the columns cannot be mapped by name. A dataset adapter in "
+            "src/bearing_pdm/adapters.py must map the columns, and the sampling rate and units "
+            "must be provided as metadata because a headerless file does not carry them.",
+            [
+                "column mapping (a dataset adapter in src/bearing_pdm/adapters.py)",
+                "sampling_rate_hz (user-provided metadata; not derivable from this file)",
+                "vibration units (user-provided metadata; not derivable from this file)",
+            ],
+        )
 
     vibration_cols = [c for c in columns if c["canonical"] in _REQUIRED_ANY]
     if not vibration_cols:
         return UNSUPPORTED, [
             "no vibration channel recognised in the header "
             f"(saw: {[c['name'] for c in columns]})"
-        ]
-    if any(c["confidence"] == "low" for c in vibration_cols):
+        ], _action(
+            "NO_VIBRATION_CHANNEL",
+            "No column resembles a vibration channel. This service predicts bearing RUL from "
+            "vibration, so a file without one is a different prediction problem and no adapter "
+            "or retraining of the current models can make it usable. (If vibration is present "
+            "under a name this check does not recognise, an adapter with an explicit column "
+            "mapping is needed instead.)",
+            ["a vibration channel (vibration_x, vibration_y or vibration_z)"],
+        )
+    low = [c["name"] for c in vibration_cols if c["confidence"] == "low"]
+    if low:
         return ADAPTER_REQUIRED, [
-            f"vibration channel(s) matched only by a low-confidence name guess: "
-            f"{[c['name'] for c in vibration_cols if c['confidence'] == 'low']} - confirm before use"
-        ]
+            f"vibration channel(s) matched only by a low-confidence name guess: {low} "
+            "- confirm before use"
+        ], _action(
+            "ADAPTER_REQUIRED",
+            "Vibration columns were matched only by a fuzzy name guess. Add an adapter in "
+            "src/bearing_pdm/adapters.py (or an explicit column mapping) that confirms which "
+            "columns are vibration channels; the guess is never used silently.",
+            [f"confirmed column mapping for: {', '.join(low)} "
+             "(a dataset adapter in src/bearing_pdm/adapters.py)"],
+        )
 
     # Column-name mapping alone is fail-open: a column named vibration_x that is
     # non-numeric, empty, constant, or mostly missing is still "mapped" by name
     # but unusable as a signal - profile_file already flags exactly this.
     if profile.get("rows", 0) == 0:
-        return INVALID_INPUT, ["file has a header but no data rows"]
+        return INVALID_INPUT, ["file has a header but no data rows"], _action(
+            "FIX_INPUT_FILE", "The file has a header but no data rows.", ["data rows"],
+        )
     usable = [
         c for c in vibration_cols
-        if c["numeric"] and not c["constant"] and c["nan_fraction"] <= 0.5 and c["inf_count"] == 0
+        if c["numeric"] and not c["constant"]
+        and c["nan_fraction"] <= MAX_NAN_FRACTION and c["inf_count"] == 0
     ]
     if not usable:
-        return INVALID_INPUT, [
+        limit = f"{MAX_NAN_FRACTION:.0%}"
+        reasons = [
             f"{c['name']}: "
             + ("non-numeric values" if not c["numeric"]
                else "constant in the sampled rows" if c["constant"]
                else f"{c['inf_count']} infinite values" if c["inf_count"]
-               else f"{c['nan_fraction']:.0%} missing")
+               else f"more than {limit} missing ({c['nan_fraction']:.0%} rounded); "
+                    f"at most {limit} is accepted")
             for c in vibration_cols
         ]
-    return FULLY_SUPPORTED, []
+        return INVALID_INPUT, reasons, _action(
+            "FIX_INPUT_FILE",
+            "Every recognised vibration column is unusable as a signal (see reasons). Fix or "
+            "re-export the data; no adapter or model change addresses this.",
+            [f"at least one vibration channel that is numeric, non-constant, free of infinite "
+             f"values and at most {limit} missing"],
+        )
+    return FULLY_SUPPORTED, [], _action("STRUCTURAL_CHECK_ONLY", _STRUCTURAL_ONLY, [])
+
+
+def _classify(profile: dict) -> tuple[str, list[str]]:
+    state, reasons, _ = _classify_detailed(profile)
+    return state, reasons
+
+
+class RequiredAction(BaseModel):
+    kind: str
+    message: str
+    missing: list[str]
 
 
 class DatasetProfileResponse(BaseModel):
     compatibility: str
     reasons: list[str]
     profile: dict[str, Any]
+    required_action: RequiredAction
 
 # Frontend origin(s) allowed to call this API, e.g. "https://rulguard.vercel.app,http://localhost:3000".
 # No default beyond localhost dev - a production origin must be set explicitly, never wildcarded.
@@ -576,8 +646,11 @@ async def inspect_dataset(file: UploadFile) -> DatasetProfileResponse:
         profile = profile_file(tmp.name)
         profile["file"] = file.filename or profile["file"]  # real name, not the temp path
 
-    compatibility, reasons = _classify(profile)
-    return DatasetProfileResponse(compatibility=compatibility, reasons=reasons, profile=profile)
+    compatibility, reasons, required_action = _classify_detailed(profile)
+    return DatasetProfileResponse(
+        compatibility=compatibility, reasons=reasons, profile=profile,
+        required_action=RequiredAction(**required_action),
+    )
 
 
 # Vercel's Python runtime forwards the original request path (e.g. /api/health)

@@ -19,6 +19,45 @@ turns the profile into one of:
 | `UNSUPPORTED` | Has a header, but no column name resembles a vibration channel at all. |
 | `FULLY_SUPPORTED` | At least one vibration column mapped with high confidence, numeric, non-constant, ≤50% missing (same `MAX_NAN_FRACTION` as `routing.quality_gate`). |
 
+## `required_action`
+
+Every response also carries `required_action: {kind, message, missing: [..]}`
+naming exactly what is missing. `compatibility`, `reasons` and `profile` are
+unchanged.
+
+| State | `kind` | `missing` |
+|---|---|---|
+| `INVALID_INPUT` (unreadable/empty) | `FIX_INPUT_FILE` | a readable, non-empty tabular file |
+| `INVALID_INPUT` (header, no rows) | `FIX_INPUT_FILE` | data rows |
+| `INVALID_INPUT` (no usable vibration column) | `FIX_INPUT_FILE` | one vibration channel that is numeric, non-constant, finite and at most 50% missing |
+| `ADAPTER_REQUIRED` (no header) | `ADAPTER_REQUIRED` | column mapping (an adapter in `src/bearing_pdm/adapters.py`); `sampling_rate_hz` and vibration units as user-provided metadata, since a headerless file carries neither |
+| `ADAPTER_REQUIRED` (low-confidence match) | `ADAPTER_REQUIRED` | a confirmed column mapping for the named columns (adapter or explicit mapping) |
+| `UNSUPPORTED` | `NO_VIBRATION_CHANNEL` | a vibration channel. Without one this is a different prediction problem, not fixable by an adapter or retraining (unless vibration exists under an unrecognised name, in which case an adapter with an explicit mapping is needed) |
+| `FULLY_SUPPORTED` | `STRUCTURAL_CHECK_ONLY` | nothing structural; see below |
+
+### `FULLY_SUPPORTED` means "structurally parseable"
+
+It does **not** mean a trained model is validated for this machine, and
+sampling rate and units are not determined here. Whether an existing model
+applies, or a retrain is needed, is decided downstream by routing and
+applicability (cached FEMTO-fit models are never applied to other datasets,
+`docs/decisions.md` D11). The `required_action` message for this state says
+so explicitly.
+
+### `RETRAIN_REQUIRED` is never emitted
+
+`model.md` defines it (different machine domain, operating regime or feature
+schema; model not scientifically justified). That cannot be decided from a
+header-level check, and no heuristic is invented to fake it, so this endpoint
+never returns that state.
+
+### Missing-value wording
+
+A vibration column is rejected only when its missing fraction is **greater
+than** 50%; exactly 50% is accepted. The reason therefore reads
+`more than 50% missing (N% rounded); at most 50% is accepted` so a rounded
+figure is not mistaken for a rejection at the threshold itself.
+
 ## What it deliberately does NOT check
 
 This is a **column/header-level** check on one file, run before any adapter

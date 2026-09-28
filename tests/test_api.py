@@ -97,6 +97,8 @@ def test_dataset_inspect_requires_adapter_for_headerless_femto_fixture():
     body = response.json()
     assert body["compatibility"] == "ADAPTER_REQUIRED"
     assert body["profile"]["has_header"] is False
+    assert body["required_action"]["kind"] == "ADAPTER_REQUIRED"
+    assert any("adapters.py" in m for m in body["required_action"]["missing"])
 
 
 def test_dataset_inspect_fully_supported_for_clean_header_csv():
@@ -108,13 +110,19 @@ def test_dataset_inspect_fully_supported_for_clean_header_csv():
     body = response.json()
     assert body["compatibility"] == "FULLY_SUPPORTED"
     assert body["reasons"] == []
+    assert body["required_action"]["kind"] == "STRUCTURAL_CHECK_ONLY"
+    assert body["required_action"]["missing"] == []
+    assert "structurally parseable" in body["required_action"]["message"]
 
 
 def test_dataset_inspect_invalid_for_non_numeric_vibration_column():
     csv_bytes = b"vibration_x\nabc\ndef\n"
     response = client.post("/dataset/inspect", files={"file": ("bad.csv", csv_bytes, "text/csv")})
     assert response.status_code == 200
-    assert response.json()["compatibility"] == "INVALID_INPUT"
+    body = response.json()
+    assert body["compatibility"] == "INVALID_INPUT"
+    assert body["required_action"]["kind"] == "FIX_INPUT_FILE"
+    assert body["required_action"]["missing"]
 
 
 def test_dataset_inspect_invalid_for_all_missing_vibration_column():
@@ -161,7 +169,9 @@ def test_dataset_inspect_unsupported_for_no_recognisable_sensor_columns():
         "/dataset/inspect", files={"file": ("unrelated.csv", csv_bytes, "text/csv")}
     )
     assert response.status_code == 200
-    assert response.json()["compatibility"] == "UNSUPPORTED"
+    body = response.json()
+    assert body["compatibility"] == "UNSUPPORTED"
+    assert body["required_action"]["kind"] == "NO_VIBRATION_CHANNEL"
 
 
 def test_dataset_inspect_rejects_oversized_upload(monkeypatch):
