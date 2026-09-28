@@ -87,10 +87,13 @@ _STATUS_DEFAULTS: dict[int, tuple[str, bool]] = {
 class ApiError(HTTPException):
     """HTTPException carrying a stable machine-readable code and retryability."""
 
-    def __init__(self, status_code: int, code: str, detail: str, retryable: bool = False):
+    def __init__(self, status_code: int, code: str, detail: str, retryable: bool = False,
+                 extra: dict[str, Any] | None = None):
         super().__init__(status_code=status_code, detail=detail)
         self.code = code
         self.retryable = retryable
+        # Additional top-level body fields (e.g. /analyze/features' `stages`).
+        self.extra = extra
 
 
 def _error_content(detail: Any, code: str, retryable: bool, message: str | None = None) -> dict[str, Any]:
@@ -100,11 +103,12 @@ def _error_content(detail: Any, code: str, retryable: bool, message: str | None 
 
 
 def _error_response(status_code: int, code: str, detail: Any, retryable: bool = False,
-                    message: str | None = None, headers: dict[str, str] | None = None) -> JSONResponse:
+                    message: str | None = None, headers: dict[str, str] | None = None,
+                    extra: dict[str, Any] | None = None) -> JSONResponse:
     _note(code=code)
     return JSONResponse(
         status_code=status_code,
-        content=_error_content(detail, code, retryable, message),
+        content={**(extra or {}), **_error_content(detail, code, retryable, message)},
         headers=headers,
     )
 
@@ -343,6 +347,7 @@ async def _http_exception_handler(request: Request, exc: StarletteHTTPException)
         exc.detail,
         getattr(exc, "retryable", default_retryable),
         headers=getattr(exc, "headers", None),
+        extra=getattr(exc, "extra", None),
     )
 
 
@@ -398,6 +403,7 @@ _STAGES = {
     "/predictions/history": "prediction_history",
     "/dataset/inspect": "dataset_inspect",
     "/models/compatibility": "model_compatibility",
+    "/analyze/features": "analyze_features",
 }
 _REQUEST_OBS: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "bearing_pdm_request_obs", default=None
@@ -1127,6 +1133,36 @@ def _check_text_head(head: bytes) -> None:
         )
 
 
+async def _spool_upload(file: UploadFile, tmp: Any) -> int:
+    """Copy the upload into `tmp` in bounded chunks, enforcing MAX_UPLOAD_BYTES and
+    the text-head check. The caller owns `tmp` (a NamedTemporaryFile context, so
+    the raw file is deleted on every exit path)."""
+    written = 0
+    try:
+        while chunk := await file.read(UPLOAD_CHUNK_BYTES):
+            if written == 0:
+                _check_text_head(chunk)
+            written += len(chunk)
+            if written > MAX_UPLOAD_BYTES:
+                raise ApiError(
+                    413, "UPLOAD_TOO_LARGE",
+                    f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB inspection limit.",
+                )
+            tmp.write(chunk)
+        tmp.flush()
+    except OSError as exc:
+        _note(exc_type=type(exc).__name__)
+        raise ApiError(
+            503, "STORAGE_UNAVAILABLE",
+            "The service could not store the upload for inspection. Retry the upload.",
+            retryable=True,
+        ) from exc
+
+    if written == 0:
+        raise ApiError(422, "EMPTY_UPLOAD", "Uploaded file is empty.")
+    return written
+
+
 @app.post("/dataset/inspect", response_model=DatasetProfileResponse)
 async def inspect_dataset(
     file: UploadFile,
@@ -1138,30 +1174,7 @@ async def inspect_dataset(
     anything is validated/preprocessed/fed to a model. Column-mapping only -
     see docs/dataset-compatibility.md for what this does and does not check."""
     with tempfile.NamedTemporaryFile(suffix=Path(file.filename or "upload").suffix) as tmp:
-        written = 0
-        try:
-            while chunk := await file.read(UPLOAD_CHUNK_BYTES):
-                if written == 0:
-                    _check_text_head(chunk)
-                written += len(chunk)
-                if written > MAX_UPLOAD_BYTES:
-                    raise ApiError(
-                        413, "UPLOAD_TOO_LARGE",
-                        f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB inspection limit.",
-                    )
-                tmp.write(chunk)
-            tmp.flush()
-        except OSError as exc:
-            _note(exc_type=type(exc).__name__)
-            raise ApiError(
-                503, "STORAGE_UNAVAILABLE",
-                "The service could not store the upload for inspection. Retry the upload.",
-                retryable=True,
-            ) from exc
-
-        if written == 0:
-            raise ApiError(422, "EMPTY_UPLOAD", "Uploaded file is empty.")
-
+        await _spool_upload(file, tmp)
         try:
             profile = profile_file(tmp.name)
             sampling = sampling_info(profile, tmp.name)
@@ -1190,6 +1203,312 @@ async def inspect_dataset(
                 "The file could not be parsed as a delimited numeric table. Upload a "
                 "UTF-8 CSV/TSV/whitespace-separated file with a header row.",
             ) from exc
+
+
+# Upload -> dataset detection -> validation -> preprocessing -> feature extraction
+# (docs/feature-analysis.md). Deliberately stops before any health indicator or
+# model: no cached artifact is loaded, so D11's FEMTO-only gate is never in play.
+ANALYZE_STAGES = ("upload", "dataset_detection", "validation", "preprocessing",
+                  "feature_extraction")
+# The FEMTO acquisition length (0.1 s at 25.6 kHz, the project's fixed feature window).
+# Only a default window length in samples; it makes no claim about any other machine.
+DEFAULT_WINDOW_SAMPLES = 2560
+MAX_WINDOW_SAMPLES = 1_048_576
+# Response size bound; windows past it are not computed (the total is still exact).
+MAX_RETURNED_WINDOWS = 200
+ANALYZE_CHUNK_ROWS = 65_536
+
+
+class PipelineStage(BaseModel):
+    name: str
+    status: str = Field(..., description="ok | failed | skipped")
+    detail: str
+
+
+class AnalyzedWindow(BaseModel):
+    index: int
+    row_start: int = Field(..., description="Zero-based data row (header excluded), inclusive.")
+    row_stop: int = Field(..., description="Zero-based data row, exclusive.")
+    features: dict[str, float | None]
+
+
+class AnalyzeFeaturesResponse(BaseModel):
+    stages: list[PipelineStage]
+    file: str
+    channel: dict[str, Any]
+    compatibility: str
+    reasons: list[str]
+    sampling: dict[str, Any]
+    window: dict[str, Any]
+    signal: dict[str, Any]
+    windows_total: int
+    windows_returned: int
+    truncated: bool
+    truncation_note: str | None
+    feature_names: list[str]
+    non_finite_feature_values: int
+    windows: list[AnalyzedWindow]
+    health_indicator_produced: bool = False
+    prediction_produced: bool = False
+    note: str = (
+        "Per-window signal features only. No health indicator, stage or RUL is computed, "
+        "and no model is applied. Amplitude features are in the channel's recorded units, "
+        "which this endpoint does not determine; frequency features (Hz) depend on the "
+        "sampling rate reported in `sampling`."
+    )
+
+
+class _StageTracker:
+    """Explicit per-stage state: every stage starts `skipped` and is set exactly
+    once, so a failure is attributed to the stage that raised it."""
+
+    def __init__(self) -> None:
+        self._stages = {name: PipelineStage(name=name, status="skipped",
+                                            detail="Not run: an earlier stage failed.")
+                        for name in ANALYZE_STAGES}
+
+    def ok(self, name: str, detail: str) -> None:
+        self._stages[name] = PipelineStage(name=name, status="ok", detail=detail)
+
+    def fail(self, name: str, status_code: int, code: str, detail: str,
+             retryable: bool = False, **extra: Any) -> ApiError:
+        self._stages[name] = PipelineStage(name=name, status="failed", detail=detail)
+        _note(pipeline_stage=name)
+        return ApiError(status_code, code, detail, retryable,
+                        extra={"failed_stage": name, "stages": self.as_list(), **extra})
+
+    def as_list(self) -> list[dict[str, str]]:
+        return [stage.model_dump() for stage in self._stages.values()]
+
+
+def _resolve_channel(columns: list[dict], channel: str) -> tuple[dict | None, str | None, str]:
+    """(column, error code, reason). `channel` is a header name, or a canonical
+    vibration name that exactly one high-confidence header maps to."""
+    matches = [c for c in columns if c["name"] == channel] or [
+        c for c in columns if c["canonical"] == channel and c["confidence"] == "high"]
+    if not matches:
+        return None, "CHANNEL_NOT_FOUND", (
+            f"channel {channel!r} is neither a header column nor the canonical name of one "
+            f"(header: {[c['name'] for c in columns]})")
+    if len(matches) > 1:
+        return None, "CHANNEL_AMBIGUOUS", (
+            f"channel {channel!r} matches several columns {[c['name'] for c in matches]}; "
+            "name the header column exactly")
+    column = matches[0]
+    if column["canonical"] not in _REQUIRED_ANY or column["confidence"] != "high":
+        return None, "CHANNEL_NOT_VIBRATION", (
+            f"column {column['name']!r} is not a confirmed vibration channel "
+            f"(mapped to {column['canonical']!r}, {column['confidence']} confidence); "
+            "features are computed from vibration only")
+    return column, None, ""
+
+
+def _finite_or_none(value: float) -> float | None:
+    return value if math.isfinite(value) else None
+
+
+@app.post("/analyze/features", response_model=AnalyzeFeaturesResponse)
+async def analyze_features(
+    file: UploadFile,
+    channel: str = Query(..., min_length=1, max_length=200,
+                         description="Vibration header column (or its canonical name)."),
+    sampling_rate_hz: float | None = Query(
+        default=None, gt=0, le=MAX_SAMPLING_RATE_HZ, allow_inf_nan=False,
+        description="Required unless regular timestamps in seconds determine it."),
+    window_samples: int = Query(default=DEFAULT_WINDOW_SAMPLES, ge=2, le=MAX_WINDOW_SAMPLES),
+    overlap_samples: int = Query(default=0, ge=0, le=MAX_WINDOW_SAMPLES),
+) -> AnalyzeFeaturesResponse:
+    """Upload -> dataset detection -> validation -> preprocessing -> feature
+    extraction, with a `stages` array on success and on every staged failure
+    (docs/feature-analysis.md). The raw upload lives only in a temporary file
+    removed when the request ends."""
+    stages = _StageTracker()
+    with tempfile.NamedTemporaryFile(suffix=Path(file.filename or "upload").suffix) as tmp:
+        try:
+            written = await _spool_upload(file, tmp)
+        except ApiError as exc:
+            raise stages.fail("upload", exc.status_code, exc.code, exc.detail,
+                              exc.retryable) from None
+        stages.ok("upload", f"{written} bytes received and held in a temporary file that is "
+                            "deleted when the request ends.")
+        return _analyze_spooled(tmp.name, file.filename, stages, channel=channel,
+                                user_rate=sampling_rate_hz, window_samples=window_samples,
+                                overlap_samples=overlap_samples)
+
+
+def _analyze_spooled(path: str, filename: str | None, stages: _StageTracker, *, channel: str,
+                     user_rate: float | None, window_samples: int,
+                     overlap_samples: int) -> AnalyzeFeaturesResponse:
+    import pandas as pd
+
+    from bearing_pdm.chunked import WindowReport, iter_csv_window_features, scan_csv_column
+    from bearing_pdm.profiler import SAMPLING_RTOL
+
+    memory_detail = ("The file needs more memory than this service allows. Upload a smaller "
+                     "file or a shorter recording.")
+
+    # --- dataset detection: the same profile/classify /dataset/inspect uses.
+    stage = "dataset_detection"
+    try:
+        profile = profile_file(path)
+        sampling = sampling_info(profile, path)
+    except MemoryError:
+        raise stages.fail(stage, 503, "MEMORY_LIMIT_EXCEEDED", memory_detail) from None
+    except Exception as exc:
+        _note(exc_type=type(exc).__name__)
+        raise stages.fail(stage, 422, "MALFORMED_FILE",
+                          "The file could not be parsed as a delimited numeric table.") from None
+    compatibility, reasons, action = _classify_detailed(profile)
+    _note(compatibility=compatibility)
+    if not profile.get("readable"):
+        raise stages.fail(stage, 422, "MALFORMED_FILE",
+                          "The file could not be read as a delimited table: " + "; ".join(reasons),
+                          compatibility=compatibility)
+    if compatibility in (ADAPTER_REQUIRED, UNSUPPORTED):
+        raise stages.fail(stage, 422, action["kind"], "; ".join(reasons),
+                          compatibility=compatibility, required_action=action)
+    # A one-column file has no delimiter to sniff and reads identically as CSV.
+    if profile.get("delimiter") != "," and profile.get("n_columns") != 1:
+        raise stages.fail(stage, 422, "UNSUPPORTED_DELIMITER",
+                          f"Delimiter {profile.get('delimiter')!r} detected; this endpoint reads "
+                          "comma-separated files only. Re-export as CSV.",
+                          compatibility=compatibility)
+    column, code, reason = _resolve_channel(profile["columns"], channel)
+    if column is None:
+        raise stages.fail(stage, 422, code, reason, compatibility=compatibility)
+    stages.ok(stage, f"Header parsed; channel {column['name']!r} maps to {column['canonical']} "
+                     f"(high confidence). Structural state: {compatibility} (a column-mapping "
+                     "check only; no model applicability is decided here).")
+
+    # --- validation: timing metadata, window parameters and a whole-file scan of
+    # the channel (the profile above samples only the first rows).
+    stage = "validation"
+    problems: list[tuple[str, str]] = []
+    if overlap_samples >= window_samples:
+        problems.append(("INVALID_WINDOW", f"overlap_samples ({overlap_samples}) must be smaller "
+                                           f"than window_samples ({window_samples})"))
+    derived = sampling["rate_hz"] if sampling["source"] == "timestamps" else None
+    if sampling["regular"] is False:
+        problems.append(("TIMESTAMPS_IRREGULAR", sampling["message"]))
+    if user_rate is not None:
+        if derived is not None and not math.isclose(user_rate, derived, rel_tol=SAMPLING_RTOL):
+            problems.append(("SAMPLING_RATE_CONFLICT",
+                             f"sampling_rate_hz {user_rate:g} disagrees with the {derived:g} Hz "
+                             "implied by the file's timestamps (1% tolerance)"))
+        rate, rate_source = user_rate, "user"
+    elif derived is not None:
+        rate, rate_source = derived, "timestamps"
+    else:
+        rate, rate_source = None, None
+        problems.append(("SAMPLING_RATE_REQUIRED",
+                         "no sampling_rate_hz was supplied and the file has no regular timestamp "
+                         "column in seconds to derive one from; frequency features need it"))
+
+    timestamps = [c for c in profile["columns"] if c["canonical"] == "timestamp"]
+    order_column = timestamps[0]["name"] if len(timestamps) == 1 and timestamps[0]["numeric"] else None
+    try:
+        scan = scan_csv_column(path, column=column["name"], chunk_rows=ANALYZE_CHUNK_ROWS,
+                               order_column=order_column)
+    except MemoryError:
+        raise stages.fail(stage, 503, "MEMORY_LIMIT_EXCEEDED", memory_detail) from None
+    except (ValueError, pd.errors.ParserError) as exc:
+        _note(exc_type=type(exc).__name__)
+        raise stages.fail(stage, 422, "MALFORMED_FILE",
+                          "The file could not be read in full as a comma-separated table "
+                          "(e.g. ragged rows after the sampled head).") from None
+    name = column["name"]
+    if scan.rows < window_samples:
+        problems.append(("INSUFFICIENT_SAMPLES",
+                         f"{scan.rows} samples in {name!r}; at least one complete window of "
+                         f"{window_samples} samples is required"))
+    if scan.non_numeric:
+        problems.append(("NON_NUMERIC_SIGNAL", f"{name!r} has {scan.non_numeric} non-numeric "
+                                               "value(s)"))
+    if scan.infinite:
+        problems.append(("NON_FINITE_SIGNAL", f"{name!r} has {scan.infinite} infinite value(s)"))
+    if scan.rows and (scan.finite_min is None or scan.finite_min == scan.finite_max):
+        problems.append(("CONSTANT_SIGNAL", f"{name!r} has no variation across the whole file "
+                                            "(constant or no finite values)"))
+    missing_fraction = scan.missing / scan.rows if scan.rows else 0.0
+    if missing_fraction > MAX_NAN_FRACTION:
+        problems.append(("EXCESSIVE_MISSING",
+                         f"{missing_fraction:.1%} of {name!r} is missing; at most "
+                         f"{MAX_NAN_FRACTION:.0%} is accepted"))
+    if scan.order_column_rows_out_of_order:
+        problems.append(("SAMPLES_OUT_OF_ORDER",
+                         f"timestamp column {order_column!r} is not strictly increasing in "
+                         f"{scan.order_column_rows_out_of_order} row(s)"))
+    if problems:
+        raise stages.fail(stage, 422, problems[0][0], "; ".join(r for _, r in problems),
+                          compatibility=compatibility,
+                          validation_errors=[{"code": c, "reason": r} for c, r in problems])
+    stages.ok(stage, f"{scan.rows} samples, all numeric and finite where present, "
+                     f"{scan.missing} missing ({missing_fraction:.1%}), not constant; "
+                     f"sampling rate {rate:g} Hz from {rate_source}"
+                     + (f"; {order_column!r} strictly increasing" if order_column else "") + ".")
+
+    # --- preprocessing: framing only; windows_total is exact from the scan.
+    step = window_samples - overlap_samples
+    windows_total = (scan.rows - window_samples) // step + 1
+    covered = (windows_total - 1) * step + window_samples
+    stages.ok("preprocessing",
+              f"Framing only: {windows_total} complete window(s) of {window_samples} samples "
+              f"({window_samples / rate:g} s), overlap {overlap_samples}, stride {step}; the "
+              f"last {scan.rows - covered} sample(s) do not fill a window and are not used. No "
+              "filtering, detrending, resampling, padding or imputation; missing samples are "
+              "omitted inside each window by the feature formulas.")
+
+    # --- feature extraction: the bounded-memory chunked extractor, stopped at the cap.
+    stage = "feature_extraction"
+    expected = min(windows_total, MAX_RETURNED_WINDOWS)
+    stream = iter_csv_window_features(
+        path, vibration_column=name, window_samples=window_samples,
+        overlap_samples=overlap_samples, chunk_rows=ANALYZE_CHUNK_ROWS, sample_rate_hz=rate,
+        report=WindowReport())
+    extracted = []
+    try:
+        for item in stream:
+            extracted.append(item)
+            if len(extracted) >= expected:
+                break
+    except MemoryError:
+        raise stages.fail(stage, 503, "MEMORY_LIMIT_EXCEEDED", memory_detail) from None
+    except (ValueError, pd.errors.ParserError) as exc:
+        _note(exc_type=type(exc).__name__)
+        raise stages.fail(stage, 422, "FEATURE_EXTRACTION_FAILED",
+                          "The feature extractor could not read the validated channel.") from None
+    finally:
+        stream.close()
+    if len(extracted) != expected:
+        raise stages.fail(stage, 500, "FEATURE_EXTRACTION_FAILED",
+                          f"Extracted {len(extracted)} window(s) where the validated sample "
+                          f"count implies {expected}; no partial result is returned.")
+
+    windows, non_finite = [], 0
+    for index, item in enumerate(extracted):
+        features = {k: _finite_or_none(float(v)) for k, v in item.features.items()}
+        non_finite += sum(v is None for v in features.values())
+        windows.append(AnalyzedWindow(index=index, row_start=item.row_start,
+                                      row_stop=item.row_stop, features=features))
+    truncated = windows_total > len(windows)
+    stages.ok(stage, f"{len(windows)} of {windows_total} window(s) featurised"
+                     + (f" (response capped at {MAX_RETURNED_WINDOWS})" if truncated else "")
+                     + f"; {non_finite} non-finite feature value(s) returned as null.")
+    return AnalyzeFeaturesResponse(
+        stages=stages.as_list(), file=filename or "upload",
+        channel={"column": name, "canonical": column["canonical"]},
+        compatibility=compatibility, reasons=reasons,
+        sampling={"rate_hz": rate, "source": rate_source,
+                  "timestamp_check": sampling["message"], "timestamps_regular": sampling["regular"]},
+        window={"samples": window_samples, "overlap_samples": overlap_samples,
+                "step_samples": step, "seconds": window_samples / rate},
+        signal={"rows": scan.rows, "missing": scan.missing, "missing_fraction": missing_fraction},
+        windows_total=windows_total, windows_returned=len(windows), truncated=truncated,
+        truncation_note=(f"Only the first {len(windows)} of {windows_total} windows are "
+                         "returned; later windows were not computed." if truncated else None),
+        feature_names=list(extracted[0].features), non_finite_feature_values=non_finite,
+        windows=windows,
+    )
 
 
 # Vercel's Python runtime forwards the original request path (e.g. /api/health)

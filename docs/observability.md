@@ -17,11 +17,12 @@ parsing. Records with status >= 500 are `WARNING`, all others `INFO`.
 | `method`, `path` | always | HTTP method and URL path. Control characters in the path are replaced and it is cut at 200 characters, so a request cannot forge log lines. The query string is never logged. |
 | `status` | always | HTTP status returned. |
 | `duration_ms` | always | Wall-clock processing time of the request, milliseconds. |
-| `stage` | always | Endpoint-level pipeline stage: `health`, `model_info`, `model_evaluation`, `predict_rul`, `predict_hi`, `prediction_history`, `dataset_inspect`, `model_compatibility`, or `unmatched` (unknown route). The Vercel `/api` prefix is ignored. |
+| `stage` | always | Endpoint-level pipeline stage: `health`, `model_info`, `model_evaluation`, `predict_rul`, `predict_hi`, `prediction_history`, `dataset_inspect`, `model_compatibility`, `analyze_features`, or `unmatched` (unknown route). The Vercel `/api` prefix is ignored. |
 | `model_name` | when a model artifact was loaded for the request | `extra_trees` (`/predict/rul`, `/models/compatibility`) or `reference_hi` (`/predict/hi`). Also set on a failure that happens after the model loaded (for example `FEATURES_MISSING`). |
 | `model_version` | with `model_name` | `sha256:` content hash of the artifact file(s) - the same value stored in prediction history. |
 | `feature_schema_version` | with `model_name` | `sha256:` fingerprint of the model's ordered feature-column names (not values) - the same value stored in prediction history. |
-| `compatibility` | `/dataset/inspect` when the file was classified | `FULLY_SUPPORTED`, `ADAPTER_REQUIRED`, `UNSUPPORTED` or `INVALID_INPUT`. This is the structural check only, see `docs/dataset-compatibility.md`. On `/models/compatibility`, the model-compatibility state (which can also be `RETRAIN_REQUIRED`). Feature names are never logged. |
+| `pipeline_stage` | `/analyze/features` failures | The inner stage that failed (`upload`, `dataset_detection`, `validation`, `preprocessing`, `feature_extraction`), same as `failed_stage` in the response body (`docs/feature-analysis.md`). |
+| `compatibility` | `/dataset/inspect` and `/analyze/features` when the file was classified | `FULLY_SUPPORTED`, `ADAPTER_REQUIRED`, `UNSUPPORTED` or `INVALID_INPUT`. This is the structural check only, see `docs/dataset-compatibility.md`. On `/models/compatibility`, the model-compatibility state (which can also be `RETRAIN_REQUIRED`). Feature names are never logged. |
 | `code` | on every error response | The stable error code from `docs/api-errors.md`, identical to the `code` in the response body. Absent on success. |
 | `exc_type` | when an exception was caught or turned into an error | The exception class name only (for example `ValueError`, `OSError`). |
 

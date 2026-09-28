@@ -98,3 +98,53 @@ def iter_csv_window_features(
             del values, chunk
     report.trailing_partial_rows = filled
     report.completed = True
+
+
+@dataclass
+class ColumnScan:
+    """Whole-file quality counts for one column, read exactly as
+    iter_csv_window_features reads it (so `rows` is the sample count it windows)."""
+
+    rows: int = 0
+    missing: int = 0
+    non_numeric: int = 0
+    infinite: int = 0
+    finite_min: float | None = None
+    finite_max: float | None = None
+    order_column_rows_out_of_order: int | None = None
+
+
+def scan_csv_column(path: str | Path, *, column: str, chunk_rows: int,
+                    order_column: str | None = None) -> ColumnScan:
+    """Bounded-memory pass over one headered CSV column; values are counted, never kept.
+
+    `order_column`, when given, must be numeric and strictly increasing; the
+    number of rows where it is not (missing/non-numeric included) is reported.
+    """
+    if isinstance(chunk_rows, bool) or not isinstance(chunk_rows, int) or chunk_rows <= 0:
+        raise ValueError("chunk_rows must be a positive integer")
+    columns = [column] if order_column in (None, column) else [column, order_column]
+    scan = ColumnScan(order_column_rows_out_of_order=0 if order_column else None)
+    previous = -np.inf
+    with pd.read_csv(path, header=0, usecols=columns, dtype=str, chunksize=chunk_rows,
+                     skip_blank_lines=False) as reader:
+        for chunk in reader:
+            raw = chunk[column]
+            values = pd.to_numeric(raw, errors="coerce").to_numpy(dtype=np.float64)
+            scan.rows += len(values)
+            scan.missing += int(raw.isna().sum())
+            scan.non_numeric += int((raw.notna() & np.isnan(values)).sum())
+            scan.infinite += int(np.isinf(values).sum())
+            finite = values[np.isfinite(values)]
+            if finite.size:
+                low, high = float(finite.min()), float(finite.max())
+                scan.finite_min = low if scan.finite_min is None else min(scan.finite_min, low)
+                scan.finite_max = high if scan.finite_max is None else max(scan.finite_max, high)
+            if order_column:
+                order = pd.to_numeric(chunk[order_column], errors="coerce").to_numpy(dtype=np.float64)
+                steps = np.diff(np.concatenate(([previous], order)))
+                scan.order_column_rows_out_of_order += int((~(steps > 0)).sum())
+                if order.size:
+                    previous = order[-1] if np.isfinite(order[-1]) else np.inf
+            del raw, values, chunk
+    return scan

@@ -33,6 +33,9 @@ Success responses are unchanged. Every error, including the two 413 paths and th
 | 422 | `INSUFFICIENT_ROWS` | no | HI request shorter than the model's reference window. |
 | 422 | `NON_FINITE_FEATURES` | no | NaN/inf in HI feature values. |
 | 422 | `DEGENERATE_REFERENCE_WINDOW` | no | HI reference window shows no real variation (e.g. stuck sensor). |
+| 422 | `ADAPTER_REQUIRED`, `NO_VIBRATION_CHANNEL`, `UNSUPPORTED_DELIMITER`, `CHANNEL_NOT_FOUND`, `CHANNEL_AMBIGUOUS`, `CHANNEL_NOT_VIBRATION` | no | `POST /analyze/features`, `dataset_detection` stage: the file or chosen channel cannot be mapped (see `docs/feature-analysis.md`). |
+| 422 | `SAMPLING_RATE_REQUIRED`, `SAMPLING_RATE_CONFLICT`, `TIMESTAMPS_IRREGULAR`, `SAMPLES_OUT_OF_ORDER`, `INVALID_WINDOW`, `INSUFFICIENT_SAMPLES`, `NON_NUMERIC_SIGNAL`, `NON_FINITE_SIGNAL`, `CONSTANT_SIGNAL`, `EXCESSIVE_MISSING` | no | `POST /analyze/features`, `validation` stage. `code` is the first problem; `validation_errors` lists all of them. |
+| 422 / 500 | `FEATURE_EXTRACTION_FAILED` | no | `POST /analyze/features`, `feature_extraction` stage: the extractor could not read the validated channel (422) or produced a different window count than validation implied (500). |
 | 400 | `MALFORMED_REQUEST` | no | Body that cannot be parsed at the HTTP level (e.g. corrupt multipart framing), if it is not reported as `VALIDATION_ERROR`. |
 | 404 / 405 | `NOT_FOUND` / `METHOD_NOT_ALLOWED` | no | Unknown route / wrong method. |
 | 503 | `MODEL_UNAVAILABLE` | yes | A cached model or HI artifact is not loadable on this instance (for `POST /models/compatibility`: `rul_selected_model.json` or the selected model's feature schema is missing or unusable). Retry with backoff; if it persists an operator must provide the artifact. |
@@ -44,6 +47,12 @@ Success responses are unchanged. Every error, including the two 413 paths and th
 Other HTTP statuses raised by the framework keep a `code` from a default table
 (`408 REQUEST_TIMEOUT`, `429 RATE_LIMITED`, `504 GATEWAY_TIMEOUT` are retryable;
 unlisted statuses get `HTTP_ERROR`, not retryable).
+
+`POST /analyze/features` errors raised inside the pipeline additionally carry `failed_stage`
+and the full `stages` array (and, where relevant, `compatibility`, `required_action` or
+`validation_errors`). Upload errors on that endpoint use the same codes as above with
+`failed_stage: "upload"`. The middleware-level `REQUEST_TOO_LARGE` and a framework
+`VALIDATION_ERROR` (e.g. no `channel`) happen before the pipeline and carry no `stages`.
 
 ## Not errors
 
