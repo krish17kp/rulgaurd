@@ -89,7 +89,8 @@ This is separate from structural compatibility and does not authorize model use.
 
 Supply an explicit rate with the query parameter `sampling_rate_hz`. It must be
 finite, greater than zero, and at most 1,000,000 Hz (an input validation ceiling,
-not a claim of validated hardware support). Invalid values return HTTP 422.
+not a claim of validated hardware support). Invalid values return HTTP 422
+(`VALIDATION_ERROR`).
 An explicit value takes precedence and is echoed with source `user`; it does
 not prove regular sampling, and any detected irregularity remains in `regular`.
 
@@ -110,3 +111,12 @@ raw upload has no validated adapter identity, so it cannot currently emit
 A missing rate sets `required: true`: frequency analysis needs user or dataset
 metadata. Providing a rate does not repair irregular timestamps or establish
 sensor units, machine compatibility, or permission to use a cached FEMTO model.
+
+## Upload errors
+
+Files that are not delimited text are refused before profiling with a coded error
+instead of a classification: binary content is 415 `UNSUPPORTED_FILE_TYPE`, empty is
+422 `EMPTY_UPLOAD`, non-UTF-8 is 422 `UNDECODABLE_FILE`, a giant first line or parser
+crash is 422 `MALFORMED_FILE`, and size limits are 413. Every error carries `code`,
+`retryable` and `message` alongside `detail`; see `docs/api-errors.md` for the full
+catalogue.

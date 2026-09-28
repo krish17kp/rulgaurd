@@ -15,6 +15,7 @@ with 422 rather than silently returning a wrong number.
 
 from __future__ import annotations
 
+import codecs
 import logging
 import os
 import tempfile
@@ -27,9 +28,12 @@ from typing import Any
 
 import joblib
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from bearing_pdm.health import apply_reference_hi
 from bearing_pdm.profiler import MAX_SAMPLING_RATE_HZ, profile_file, sampling_info
@@ -52,6 +56,48 @@ UNSUPPORTED = "UNSUPPORTED"
 INVALID_INPUT = "INVALID_INPUT"
 
 _REQUIRED_ANY = {"vibration_x", "vibration_y", "vibration_z"}
+
+# Error contract (docs/api-errors.md): every error body keeps FastAPI's `detail`
+# and adds a stable UPPER_SNAKE `code`, a `retryable` bool and a user-readable
+# `message`. `retryable` is True only when the same request could succeed later
+# without the caller changing it.
+_STATUS_DEFAULTS: dict[int, tuple[str, bool]] = {
+    400: ("MALFORMED_REQUEST", False),
+    404: ("NOT_FOUND", False),
+    405: ("METHOD_NOT_ALLOWED", False),
+    408: ("REQUEST_TIMEOUT", True),
+    413: ("REQUEST_TOO_LARGE", False),
+    415: ("UNSUPPORTED_FILE_TYPE", False),
+    422: ("VALIDATION_ERROR", False),
+    429: ("RATE_LIMITED", True),
+    500: ("INTERNAL_ERROR", False),
+    503: ("SERVICE_UNAVAILABLE", True),
+    504: ("GATEWAY_TIMEOUT", True),
+}
+
+
+class ApiError(HTTPException):
+    """HTTPException carrying a stable machine-readable code and retryability."""
+
+    def __init__(self, status_code: int, code: str, detail: str, retryable: bool = False):
+        super().__init__(status_code=status_code, detail=detail)
+        self.code = code
+        self.retryable = retryable
+
+
+def _error_content(detail: Any, code: str, retryable: bool, message: str | None = None) -> dict[str, Any]:
+    if message is None:
+        message = detail if isinstance(detail, str) else "The request could not be processed."
+    return {"detail": detail, "code": code, "retryable": retryable, "message": message}
+
+
+def _error_response(status_code: int, code: str, detail: Any, retryable: bool = False,
+                    message: str | None = None, headers: dict[str, str] | None = None) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content=_error_content(detail, code, retryable, message),
+        headers=headers,
+    )
 
 
 _STRUCTURAL_ONLY = (
@@ -184,9 +230,11 @@ _ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http:/
 
 # Upper bound on a whole request body: MAX_UPLOAD_BYTES plus a small margin for
 # multipart boundary/header overhead on a file right at the limit. Enforced two
-# ways: from a declared Content-Length before anything is read (_log_requests),
-# and by counting bytes as they arrive when there is no Content-Length
-# (_BodyLimitMiddleware), so a chunked request can't be buffered unbounded.
+# ways inside _BodyLimitMiddleware: from a declared Content-Length before
+# anything is read, and by counting bytes as they arrive when there is no
+# Content-Length, so a chunked request can't be buffered unbounded.
+# /dataset/inspect's own read loop (MAX_UPLOAD_BYTES) then limits the file
+# itself, separately from the multipart overhead allowed here.
 _MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 2 * 1024 * 1024
 
 
@@ -194,12 +242,18 @@ def _request_too_large_detail() -> str:
     return f"Request body exceeds {_MAX_REQUEST_BYTES // (1024 * 1024)}MB."
 
 
+def _request_too_large() -> ApiError:
+    return ApiError(413, "REQUEST_TOO_LARGE", _request_too_large_detail())
+
+
 class _BodyLimitMiddleware:
-    """Pure-ASGI byte counter around `receive`. Raises HTTPException(413) as
-    soon as the running total passes _MAX_REQUEST_BYTES, so the rest of the
-    body is never requested from the server or buffered by Starlette. FastAPI's
-    body parsing re-raises HTTPException as-is (any other exception would be
-    rewritten to a 4xx parse error)."""
+    """Pure-ASGI body limit. Rejects a declared Content-Length over
+    _MAX_REQUEST_BYTES before reading anything, and otherwise raises a 413
+    ApiError as soon as the running byte total passes the limit, so the rest of
+    the body is never requested from the server or buffered by Starlette.
+    FastAPI's body parsing re-raises HTTPException as-is (any other exception
+    would be rewritten to a 4xx parse error). It sits inside CORSMiddleware and
+    inside _log_requests, so both 413 paths carry CORS headers and X-Request-ID."""
 
     def __init__(self, app):
         self.app = app
@@ -207,6 +261,12 @@ class _BodyLimitMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             await self.app(scope, receive, send)
+            return
+
+        declared = dict(scope.get("headers") or []).get(b"content-length", b"")
+        if declared.isdigit() and int(declared) > _MAX_REQUEST_BYTES:
+            error = _request_too_large()
+            await _error_response(error.status_code, error.code, error.detail)(scope, receive, send)
             return
 
         received = 0
@@ -217,10 +277,48 @@ class _BodyLimitMiddleware:
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
                 if received > _MAX_REQUEST_BYTES:
-                    raise HTTPException(status_code=413, detail=_request_too_large_detail())
+                    raise _request_too_large()
             return message
 
         await self.app(scope, counting_receive, send)
+
+
+class _ErrorBoundaryMiddleware:
+    """Last-resort JSON 500 for anything a route did not handle, so a client
+    never gets a bare traceback or an HTML error page. Sits inside CORS. Logs
+    only the exception type: exception messages from parsers can quote cell
+    values, and raw sensor data must not reach the logs."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        started = False
+
+        async def tracking_send(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception as exc:
+            if started:
+                raise
+            logger.error(
+                "method=%s path=%s status=500 unhandled exception type=%s",
+                scope.get("method"), scope.get("path"), type(exc).__name__,
+            )
+            await _error_response(
+                500, "INTERNAL_ERROR", "Internal server error.",
+                message="The service hit an unexpected error. Retrying the same request is "
+                        "unlikely to help; report the X-Request-ID if it persists.",
+            )(scope, receive, send)
 
 
 app = FastAPI(
@@ -229,14 +327,44 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Added before CORS so it sits inside it: the 413 then carries CORS headers and
-# a browser client can read it.
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    default_code, default_retryable = _STATUS_DEFAULTS.get(exc.status_code, ("HTTP_ERROR", False))
+    return _error_response(
+        exc.status_code,
+        getattr(exc, "code", default_code),
+        exc.detail,
+        getattr(exc, "retryable", default_retryable),
+        headers=getattr(exc, "headers", None),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    errors = exc.errors()
+    summary = "; ".join(
+        f"{'.'.join(str(part) for part in err.get('loc', ()))}: {err.get('msg', 'invalid')}"
+        for err in errors[:5]
+    )
+    if len(errors) > 5:
+        summary += f"; and {len(errors) - 5} more"
+    return _error_response(
+        422, "VALIDATION_ERROR", jsonable_encoder(errors),
+        message=f"The request is invalid: {summary}",
+    )
+
+
+# The error boundary and body limit are added before CORS so they sit inside
+# it: every error they produce carries CORS headers a browser client can read.
 app.add_middleware(_BodyLimitMiddleware)
+app.add_middleware(_ErrorBoundaryMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
+    expose_headers=["X-Request-ID"],
 )
 
 # Structured logging (goals.md: "monitoring and logging for prediction
@@ -252,22 +380,6 @@ if not logger.handlers:
 
 @app.middleware("http")
 async def _log_requests(request: Request, call_next):
-    # Fast path: reject an oversized body from its declared Content-Length
-    # before reading any of it. A request with no Content-Length (chunked) is
-    # covered by _BodyLimitMiddleware's running byte count instead;
-    # /dataset/inspect's own read loop (MAX_UPLOAD_BYTES) then limits the file
-    # itself, separately from the multipart overhead allowed here.
-    content_length = request.headers.get("content-length")
-    if (
-        content_length is not None
-        and content_length.isdigit()
-        and int(content_length) > _MAX_REQUEST_BYTES
-    ):
-        return JSONResponse(
-            status_code=413,
-            content={"detail": _request_too_large_detail()},
-        )
-
     request_id = uuid.uuid4().hex[:12]
     start = time.monotonic()
     try:
@@ -365,9 +477,10 @@ def models_evaluation() -> dict[str, Any]:
     never be presented as a fair comparison."""
     path = METRICS_DIR / "rul_evaluation.json"
     if not path.exists():
-        raise HTTPException(
-            status_code=503,
-            detail="reports/metrics/rul_evaluation.json missing. Run scripts/evaluate_models.py first.",
+        raise ApiError(
+            503, "METRICS_UNAVAILABLE",
+            "reports/metrics/rul_evaluation.json missing. Run scripts/evaluate_models.py first.",
+            retryable=True,
         )
     import json
 
@@ -401,32 +514,29 @@ def models_info() -> dict[str, Any]:
 @app.post("/predict/rul", response_model=PredictRulResponse)
 def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
     if request.dataset_id != "femto":
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"dataset_id={request.dataset_id!r} is not supported for RUL prediction. "
-                "Every cached model is fit on FEMTO learning bearings only "
-                "(docs/decisions.md D11); applying it elsewhere would fabricate a result."
-            ),
+        raise ApiError(
+            422, "UNSUPPORTED_DATASET",
+            f"dataset_id={request.dataset_id!r} is not supported for RUL prediction. "
+            "Every cached model is fit on FEMTO learning bearings only "
+            "(docs/decisions.md D11); applying it elsewhere would fabricate a result.",
         )
 
     model = _load_joblib("rul_extra_trees.joblib")
     if model is None:
-        raise HTTPException(
-            status_code=503,
-            detail="rul_extra_trees.joblib is missing. Run scripts/train_models.py first.",
+        raise ApiError(
+            503, "MODEL_UNAVAILABLE",
+            "rul_extra_trees.joblib is missing. Run scripts/train_models.py first.",
+            retryable=True,
         )
 
     missing = [c for c in model.feature_columns if c not in request.features]
     max_missing_fraction = 0.5  # below this, too few real measurements to trust the prediction
     if len(missing) / len(model.feature_columns) > max_missing_fraction:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"{len(missing)}/{len(model.feature_columns)} required features are missing "
-                f"(max allowed {max_missing_fraction:.0%}). A prediction built mostly from "
-                "training medians would not reflect the submitted sample."
-            ),
+        raise ApiError(
+            422, "FEATURES_MISSING",
+            f"{len(missing)}/{len(model.feature_columns)} required features are missing "
+            f"(max allowed {max_missing_fraction:.0%}). A prediction built mostly from "
+            "training medians would not reflect the submitted sample.",
         )
 
     row = {
@@ -435,9 +545,9 @@ def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
     }
     if any(v is None for v in row.values()):
         unresolvable = [c for c, v in row.items() if v is None]
-        raise HTTPException(
-            status_code=422,
-            detail=f"Missing required features with no fallback median: {unresolvable}",
+        raise ApiError(
+            422, "FEATURES_MISSING",
+            f"Missing required features with no fallback median: {unresolvable}",
         )
 
     import pandas as pd
@@ -497,28 +607,27 @@ def predict_hi(request: HiRequest) -> HiResponse:
     out-of-domain, confirmed in dashboard.py's own history to swing outside
     the HI's valid (0,1) range)."""
     if request.dataset_id != "femto":
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"dataset_id={request.dataset_id!r} is not supported for HI prediction. "
-                "The cached reference HI model is fit on FEMTO learning bearings only "
-                "(docs/decisions.md D11)."
-            ),
+        raise ApiError(
+            422, "UNSUPPORTED_DATASET",
+            f"dataset_id={request.dataset_id!r} is not supported for HI prediction. "
+            "The cached reference HI model is fit on FEMTO learning bearings only "
+            "(docs/decisions.md D11).",
         )
 
     reference_model = _load_joblib("reference_hi_model.joblib")
     thresholds = _load_joblib("stage_thresholds.joblib")
     if reference_model is None or thresholds is None:
-        raise HTTPException(
-            status_code=503,
-            detail="HI artifacts missing. Run scripts/build_health.py first.",
+        raise ApiError(
+            503, "MODEL_UNAVAILABLE",
+            "HI artifacts missing. Run scripts/build_health.py first.",
+            retryable=True,
         )
 
     missing = [c for c in reference_model.features if any(c not in row for row in request.rows)]
     if missing:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Every row must include all HI feature columns. Missing from at least one row: {missing}",
+        raise ApiError(
+            422, "FEATURES_MISSING",
+            f"Every row must include all HI feature columns. Missing from at least one row: {missing}",
         )
 
     # apply_reference_hi normalises each row against THIS run's own leading
@@ -530,15 +639,13 @@ def predict_hi(request: HiRequest) -> HiResponse:
     # upload silently returned HEALTHY for every row. Refuse instead.
     min_rows = reference_model.reference_skip + reference_model.reference_n
     if len(request.rows) < min_rows:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"At least {min_rows} rows are required (the model's reference window: "
-                f"reference_skip={reference_model.reference_skip} + "
-                f"reference_n={reference_model.reference_n}) so the healthy-baseline rows "
-                "and the rows being scored don't overlap. Got "
-                f"{len(request.rows)}."
-            ),
+        raise ApiError(
+            422, "INSUFFICIENT_ROWS",
+            f"At least {min_rows} rows are required (the model's reference window: "
+            f"reference_skip={reference_model.reference_skip} + "
+            f"reference_n={reference_model.reference_n}) so the healthy-baseline rows "
+            "and the rows being scored don't overlap. Got "
+            f"{len(request.rows)}.",
         )
 
     import numpy as np
@@ -550,9 +657,9 @@ def predict_hi(request: HiRequest) -> HiResponse:
         if any(not np.isfinite(row[c]) for row in request.rows)
     ]
     if non_finite:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Non-finite (NaN/inf) feature values are not allowed: {non_finite}",
+        raise ApiError(
+            422, "NON_FINITE_FEATURES",
+            f"Non-finite (NaN/inf) feature values are not allowed: {non_finite}",
         )
 
     df = pd.DataFrame(request.rows)
@@ -582,15 +689,13 @@ def predict_hi(request: HiRequest) -> HiResponse:
         and float(window[c].std()) >= degenerate_tolerance * reference_model.scales[c]
     ]
     if len(varying) < 2:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Rows {skip}-{skip + n_ref - 1} (the reference window) show negligible "
-                f"variation relative to this model's training scale in all but {len(varying)} "
-                "feature(s). The model normalises against this window as the healthy "
-                "baseline; a window this flat carries no evidence of actual healthy "
-                "variation (e.g. a stuck sensor) and cannot be scored meaningfully."
-            ),
+        raise ApiError(
+            422, "DEGENERATE_REFERENCE_WINDOW",
+            f"Rows {skip}-{skip + n_ref - 1} (the reference window) show negligible "
+            f"variation relative to this model's training scale in all but {len(varying)} "
+            "feature(s). The model normalises against this window as the healthy "
+            "baseline; a window this flat carries no evidence of actual healthy "
+            "variation (e.g. a stuck sensor) and cannot be scored meaningfully.",
         )
 
     hi = apply_reference_hi(df, reference_model)
@@ -624,6 +729,34 @@ def prediction_history() -> dict[str, Any]:
     }
 
 
+_BINARY_SIGNATURES = (b"PK\x03\x04", b"%PDF", b"\x1f\x8b", b"\x89PNG")
+
+
+def _check_text_head(head: bytes) -> None:
+    """Reject non-text uploads from the first chunk, before profile_file (which
+    decodes with errors='replace') could turn binary junk into a misleading
+    profile, or a single enormous line into a huge in-memory sample."""
+    if b"\x00" in head or head.startswith(_BINARY_SIGNATURES):
+        raise ApiError(
+            415, "UNSUPPORTED_FILE_TYPE",
+            "The upload is a binary file, not delimited text. Export the data as a "
+            "UTF-8 CSV/TSV file and upload that.",
+        )
+    try:
+        codecs.getincrementaldecoder("utf-8")().decode(head, final=False)
+    except UnicodeDecodeError as exc:
+        raise ApiError(
+            422, "UNDECODABLE_FILE",
+            "The file is not valid UTF-8 text. Re-save it as UTF-8 and upload it again.",
+        ) from exc
+    if len(head) >= UPLOAD_CHUNK_BYTES and b"\n" not in head and b"\r" not in head:
+        raise ApiError(
+            422, "MALFORMED_FILE",
+            f"No line break in the first {UPLOAD_CHUNK_BYTES // 1024}KB: this is not a "
+            "row-oriented CSV/TSV file.",
+        )
+
+
 @app.post("/dataset/inspect", response_model=DatasetProfileResponse)
 async def inspect_dataset(
     file: UploadFile,
@@ -636,32 +769,56 @@ async def inspect_dataset(
     see docs/dataset-compatibility.md for what this does and does not check."""
     with tempfile.NamedTemporaryFile(suffix=Path(file.filename or "upload").suffix) as tmp:
         written = 0
-        while chunk := await file.read(UPLOAD_CHUNK_BYTES):
-            written += len(chunk)
-            if written > MAX_UPLOAD_BYTES:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB inspection limit.",
-                )
-            tmp.write(chunk)
-        tmp.flush()
+        try:
+            while chunk := await file.read(UPLOAD_CHUNK_BYTES):
+                if written == 0:
+                    _check_text_head(chunk)
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise ApiError(
+                        413, "UPLOAD_TOO_LARGE",
+                        f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB inspection limit.",
+                    )
+                tmp.write(chunk)
+            tmp.flush()
+        except OSError as exc:
+            logger.error("upload spool failed type=%s", type(exc).__name__)
+            raise ApiError(
+                503, "STORAGE_UNAVAILABLE",
+                "The service could not store the upload for inspection. Retry the upload.",
+                retryable=True,
+            ) from exc
 
         if written == 0:
-            raise HTTPException(status_code=422, detail="Uploaded file is empty.")
+            raise ApiError(422, "EMPTY_UPLOAD", "Uploaded file is empty.")
 
-        profile = profile_file(tmp.name)
-        sampling = sampling_info(profile, tmp.name)
-        if sampling_rate_hz is not None:
-            sampling.update(rate_hz=sampling_rate_hz, source="user", required=False,
-                            message="User-supplied sampling rate; this does not validate "
-                                    "timestamp regularity or dataset/model compatibility.")
-        profile["file"] = file.filename or profile["file"]  # real name, not the temp path
-
-    compatibility, reasons, required_action = _classify_detailed(profile)
-    return DatasetProfileResponse(
-        compatibility=compatibility, reasons=reasons, profile=profile,
-        required_action=RequiredAction(**required_action), sampling=sampling,
-    )
+        try:
+            profile = profile_file(tmp.name)
+            sampling = sampling_info(profile, tmp.name)
+            if sampling_rate_hz is not None:
+                sampling.update(rate_hz=sampling_rate_hz, source="user", required=False,
+                                message="User-supplied sampling rate; this does not validate "
+                                        "timestamp regularity or dataset/model compatibility.")
+            profile["file"] = file.filename or profile["file"]  # real name, not the temp path
+            compatibility, reasons, required_action = _classify_detailed(profile)
+            return DatasetProfileResponse(
+                compatibility=compatibility, reasons=reasons, profile=profile,
+                required_action=RequiredAction(**required_action), sampling=sampling,
+            )
+        except MemoryError as exc:
+            raise ApiError(
+                503, "MEMORY_LIMIT_EXCEEDED",
+                "The file needs more memory to inspect than this service allows. "
+                "Upload a smaller file or a shorter recording.",
+            ) from exc
+        except Exception as exc:
+            # Parser messages can quote cell values; log the type only, never the text.
+            logger.warning("inspect failed on malformed upload type=%s", type(exc).__name__)
+            raise ApiError(
+                422, "MALFORMED_FILE",
+                "The file could not be parsed as a delimited numeric table. Upload a "
+                "UTF-8 CSV/TSV/whitespace-separated file with a header row.",
+            ) from exc
 
 
 # Vercel's Python runtime forwards the original request path (e.g. /api/health)

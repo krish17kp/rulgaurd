@@ -226,7 +226,10 @@ def test_oversized_chunked_upload_is_rejected_with_413(monkeypatch):
         headers={"Content-Type": content_type},
     )
     assert response.status_code == 413
-    assert response.json() == {"detail": "Request body exceeds 0MB."}
+    body = response.json()
+    assert body["detail"] == "Request body exceeds 0MB."
+    assert body["code"] == "REQUEST_TOO_LARGE"
+    assert body["retryable"] is False
 
 
 def test_small_chunked_upload_still_succeeds():
