@@ -16,6 +16,7 @@ with 422 rather than silently returning a wrong number.
 from __future__ import annotations
 
 import codecs
+import contextvars
 import hashlib
 import json
 import logging
@@ -96,6 +97,7 @@ def _error_content(detail: Any, code: str, retryable: bool, message: str | None 
 
 def _error_response(status_code: int, code: str, detail: Any, retryable: bool = False,
                     message: str | None = None, headers: dict[str, str] | None = None) -> JSONResponse:
+    _note(code=code)
     return JSONResponse(
         status_code=status_code,
         content=_error_content(detail, code, retryable, message),
@@ -313,10 +315,7 @@ class _ErrorBoundaryMiddleware:
         except Exception as exc:
             if started:
                 raise
-            logger.error(
-                "method=%s path=%s status=500 unhandled exception type=%s",
-                scope.get("method"), scope.get("path"), type(exc).__name__,
-            )
+            _note(exc_type=type(exc).__name__)
             await _error_response(
                 500, "INTERNAL_ERROR", "Internal server error.",
                 message="The service hit an unexpected error. Retrying the same request is "
@@ -373,34 +372,79 @@ app.add_middleware(
 # Structured logging (goals.md: "monitoring and logging for prediction
 # requests, failures, and deployment issues"). Plain stdlib logging to
 # stdout/stderr - Vercel's Python runtime and any container platform capture
-# that automatically, so this needs no new service or credential. Never logs
-# request bodies (feature vectors, uploaded filenames go elsewhere) - only
-# method, path, status, latency, and a request id for correlation.
+# that automatically, so this needs no new service or credential.
+#
+# One access record per request (docs/observability.md): a key=value message
+# plus the same fields as attributes on the LogRecord. Only a fixed vocabulary
+# and derived identifiers are recorded - request id, method, path, status,
+# duration, endpoint stage, model name/version, feature-schema version,
+# compatibility outcome, error code, exception type. Never a request body,
+# feature/sensor value, uploaded filename, query value, exception message or
+# filesystem path.
 logger = logging.getLogger("bearing_pdm.api")
 if not logger.handlers:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+
+_STAGES = {
+    "/health": "health",
+    "/models/info": "model_info",
+    "/models/evaluation": "model_evaluation",
+    "/predict/rul": "predict_rul",
+    "/predict/hi": "predict_hi",
+    "/predictions/history": "prediction_history",
+    "/dataset/inspect": "dataset_inspect",
+}
+_REQUEST_OBS: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "bearing_pdm_request_obs", default=None
+)
+
+
+def _note(**fields: Any) -> None:
+    """Attach fields to the current request's access-log record (no-op outside a request)."""
+    current = _REQUEST_OBS.get()
+    if current is not None:
+        current.update({k: v for k, v in fields.items() if v is not None})
+
+
+def _safe_path(path: str) -> str:
+    # The ASGI path is percent-decoded, so it can carry newlines or other control characters.
+    return "".join(ch if ch.isprintable() else "?" for ch in path)[:200]
+
+
+def _stage_for(path: str) -> str:
+    route = path[len("/api"):] if path.startswith("/api/") else path  # Vercel mount prefix
+    return _STAGES.get(route, "unmatched")
 
 
 @app.middleware("http")
 async def _log_requests(request: Request, call_next):
     request_id = uuid.uuid4().hex[:12]
+    path = _safe_path(request.url.path)
+    fields: dict[str, Any] = {"stage": _stage_for(path)}
+    token = _REQUEST_OBS.set(fields)
     start = time.monotonic()
+    status = 500
     try:
-        response = await call_next(request)
-    except Exception:
-        logger.exception(
-            "request_id=%s method=%s path=%s status=500 (unhandled exception)",
-            request_id, request.method, request.url.path,
-        )
-        raise
-    duration_ms = (time.monotonic() - start) * 1000
-    log = logger.warning if response.status_code >= 500 else logger.info
-    log(
-        "request_id=%s method=%s path=%s status=%s duration_ms=%.1f",
-        request_id, request.method, request.url.path, response.status_code, duration_ms,
-    )
+        try:
+            response = await call_next(request)
+            status = response.status_code
+        except Exception as exc:
+            fields.update(code="INTERNAL_ERROR", exc_type=type(exc).__name__)
+            raise
+        finally:
+            record = {
+                "request_id": request_id, "method": request.method, "path": path,
+                "status": status,
+                "duration_ms": round((time.monotonic() - start) * 1000, 1),
+                **fields,
+            }
+            line = " ".join(f"{key}={value}" for key, value in record.items())
+            (logger.warning if status >= 500 else logger.info)(line, extra=record)
+    finally:
+        _REQUEST_OBS.reset(token)
     response.headers["X-Request-ID"] = request_id
     return response
+
 
 _MODEL_CACHE: dict[str, Any] = {}
 
@@ -412,6 +456,23 @@ def _fingerprint(value: Any) -> str:
     return "sha256:" + hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _model_provenance(kind: str, artifact: str) -> tuple[str | None, str | None]:
+    """(model_version, feature_schema_version) of the loaded artifact, or None for
+    whatever is not loaded. Shared by the history record and the access log."""
+    model = _MODEL_CACHE.get(artifact)
+    columns = getattr(model, "feature_columns", getattr(model, "features", None))
+    version = _MODEL_VERSIONS.get(artifact)
+    if kind == "predict_hi":
+        versions = [_MODEL_VERSIONS.get(name) for name in (artifact, "stage_thresholds.joblib")]
+        version = _fingerprint(versions) if all(versions) else None
+    return version, _fingerprint(list(columns)) if columns is not None else None
+
+
+def _note_model(kind: str, artifact: str, model_name: str) -> None:
+    version, schema = _model_provenance(kind, artifact)
+    _note(model_name=model_name, model_version=version, feature_schema_version=schema)
 
 
 def _track_prediction(kind: str, artifact: str):
@@ -463,21 +524,13 @@ def _track_prediction(kind: str, artifact: str):
                 raise
             finally:
                 if request.dataset_id == "femto":
-                    model = _MODEL_CACHE.get(artifact)
-                    columns = getattr(model, "feature_columns", getattr(model, "features", None))
-                    record["model_version"] = _MODEL_VERSIONS.get(artifact)
-                    if kind == "predict_hi":
-                        versions = [_MODEL_VERSIONS.get(name) for name in
-                                    (artifact, "stage_thresholds.joblib")]
-                        record["model_version"] = (
-                            _fingerprint(versions) if all(versions) else None
-                        )
-                    if columns is not None:
-                        record["feature_schema_version"] = _fingerprint(list(columns))
+                    record["model_version"], record["feature_schema_version"] = (
+                        _model_provenance(kind, artifact)
+                    )
                 try:
                     _history_store.append(record)
                 except Exception as exc:
-                    logger.error("history write failed type=%s", type(exc).__name__)
+                    _note(exc_type=type(exc).__name__)
                     raise ApiError(503, "HISTORY_UNAVAILABLE",
                                    "Prediction history could not be saved.", retryable=True) from None
         return tracked
@@ -518,12 +571,31 @@ class PredictRulResponse(BaseModel):
 def health() -> dict[str, Any]:
     tree_model = _load_joblib("rul_extra_trees.joblib")
     naive_model = _load_joblib("rul_naive.joblib")
+    hi_model = _load_joblib("reference_hi_model.joblib")
+    thresholds = _load_joblib("stage_thresholds.joblib")
+    loaded = {
+        "rul_extra_trees": tree_model is not None,
+        "rul_naive": naive_model is not None,
+    }
+    version, schema = _model_provenance("predict_rul", "rul_extra_trees.joblib")
+    hi_version, hi_schema = _model_provenance("predict_hi", "reference_hi_model.joblib")
+    # Identifiers only (content hashes), never file names or paths.
+    models = {
+        "rul_extra_trees": {
+            "loaded": loaded["rul_extra_trees"], "version": version,
+            "feature_schema_version": schema,
+        },
+        "reference_hi": {
+            "loaded": hi_model is not None and thresholds is not None, "version": hi_version,
+            "feature_schema_version": hi_schema,
+        },
+    }
     return {
         "status": "ok",
-        "models_loaded": {
-            "rul_extra_trees": tree_model is not None,
-            "rul_naive": naive_model is not None,
-        },
+        "models_loaded": loaded,
+        "models": models,
+        "ready": models["rul_extra_trees"]["loaded"] and models["reference_hi"]["loaded"],
+        "api_version": app.version,
     }
 
 
@@ -595,6 +667,7 @@ def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
             "rul_extra_trees.joblib is missing. Run scripts/train_models.py first.",
             retryable=True,
         )
+    _note_model("predict_rul", "rul_extra_trees.joblib", "extra_trees")
 
     missing = [c for c in model.feature_columns if c not in request.features]
     max_missing_fraction = 0.5  # below this, too few real measurements to trust the prediction
@@ -685,6 +758,7 @@ def predict_hi(request: HiRequest) -> HiResponse:
             "HI artifacts missing. Run scripts/build_health.py first.",
             retryable=True,
         )
+    _note_model("predict_hi", "reference_hi_model.joblib", "reference_hi")
 
     missing = [c for c in reference_model.features if any(c not in row for row in request.rows)]
     if missing:
@@ -839,7 +913,7 @@ async def inspect_dataset(
                 tmp.write(chunk)
             tmp.flush()
         except OSError as exc:
-            logger.error("upload spool failed type=%s", type(exc).__name__)
+            _note(exc_type=type(exc).__name__)
             raise ApiError(
                 503, "STORAGE_UNAVAILABLE",
                 "The service could not store the upload for inspection. Retry the upload.",
@@ -858,6 +932,7 @@ async def inspect_dataset(
                                         "timestamp regularity or dataset/model compatibility.")
             profile["file"] = file.filename or profile["file"]  # real name, not the temp path
             compatibility, reasons, required_action = _classify_detailed(profile)
+            _note(compatibility=compatibility)
             return DatasetProfileResponse(
                 compatibility=compatibility, reasons=reasons, profile=profile,
                 required_action=RequiredAction(**required_action), sampling=sampling,
@@ -870,7 +945,7 @@ async def inspect_dataset(
             ) from exc
         except Exception as exc:
             # Parser messages can quote cell values; log the type only, never the text.
-            logger.warning("inspect failed on malformed upload type=%s", type(exc).__name__)
+            _note(exc_type=type(exc).__name__)
             raise ApiError(
                 422, "MALFORMED_FILE",
                 "The file could not be parsed as a delimited numeric table. Upload a "

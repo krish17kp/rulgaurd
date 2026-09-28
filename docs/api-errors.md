@@ -10,6 +10,9 @@ four fields:
 | `retryable` | bool | `true` only if the *same request* could succeed later without the caller changing it. |
 | `message` | string | User-readable text. Equal to `detail` when that is a string. |
 
+Every error `code` is also written to the request's access log record, next to the same
+`X-Request-ID` (`docs/observability.md`).
+
 Success responses are unchanged. Every error, including the two 413 paths and the last-resort
 500, carries CORS headers and `X-Request-ID`, and the API exposes `X-Request-ID` to browsers
 (`Access-Control-Expose-Headers`), so a browser client can read the body and quote the id.
