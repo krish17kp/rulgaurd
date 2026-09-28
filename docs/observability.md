@@ -94,3 +94,12 @@ No metrics endpoint, aggregation or alerting is provided; the platform's log sea
 consumer. `duration_ms` covers the whole request including the history write. Model fields
 describe the artifacts that were loaded, which is what handled the request; a hot-swapped
 artifact on disk is not re-hashed until the process restarts.
+
+## Upload cleanup
+
+Upload routes add a random `upload_id` and `cleanup_state` for their temporary
+analysis file. The final state is `deleted` after successful close/unlink,
+`not_created` if creation failed, or `failed` if close/unlink failed. The HTTP
+status and error code describe the request outcome independently of cleanup.
+No filename or temporary path is logged. See [raw upload lifecycle](upload-lifecycle.md)
+for retention, multipart cleanup, disconnect behavior, and process-crash limits.

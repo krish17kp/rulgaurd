@@ -25,6 +25,7 @@ import os
 import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
@@ -1134,6 +1135,25 @@ def _check_text_head(head: bytes) -> None:
         )
 
 
+@contextmanager
+def _temporary_upload():
+    """Own exactly one server-created raw file; never accept a deletion path."""
+    _note(upload_id=uuid.uuid4().hex, cleanup_state="not_created")
+    tmp = tempfile.NamedTemporaryFile(suffix=".csv")
+    _note(cleanup_state="pending")
+    try:
+        yield tmp
+    finally:
+        # Synchronous close/unlink also runs when an async task is cancelled.
+        try:
+            tmp.close()
+        except OSError:
+            _note(cleanup_state="failed")
+            raise
+        else:
+            _note(cleanup_state="deleted")
+
+
 async def _spool_upload(file: UploadFile, tmp: Any) -> int:
     """Copy the upload into `tmp` in bounded chunks, enforcing MAX_UPLOAD_BYTES and
     the text-head check. The caller owns `tmp` (a NamedTemporaryFile context, so
@@ -1174,7 +1194,7 @@ async def inspect_dataset(
     """Upload -> inspect -> classify (goals.md's dataset-detection step), before
     anything is validated/preprocessed/fed to a model. Column-mapping only -
     see docs/dataset-compatibility.md for what this does and does not check."""
-    with tempfile.NamedTemporaryFile(suffix=Path(file.filename or "upload").suffix) as tmp:
+    with _temporary_upload() as tmp:
         await _spool_upload(file, tmp)
         try:
             profile = profile_file(tmp.name)
@@ -1327,7 +1347,7 @@ async def analyze_features(
     (docs/feature-analysis.md). The raw upload lives only in a temporary file
     removed when the request ends."""
     stages = _StageTracker()
-    with tempfile.NamedTemporaryFile(suffix=Path(file.filename or "upload").suffix) as tmp:
+    with _temporary_upload() as tmp:
         try:
             written = await _spool_upload(file, tmp)
         except ApiError as exc:
@@ -1567,7 +1587,7 @@ async def analyze_rul(
 
 async def _analyze_upload(file, stages, *, dataset_id, units, preprocessing_version,
                           sampling_rate_hz, window_samples, overlap_samples):
-    with tempfile.NamedTemporaryFile(suffix=".csv") as tmp:
+    with _temporary_upload() as tmp:
         try:
             written = await _spool_upload(file, tmp)
         except ApiError as exc:
