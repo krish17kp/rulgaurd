@@ -156,6 +156,35 @@ def test_overlap_not_below_window_fails_validation():
                          window_samples=8, overlap_samples=8), 422, "INVALID_WINDOW", "validation")
 
 
+def test_excessive_compute_is_rejected_before_extraction(monkeypatch):
+    import bearing_pdm.chunked as chunked
+
+    monkeypatch.setattr(chunked, "iter_csv_window_features",
+                        lambda *a, **k: pytest.fail("extractor must not run"))
+    window = api.MAX_WINDOW_SAMPLES
+    # A ~2MB upload whose maximal overlap would featurise 17 x 1M samples.
+    content = b"vibration_x\n" + b"1\n2\n" * ((window + 16) // 2)
+    body = _assert_failed(_post(content, channel="vibration_x", sampling_rate_hz=FEMTO_RATE,
+                                window_samples=window, overlap_samples=window - 1),
+                          422, "COMPUTE_LIMIT_EXCEEDED", "preprocessing")
+    assert str(api.MAX_COMPUTED_SAMPLES) in body["detail"]
+    assert 17 * window > api.MAX_COMPUTED_SAMPLES
+
+
+def test_user_rate_timestamp_check_reports_user_rate():
+    content = _headered(FEMTO_ACC, {4: "vibration_x"})
+    body = _post(content, channel="vibration_x", sampling_rate_hz=FEMTO_RATE).json()
+    check = body["sampling"]["timestamp_check"]
+    assert body["sampling"]["source"] == "user"
+    assert "no justified sampling rate" not in check
+    assert "User-supplied sampling_rate_hz" in check and f"{FEMTO_RATE:g}" in check
+
+    t = np.arange(64) / 1000.0
+    content = pd.DataFrame({"time_s": t, "vibration_x": np.sin(t * 700)}).to_csv(index=False).encode()
+    body = _post(content, channel="vibration_x", sampling_rate_hz=1000, window_samples=32).json()
+    assert "agrees with the file's timestamps" in body["sampling"]["timestamp_check"]
+
+
 def test_headerless_real_fixture_fails_detection():
     body = _assert_failed(_post(FEMTO_ACC.read_bytes(), channel="vibration_x",
                                 sampling_rate_hz=FEMTO_RATE), 422, "ADAPTER_REQUIRED",

@@ -136,3 +136,30 @@ def test_large_stream_reuses_one_window(tmp_path, monkeypatch):
     assert chunks_seen == 315
     assert report.peak_rows_held == 383
     assert report.completed
+
+
+def test_large_overlap_shift_is_vectorised(tmp_path, monkeypatch):
+    import time
+
+    import bearing_pdm.chunked as chunked
+
+    # Features are stubbed so the timing isolates the per-window overlap shift,
+    # which was an interpreted loop of overlap_samples steps per window.
+    window, overlap, windows = 200_000, 199_999, 201
+    x = np.arange(window + windows - 1, dtype=np.float64)
+    path = tmp_path / "large_overlap.csv"
+    pd.DataFrame({"vibration": x}).to_csv(path, index=False)
+    monkeypatch.setattr(chunked, "time_domain_features",
+                        lambda values, prefix: {"first": values[0], "last": values[-1]})
+    monkeypatch.setattr(chunked, "frequency_domain_features", lambda *args: {})
+    report = WindowReport()
+    started = time.perf_counter()
+    rows = list(iter_csv_window_features(
+        path, vibration_column="vibration", window_samples=window,
+        overlap_samples=overlap, chunk_rows=65_536, sample_rate_hz=100, report=report,
+    ))
+    elapsed = time.perf_counter() - started
+    assert len(rows) == windows
+    for index, row in enumerate(rows):
+        assert row.features == {"first": index, "last": index + window - 1}
+    assert elapsed < 3, f"{elapsed:.1f}s for {windows} heavily overlapping windows"

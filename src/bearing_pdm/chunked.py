@@ -89,9 +89,8 @@ def iter_csv_window_features(
                     features.update(frequency_domain_features(window, sample_rate_hz, vibration_column))
                     report.windows_emitted += 1
                     yield WindowFeatures(start, start + window_samples, features)
-                    # Scalar forward copy avoids an overlap-sized temporary.
-                    for i in range(overlap_samples):
-                        window[i] = window[step + i]
+                    # numpy resolves the overlapping in-place copy correctly.
+                    window[:overlap_samples] = window[step:]
                     filled = overlap_samples
                     start += step
             # Do not retain the previous chunk while pandas reads the next one.

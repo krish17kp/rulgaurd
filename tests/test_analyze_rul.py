@@ -168,6 +168,49 @@ def test_header_aliases_preserve_prediction(raw):
     assert response.json()['rul_seconds'] == pytest.approx(reference['rul_seconds'])
 
 
+@pytest.mark.parametrize('blank', [1, 1280])
+def test_missing_samples_reject_before_prediction(raw, blank, monkeypatch):
+    raw['vibration_y'] = raw['vibration_y'].astype(float)
+    raw.loc[raw.index[:blank], 'vibration_y'] = float('nan')
+    monkeypatch.setattr(api, 'predict_rul', lambda *_: pytest.fail('RUL must not run'))
+    monkeypatch.setattr(api, 'predict_hi', lambda *_: pytest.fail('HI must not run'))
+    response = post(raw)
+    assert response.status_code == 422, response.json()
+    body = response.json()
+    assert body['code'] == 'INCOMPLETE_ACQUISITION'
+    assert body['compatibility'] == 'INVALID_INPUT'
+    assert f"'vibration_y': {blank}" in body['detail']
+    assert body['rul_seconds'] is None and body['prediction_produced'] is False
+
+
+def test_complete_acquisition_still_predicts_unchanged(raw):
+    features = {}
+    for channel in raw:
+        features.update(time_domain_features(raw[channel].to_numpy(), channel))
+        features.update(frequency_domain_features(raw[channel].to_numpy(), 25600, channel))
+    reference = client.post('/predict/rul', json={'dataset_id': 'femto', 'features': features})
+    response = post(raw)
+    assert response.status_code == 200, response.json()
+    assert response.json()['rul_seconds'] == pytest.approx(reference.json()['rul_seconds'],
+                                                           rel=1e-10)
+
+
+def test_excessive_compute_rejected(raw, monkeypatch):
+    monkeypatch.setattr(api, 'MAX_COMPUTED_SAMPLES', 2560 * 2 - 1)
+    monkeypatch.setattr(api, 'predict_rul', lambda *_: pytest.fail('RUL must not run'))
+    response = post(raw, window_samples=2048, overlap_samples=2047)
+    assert response.status_code == 422, response.json()
+    assert response.json()['code'] == 'COMPUTE_LIMIT_EXCEEDED'
+    assert response.json()['failed_stage'] == 'preprocessing'
+
+
+def test_timestamp_check_reports_user_rate(raw):
+    sampling = post(raw).json()['supporting']['sampling']
+    assert sampling['source'] == 'user' and sampling['rate_hz'] == 25600
+    assert 'no justified sampling rate' not in sampling['timestamp_check']
+    assert 'User-supplied sampling_rate_hz 25600 used' in sampling['timestamp_check']
+
+
 def test_selected_metadata_missing(raw, monkeypatch, tmp_path):
     monkeypatch.setattr(api, 'MODELS_DIR', tmp_path)
     response = post(raw)

@@ -4,6 +4,7 @@ malformed uploads never produce a 500 or a traceback."""
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 
@@ -97,6 +98,25 @@ def test_body_validation_error_keeps_detail_list_and_adds_code():
 def test_invalid_sampling_rate_is_validation_error():
     assert_error(upload(b"vibration_x\n1\n2\n3\n", params={"sampling_rate_hz": "abc"}), 422, "VALIDATION_ERROR")
     assert_error(upload(b"vibration_x\n1\n2\n3\n", params={"sampling_rate_hz": "-5"}), 422, "VALIDATION_ERROR")
+
+
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+@pytest.mark.parametrize("path", [
+    "/models/compatibility",
+    "/analyze/rul?dataset_id=femto&units=g&preprocessing_version=femto-acquisition-v1",
+])
+def test_non_finite_json_body_is_422_not_500(path, literal):
+    # Literal tokens in the raw body: Python's JSON parser accepts them, and the
+    # echoed `input` must not make the error response itself unserialisable.
+    body = ('{"dataset_id": "femto", "feature_names": ["a"], "sampling_rate_hz": %s}'
+            % literal).encode()
+    response = client.post(path, content=body, headers={"Content-Type": "application/json"})
+    assert_error(response, 422, "VALIDATION_ERROR")
+
+    def reject(token):
+        raise AssertionError(f"non-standard JSON token {token} in error body")
+
+    json.loads(response.text, parse_constant=reject)
 
 
 def test_missing_file_part_is_validation_error():

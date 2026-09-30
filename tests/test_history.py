@@ -3,6 +3,7 @@
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -30,6 +31,18 @@ def test_round_trip_bound_and_snapshot(tmp_path, backend):
     ]
     store.recent()[0]["result"]["value"] = -2
     assert store.recent()[0]["result"]["value"] == 2
+
+
+def test_append_trims_rows_without_reopen(tmp_path):
+    # recent() applies LIMIT itself, so only a raw row count proves append() trims.
+    path = str(tmp_path / "history.db")
+    store = SQLiteHistoryStore(path, 3)
+    for i in range(10):
+        store.append({"id": str(i)})
+        with closing(sqlite3.connect(path)) as conn:
+            count = conn.execute("SELECT count(*) FROM prediction_history").fetchone()[0]
+        assert count == min(i + 1, 3)
+    assert [r["id"] for r in store.recent()] == ["9", "8", "7"]
 
 
 def test_restart_and_concurrent_writes(tmp_path):

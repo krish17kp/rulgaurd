@@ -352,6 +352,18 @@ async def _http_exception_handler(request: Request, exc: StarletteHTTPException)
     )
 
 
+def _json_safe(value: Any) -> Any:
+    """Stringify non-finite floats (e.g. an echoed NaN `input` or `ctx` limit),
+    which strict JSON cannot represent and JSONResponse refuses to encode."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 @app.exception_handler(RequestValidationError)
 async def _validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     errors = exc.errors()
@@ -362,7 +374,7 @@ async def _validation_exception_handler(request: Request, exc: RequestValidation
     if len(errors) > 5:
         summary += f"; and {len(errors) - 5} more"
     return _error_response(
-        422, "VALIDATION_ERROR", jsonable_encoder(errors),
+        422, "VALIDATION_ERROR", _json_safe(jsonable_encoder(errors)),
         message=f"The request is invalid: {summary}",
     )
 
@@ -1237,6 +1249,9 @@ DEFAULT_WINDOW_SAMPLES = 2560
 MAX_WINDOW_SAMPLES = 1_048_576
 # Response size bound; windows past it are not computed (the total is still exact).
 MAX_RETURNED_WINDOWS = 200
+# Per-channel compute bound: featurised windows x window_samples. Heavily overlapping
+# large windows would otherwise turn a tiny upload into unbounded synchronous work.
+MAX_COMPUTED_SAMPLES = 16_777_216
 ANALYZE_CHUNK_ROWS = 65_536
 
 
@@ -1475,6 +1490,14 @@ def _analyze_spooled(path: str, filename: str | None, stages: _StageTracker, *, 
     step = window_samples - overlap_samples
     windows_total = (scan.rows - window_samples) // step + 1
     covered = (windows_total - 1) * step + window_samples
+    computed_samples = min(windows_total, MAX_RETURNED_WINDOWS) * window_samples
+    if computed_samples > MAX_COMPUTED_SAMPLES:
+        raise stages.fail("preprocessing", 422, "COMPUTE_LIMIT_EXCEEDED",
+                          f"{min(windows_total, MAX_RETURNED_WINDOWS)} window(s) of "
+                          f"{window_samples} samples would featurise {computed_samples} samples "
+                          f"per channel; at most {MAX_COMPUTED_SAMPLES} are allowed. Use a "
+                          "smaller window_samples or overlap_samples.",
+                          compatibility=compatibility)
     stages.ok("preprocessing",
               f"Framing only: {windows_total} complete window(s) of {window_samples} samples "
               f"({window_samples / rate:g} s), overlap {overlap_samples}, stride {step}; the "
@@ -1515,6 +1538,13 @@ def _analyze_spooled(path: str, filename: str | None, stages: _StageTracker, *, 
         windows.append(AnalyzedWindow(index=index, row_start=item.row_start,
                                       row_stop=item.row_stop, features=features))
     truncated = windows_total > len(windows)
+    timestamp_check = sampling["message"]
+    if rate_source == "user":
+        timestamp_check = (
+            f"User-supplied sampling_rate_hz {rate:g} used; it agrees with the file's timestamps "
+            "(1% tolerance)." if derived is not None else
+            f"User-supplied sampling_rate_hz {rate:g} used; the file has no regular timestamp "
+            "column in seconds, so the rate is not cross-checked against timing data.")
     stages.ok(stage, f"{len(windows)} of {windows_total} window(s) featurised"
                      + (f" (response capped at {MAX_RETURNED_WINDOWS})" if truncated else "")
                      + f"; {non_finite} non-finite feature value(s) returned as null.")
@@ -1523,7 +1553,7 @@ def _analyze_spooled(path: str, filename: str | None, stages: _StageTracker, *, 
         channel={"column": name, "canonical": column["canonical"]},
         compatibility=compatibility, reasons=reasons,
         sampling={"rate_hz": rate, "source": rate_source,
-                  "timestamp_check": sampling["message"], "timestamps_regular": sampling["regular"]},
+                  "timestamp_check": timestamp_check, "timestamps_regular": sampling["regular"]},
         window={"samples": window_samples, "overlap_samples": overlap_samples,
                 "step_samples": step, "seconds": window_samples / rate},
         signal={"rows": scan.rows, "missing": scan.missing, "missing_fraction": missing_fraction},
@@ -1643,6 +1673,12 @@ async def _analyze_upload(file, stages, *, dataset_id, units, preprocessing_vers
                           "The cached FEMTO pipeline requires femto-acquisition-v1: complete "
                           "2560-sample acquisitions, no overlap or prior signal transforms.",
                           compatibility=ADAPTER_REQUIRED)
+    incomplete = {a.channel["column"]: a.signal["missing"] for a in axes if a.signal["missing"]}
+    if incomplete:
+        raise stages.fail(stage, 422, "INCOMPLETE_ACQUISITION",
+                          "femto-acquisition-v1 requires every vibration sample to be present; "
+                          f"missing samples per axis: {incomplete}. Samples are never dropped "
+                          "or filled before prediction.", compatibility=INVALID_INPUT)
     if any(a.truncated or a.signal["rows"] % 2560 for a in axes):
         raise stages.fail(stage, 422, "INCOMPLETE_RUN",
                           "Supply complete acquisitions within the returned-window limit; "
