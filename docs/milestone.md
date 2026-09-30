@@ -116,7 +116,8 @@ cycles - see the branch's commit history for the specific defects found and fixe
   `/predict/hi` (FEMTO-gated, D11; rejects non-finite values and degenerate/constant
   reference windows relative to the model's own fitted scale), `/dataset/inspect` (upload -
   inspect - classify into FULLY_SUPPORTED/ADAPTER_REQUIRED/UNSUPPORTED/INVALID_INPUT,
-  fail-closed), `/predictions/history` (in-memory only, explicitly not durable). Request
+  fail-closed), `/predictions/history` (memory by default; optional local SQLite persistence,
+  see [prediction history](prediction-history.md)). Request
   logging middleware, request-size rejection (413 above 66MB: from a declared Content-Length
   before reading, or, for chunked requests with no Content-Length, by counting bytes as they
   arrive and aborting once the limit is passed; `/dataset/inspect` additionally caps the file
@@ -136,7 +137,7 @@ Explicitly NOT done, stated here rather than implied by silence:
   security policy, so a real Vercel deploy currently has no model to load - needs external
   storage (Vercel Blob/S3/a GitHub Release asset), not implemented. See
   `docs/vercel-deployment.md`.
-- No database-backed prediction history, no auth, no resumable/large-file upload beyond the
+- No external/serverless-durable prediction history, no auth, no resumable/large-file upload beyond the
   64MB `/dataset/inspect` cap, no Codex/watchdog failover system - all need real
   infrastructure or tooling not present in this environment.
 

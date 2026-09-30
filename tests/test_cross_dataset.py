@@ -207,7 +207,7 @@ def test_column_alias_mapping(header, expected, confidence):
 def test_profile_headered_csv_with_low_confidence_warning(tmp_path):
     fs = 1000.0
     t = np.arange(2000) / fs
-    pd.DataFrame({"time": t, "my_acc_sensor_x": np.sin(t), "status": ["ok"] * 2000,
+    pd.DataFrame({"time_s": t, "my_acc_sensor_x": np.sin(t), "status": ["ok"] * 2000,
                   "dead": 1.0}).to_csv(tmp_path / "a.csv", index=False)
     p = profile_folder(tmp_path)
     assert p["sampling_rate_hz"] == pytest.approx(fs)

@@ -93,6 +93,10 @@ class DatasetAdapter:
     # recording has already averaged out. FEMTO keeps stages.DEFAULT_PERSISTENCE;
     # 5 hourly college files would outlast its 4-hour terminal cliff.
     stage_persistence: int = 1
+    # Documented acquisition rate of every recording this adapter reads (the
+    # dataset's published metadata, never inferred from data). Also what the
+    # model-compatibility gate (api.POST /models/compatibility) compares against.
+    sampling_rate_hz: float | None = None
 
     def discover(self, root: str | Path, role: str | None = None) -> list[BearingRun]:
         raise NotImplementedError
@@ -117,6 +121,7 @@ class FemtoAdapter(DatasetAdapter):
     reference_window = (10, 50)   # == health.REFERENCE_HI_SKIP / REFERENCE_HI_N
     hi_smooth_window = 11         # == health.REFERENCE_HI_SMOOTH_WINDOW
     stage_persistence = 5         # == stages.DEFAULT_PERSISTENCE
+    sampling_rate_hz = 25_600.0
 
     def discover(self, root, role=femto.ROLE_LEARNING):
         role = role or femto.ROLE_LEARNING
@@ -129,7 +134,7 @@ class FemtoAdapter(DatasetAdapter):
             rpm, load = FEMTO_CONDITIONS[b.condition_id]
             runs.append(BearingRun(
                 dataset_id=self.dataset_id, bearing_id=b.bearing_label, role=role, source=b.path,
-                sampling_rate_hz=25_600.0,
+                sampling_rate_hz=self.sampling_rate_hz,
                 # Learning and full-test bearings are complete runs; the censored
                 # test prefix is not (its end is the hidden label).
                 run_to_failure=role != femto.ROLE_TEST_CENSORED,
@@ -174,13 +179,14 @@ class CollegeAdapter(DatasetAdapter):
     # 129 hourly files: skip the first hour, use hours 1-5 as the healthy
     # reference (a 50-recording window would be ~40% of this run).
     reference_window = (1, 5)
+    sampling_rate_hz = 25_600.0
 
     def discover(self, root, role=None):
         # Fail early on an empty/unknown folder, same as the parser.
         college.discover_college_files(root)
         return [BearingRun(
             dataset_id=self.dataset_id, bearing_id="nsk6205", role="college_run",
-            source=Path(root), sampling_rate_hz=25_600.0, run_to_failure=True,
+            source=Path(root), sampling_rate_hz=self.sampling_rate_hz, run_to_failure=True,
             rpm=1775.0, radial_load_n=5880.0,
             operating_condition="1770-1780 rpm, 5.88 kN vertical + 2.94 kN axial",
             recording_interval_s=3600.0,
@@ -216,6 +222,7 @@ class ImsAdapter(DatasetAdapter):
     dataset_id = "ims"
     display_name = "IMS / NASA bearing run-to-failure (Univ. of Cincinnati)"
     reference_window = (10, 50)   # 10-min cadence: ~1.5 h skipped, next ~8 h
+    sampling_rate_hz = ims.IMS_SAMPLE_RATE_HZ
 
     def discover(self, root, role=None):
         runs = []
@@ -230,7 +237,7 @@ class ImsAdapter(DatasetAdapter):
                     continue
                 runs.append(BearingRun(
                     dataset_id=self.dataset_id, bearing_id=f"test{test_id}_bearing{number}",
-                    role=run_role, source=test_dir, sampling_rate_hz=ims.IMS_SAMPLE_RATE_HZ,
+                    role=run_role, source=test_dir, sampling_rate_hz=self.sampling_rate_hz,
                     run_to_failure=failed, rpm=ims.IMS_RPM, radial_load_n=ims.IMS_RADIAL_LOAD_N,
                     operating_condition=f"test {test_id}", recording_interval_s=600.0,
                     channel_columns=cols,
@@ -264,6 +271,7 @@ class XjtuAdapter(DatasetAdapter):
     display_name = "XJTU-SY bearing run-to-failure (Xi'an Jiaotong Univ.)"
     # 1-min cadence and runs as short as 42 recordings: skip 2, use the next 10.
     reference_window = (2, 10)
+    sampling_rate_hz = xjtu.XJTU_SAMPLE_RATE_HZ
 
     def discover(self, root, role=None):
         runs = []
@@ -271,7 +279,7 @@ class XjtuAdapter(DatasetAdapter):
             rpm, load, cid = xjtu.XJTU_CONDITIONS[condition]
             runs.append(BearingRun(
                 dataset_id=self.dataset_id, bearing_id=bdir.name, role=ROLE_RUN_TO_FAILURE,
-                source=bdir, sampling_rate_hz=xjtu.XJTU_SAMPLE_RATE_HZ, run_to_failure=True,
+                source=bdir, sampling_rate_hz=self.sampling_rate_hz, run_to_failure=True,
                 rpm=rpm, radial_load_n=load, operating_condition=f"condition {cid} ({condition})",
                 recording_interval_s=xjtu.XJTU_RECORDING_INTERVAL_S,
             ))

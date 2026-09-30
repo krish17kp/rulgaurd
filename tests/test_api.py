@@ -97,6 +97,8 @@ def test_dataset_inspect_requires_adapter_for_headerless_femto_fixture():
     body = response.json()
     assert body["compatibility"] == "ADAPTER_REQUIRED"
     assert body["profile"]["has_header"] is False
+    assert body["required_action"]["kind"] == "ADAPTER_REQUIRED"
+    assert any("adapters.py" in m for m in body["required_action"]["missing"])
 
 
 def test_dataset_inspect_fully_supported_for_clean_header_csv():
@@ -108,13 +110,19 @@ def test_dataset_inspect_fully_supported_for_clean_header_csv():
     body = response.json()
     assert body["compatibility"] == "FULLY_SUPPORTED"
     assert body["reasons"] == []
+    assert body["required_action"]["kind"] == "STRUCTURAL_CHECK_ONLY"
+    assert body["required_action"]["missing"] == []
+    assert "structurally parseable" in body["required_action"]["message"]
 
 
 def test_dataset_inspect_invalid_for_non_numeric_vibration_column():
     csv_bytes = b"vibration_x\nabc\ndef\n"
     response = client.post("/dataset/inspect", files={"file": ("bad.csv", csv_bytes, "text/csv")})
     assert response.status_code == 200
-    assert response.json()["compatibility"] == "INVALID_INPUT"
+    body = response.json()
+    assert body["compatibility"] == "INVALID_INPUT"
+    assert body["required_action"]["kind"] == "FIX_INPUT_FILE"
+    assert body["required_action"]["missing"]
 
 
 def test_dataset_inspect_invalid_for_all_missing_vibration_column():
@@ -161,7 +169,9 @@ def test_dataset_inspect_unsupported_for_no_recognisable_sensor_columns():
         "/dataset/inspect", files={"file": ("unrelated.csv", csv_bytes, "text/csv")}
     )
     assert response.status_code == 200
-    assert response.json()["compatibility"] == "UNSUPPORTED"
+    body = response.json()
+    assert body["compatibility"] == "UNSUPPORTED"
+    assert body["required_action"]["kind"] == "NO_VIBRATION_CHANNEL"
 
 
 def test_dataset_inspect_rejects_oversized_upload(monkeypatch):
@@ -216,7 +226,10 @@ def test_oversized_chunked_upload_is_rejected_with_413(monkeypatch):
         headers={"Content-Type": content_type},
     )
     assert response.status_code == 413
-    assert response.json() == {"detail": "Request body exceeds 0MB."}
+    body = response.json()
+    assert body["detail"] == "Request body exceeds 0MB."
+    assert body["code"] == "REQUEST_TOO_LARGE"
+    assert body["retryable"] is False
 
 
 def test_small_chunked_upload_still_succeeds():
@@ -298,6 +311,8 @@ def test_predict_hi_rejects_rows_missing_feature_columns():
         "/predict/hi", json={"dataset_id": "femto", "rows": [{"sequence_index": 0}]}
     )
     assert response.status_code == 422
+    assert response.json()["code"] == "FEATURES_MISSING"
+    assert response.json()["retryable"] is False
 
 
 @pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
@@ -311,6 +326,8 @@ def test_predict_hi_rejects_a_run_shorter_than_the_reference_window():
     ]
     response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
     assert response.status_code == 422
+    assert response.json()["code"] == "INSUFFICIENT_ROWS"
+    assert response.json()["retryable"] is False
     assert "reference window" in response.json()["detail"].lower()
 
 
@@ -327,6 +344,8 @@ def test_predict_hi_rejects_constant_reference_window_even_when_long_enough():
     ]
     response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
     assert response.status_code == 422
+    assert response.json()["code"] == "DEGENERATE_REFERENCE_WINDOW"
+    assert response.json()["retryable"] is False
     assert "variation" in response.json()["detail"].lower()
 
 
@@ -344,6 +363,8 @@ def test_predict_hi_rejects_reference_window_with_only_float_jitter():
     ]
     response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
     assert response.status_code == 422
+    assert response.json()["code"] == "DEGENERATE_REFERENCE_WINDOW"
+    assert response.json()["retryable"] is False
     assert "variation" in response.json()["detail"].lower()
 
 
@@ -359,6 +380,8 @@ def test_predict_hi_rejects_reference_window_with_only_one_varying_feature():
         rows.append(row)
     response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
     assert response.status_code == 422
+    assert response.json()["code"] == "DEGENERATE_REFERENCE_WINDOW"
+    assert response.json()["retryable"] is False
 
 
 @pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
@@ -381,6 +404,8 @@ def test_predict_hi_rejects_non_finite_feature_values():
         "/predict/hi", content=body, headers={"Content-Type": "application/json"}
     )
     assert response.status_code == 422
+    assert response.json()["code"] == "NON_FINITE_FEATURES"
+    assert response.json()["retryable"] is False
     assert "non-finite" in response.json()["detail"].lower()
 
 
@@ -423,6 +448,8 @@ def test_predict_rul_returns_503_when_model_artifact_missing(monkeypatch):
 def test_predict_rul_rejects_mostly_missing_features():
     response = client.post("/predict/rul", json={"dataset_id": "femto", "features": {}})
     assert response.status_code == 422
+    assert response.json()["code"] == "FEATURES_MISSING"
+    assert response.json()["retryable"] is False
     assert "missing" in response.json()["detail"].lower()
 
 

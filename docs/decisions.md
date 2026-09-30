@@ -453,3 +453,29 @@ sensitive early flag, not a failure prediction. On college specifically, the FEM
 healthy-band edge (HI 0.928) lies inside the machine's own hour-to-hour variation, so the stage
 flickers during the first ~35% of life; the thresholds are deliberately not re-tuned on the one
 college run.
+
+## Goal 21: Reliability information comes only from cached, traceable sources
+
+`/predict/rul` returns a `reliability` block (`docs/prediction-reliability.md`). Its parts are:
+
+- held-out leave-one-bearing-out error from `reports/metrics/rul_evaluation.json`;
+- tree disagreement, labelled as a diagnostic;
+- the conformal interval from the calibrator already cached in `cross_domain_bundle.joblib`;
+- `applicability.assess` against that bundle's cached applicability model.
+
+The API never fits a calibrator. A cached calibrator is applied only if the bundled model
+reproduces the served prediction, and no interval is reported for a LOW-applicability row,
+because the exchangeability assumption behind the coverage target fails there. Missing parts are
+null and carry a reason. No confidence score or probability is synthesised.
+
+## Goal 12: Timestamp units and regularity
+
+The previous profiler treated every numeric timestamp alias as seconds and used
+its median interval even when intervals were irregular. A numeric `time` column
+does not establish a unit. Sampling derivation now requires explicit seconds
+(`time_s` or `seconds`) or ISO date-time values, and at least three samples with
+all intervals positive, finite, and within 1% of their median. Unknown units
+require metadata. The existing synthetic profiler fixture now names its known
+seconds unit explicitly; its rate, provenance, and warning assertions remain.
+The upload endpoint accepts explicit user rates without claiming that they
+repair irregular timing or validate any trained model for the dataset.

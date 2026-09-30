@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from bearing_pdm.api import _classify
+from bearing_pdm.api import _classify, _classify_detailed
 from bearing_pdm.profiler import profile_file
 
 
@@ -86,7 +86,10 @@ def test_real_csv_missing_fraction_boundary(tmp_path, missing_rows):
     if missing_rows == 2:
         assert _classify(profile) == ("FULLY_SUPPORTED", [])
     else:
-        assert _classify(profile) == ("INVALID_INPUT", ["vibration_x: 60% missing"])
+        assert _classify(profile) == (
+            "INVALID_INPUT",
+            ["vibration_x: more than 50% missing (60% rounded); at most 50% is accepted"],
+        )
 
 
 @pytest.mark.parametrize("fraction", [0.5, math.nextafter(0.5, math.inf)])
@@ -102,7 +105,10 @@ def test_missing_fraction_immediately_above_half_is_rejected(fraction):
     }
     expected = (
         ("FULLY_SUPPORTED", []) if fraction == 0.5
-        else ("INVALID_INPUT", ["vibration_x: 50% missing"])
+        else (
+            "INVALID_INPUT",
+            ["vibration_x: more than 50% missing (50% rounded); at most 50% is accepted"],
+        )
     )
     assert _classify(profile) == expected
 
@@ -124,3 +130,79 @@ def test_clean_csv_has_no_rejection_reasons(tmp_path):
     profile = profile_file(path)
     assert profile["warnings"] == []
     assert _classify(profile) == ("FULLY_SUPPORTED", [])
+
+
+def _detail(tmp_path, csv_text):
+    path = tmp_path / "input.csv"
+    path.write_text(csv_text, encoding="utf-8")
+    return _classify_detailed(profile_file(path))
+
+
+@pytest.mark.parametrize(
+    "csv_text, state, kind, missing_fragment",
+    [
+        ("", "INVALID_INPUT", "FIX_INPUT_FILE", "readable"),
+        ("1,2\n3,4\n", "ADAPTER_REQUIRED", "ADAPTER_REQUIRED", "adapters.py"),
+        (
+            "timestamp,temperature_bearing\n1,20\n2,21\n",
+            "UNSUPPORTED", "NO_VIBRATION_CHANNEL", "vibration channel",
+        ),
+        (
+            "machine_vib_x,vibration_y\n1,2\n3,4\n",
+            "ADAPTER_REQUIRED", "ADAPTER_REQUIRED", "machine_vib_x",
+        ),
+        ("vibration_x,vibration_y\n", "INVALID_INPUT", "FIX_INPUT_FILE", "data rows"),
+        (
+            "vibration_x,timestamp\nabc,1\ndef,2\n",
+            "INVALID_INPUT", "FIX_INPUT_FILE", "non-constant",
+        ),
+        ("vibration_x,vibration_y\n1,2\n3,4\n", "FULLY_SUPPORTED", "STRUCTURAL_CHECK_ONLY", None),
+    ],
+)
+def test_every_state_has_a_required_action(tmp_path, csv_text, state, kind, missing_fragment):
+    actual_state, _, action = _detail(tmp_path, csv_text)
+    assert actual_state == state
+    assert set(action) == {"kind", "message", "missing"}
+    assert action["kind"] == kind
+    assert action["message"]
+    if missing_fragment is None:
+        assert action["missing"] == []
+    else:
+        assert any(missing_fragment in m for m in action["missing"])
+
+
+def test_headerless_action_names_adapter_and_user_metadata(tmp_path):
+    _, _, action = _detail(tmp_path, "1,2\n3,4\n")
+    assert any("adapters.py" in m for m in action["missing"])
+    assert any("sampling_rate_hz" in m and "user-provided" in m for m in action["missing"])
+
+
+def test_fully_supported_action_disclaims_model_validation(tmp_path):
+    state, _, action = _detail(tmp_path, "vibration_x,vibration_y\n1,2\n3,4\n")
+    assert state == "FULLY_SUPPORTED"
+    assert "structurally parseable" in action["message"]
+    assert "NOT mean a trained model is validated" in action["message"]
+    assert "decided downstream" in action["message"]
+
+
+@pytest.mark.parametrize(
+    "csv_text",
+    ["", "1,2\n3,4\n", "a,b\n1,2\n3,4\n", "vibration_x\n1\n2\n", "vibration_x\n1\n1\n"],
+)
+def test_retrain_required_is_never_emitted(tmp_path, csv_text):
+    state, _, action = _detail(tmp_path, csv_text)
+    assert state != "RETRAIN_REQUIRED"
+    assert "RETRAIN" not in action["kind"]
+
+
+def test_missing_message_states_the_threshold():
+    profile = {
+        "readable": True, "has_header": True, "rows": 4,
+        "columns": [{
+            "name": "vibration_x", "canonical": "vibration_x", "confidence": "high",
+            "numeric": True, "constant": False, "nan_fraction": 0.75, "inf_count": 0,
+        }],
+    }
+    _, reasons, _ = _classify_detailed(profile)
+    assert "more than 50% missing" in reasons[0]
+    assert "at most 50% is accepted" in reasons[0]
