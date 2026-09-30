@@ -16,7 +16,7 @@ change was made unattended.
 
 ## Why this exists
 
-Goals 39-45 in the project's goal list ask for a workflow that lets
+Goals 39-44 ask for a workflow that lets
 development continue unattended without an operator watching every step,
 while guaranteeing that:
 
@@ -45,9 +45,10 @@ that night. This gives each task:
   diffs rather than implicit.
 
 Where two tasks would need to touch clearly overlapping files (for example,
-the same API route or the same page component), they are not scheduled to
-run concurrently in the same night's batch - the overlap is resolved by
-sequencing, not by letting both tasks race on the same file.
+the same API route or the same page component), running them concurrently
+in the same night's batch is avoided where possible - the overlap is
+resolved by sequencing rather than by letting both tasks race on the same
+file.
 
 ## Worker / supervisor split
 
@@ -104,9 +105,8 @@ Only after this gate passes does the task move to independent review.
 
 ## Independent high-model review before integration
 
-Per the model routing in `model.md` and `prompts.md`, the model that
-implements a task is never the model that gives it final sign-off.
-Implementation work may be done by a default/worker-tier model; **final
+The model that implements a task is never the model that gives it final
+sign-off. Implementation work may be done by a default/worker-tier model; **final
 testing, scientific review, and merge acceptance must be done by a
 high-end model**, working from the goal definition and the actual Git diff
 rather than from the worker's own summary. The reviewer re-runs the
@@ -129,16 +129,32 @@ pushed anywhere. Tasks are merged into the integration branch in a
 deterministic order (declared ahead of time, e.g. by goal number or by
 dependency), so the result is reproducible.
 
-After each merge into the integration branch, and again after the last
-task of the night is merged, the **full test suite and linter are run
-against the integration branch** - not just the affected task's targeted
-tests. Any regression found at this stage is treated as a defect in the
-integration, not in the individual task: it is fixed (or the offending
-merge is backed out) and the full suite is re-run until it is green before
-the branch is considered ready to hand to a human for the actual push/merge
-to `main`. This repository's own history record (`git log`) is the source
+After each merge into the integration branch, the tests affected by the
+merge (and any conflicts it required resolving) are rerun against the
+integration branch, and once the last task of the night is merged, the
+**full test suite and linter are run against the integration branch** -
+not just the targeted tests exercised along the way. Any regression found
+at either stage is treated as a defect in the integration, not in the
+individual task: it is fixed (or the offending merge is backed out) and
+the full suite is re-run until it is green before the branch is considered
+ready to hand to a human for the actual push/merge to `main`. This repository's own history record (`git log`) is the source
 of truth for what actually landed; the workflow does not push to `main`
 or to any remote on its own.
+
+## Guardrails for autonomous agents
+
+Any agent (worker, supervisor, or a human operating the same process by
+hand) that runs part of this workflow must respect the following
+guardrails at all times:
+
+- never force-push or reset the main/default branch,
+- never discard unrelated work - if something unexpected is found in a
+  worktree or branch, set it aside (for example, by moving or committing
+  it) rather than deleting it,
+- checkpoint (commit) before making a risky change, so the change can be
+  inspected or backed out without losing prior progress,
+- version model artifacts rather than overwrite them in place, so a
+  previous trained model remains recoverable after a new one is produced.
 
 ## Final report
 
@@ -152,8 +168,15 @@ At the end of a night's session, a report is produced covering:
 - **test results** - the exact suites run and their pass/fail outcome, both
   per-task and for the final full-suite run against the integration branch,
 - **changed files** - the file-level diff summary for each merged task,
+- **branches/worktrees** - which branch and worktree each task ran in, so
+  its history can be inspected independently,
+- **commits** - the commits produced by each task, in the order they were
+  merged into the integration branch,
 - **model versions used** - which model implemented and which model
-  reviewed each task, consistent with the routing rules in `model.md`,
+  reviewed each task, consistent with the worker/supervisor split described
+  above,
+- **failures/fixes** - any defect found during review, the fix applied, and
+  the targeted re-verification that followed,
 - **remaining work** - what is still open, and what the next task or
   decision should be.
 
