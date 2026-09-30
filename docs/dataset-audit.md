@@ -11,9 +11,9 @@ Confirmed facts:
 - No header. 4 comma-separated columns: vibration X, vibration Y, bearing temperature, ambient temperature.
 - Row count: first file 2,000,001 rows, last file 2,000,001 rows (checked via `wc -l`). Stated ~2,000,000/file confirmed to within 1 row (trailing newline or 1 extra sample — not yet resolved, non-blocking).
 - File size: ~143.5 MB (first file, on-disk stat) — consistent with 141-144MB/file quoted in `command.md`.
-- Bearing temperature (col 3): first file ~41.6degC constant per-file value at start, last file ~100.4degC — **exceeds the stated 85degC stop threshold**, supporting temperature as the actual terminal trigger for this run.
+- Bearing temperature (col 3): first file ~41.6degC constant per-file value at start, last file ~100.4degC — **exceeds the stated 85degC stop threshold**, consistent with a threshold exceedance; it does not establish which condition actually triggered termination.
 - Ambient temperature (col 4): 24.8degC (first file) to 26.6degC (last file) — stable, plausible.
-- Vibration X/Y (sampled every 200th row, NOT exhaustive max): first file |X|<=1.82, |Y|<=2.84; last file |X|<=5.83, |Y|<=6.43. Magnitude grows with degradation as expected. The stated "9 m/s^2" stop criterion is **not proven** by this sample (could be exceeded elsewhere, could use a different definition: RMS/peak/vector-magnitude/other axis/window). Treat as terminal-event evidence only, per `command.md` section 3.1 caveat — do not assume a specific definition in code.
+- Vibration X/Y (sampled every 200th row, NOT exhaustive max): first file |X|<=1.82, |Y|<=2.84; last file |X|<=5.83, |Y|<=6.43. The sampled final file has greater magnitude than the sampled first file; this is not evidence of monotonic degradation across the run (D26). The stated "9 m/s^2" stop criterion is **not proven** by this sample (could be exceeded elsewhere, could use a different definition: RMS/peak/vector-magnitude/other axis/window). Treat as terminal-event evidence only, per `command.md` section 3.1 caveat — do not assume a specific definition in code.
 - No malformed rows (col count != 4) detected in the sampled rows of the last file.
 
 Open / unverified:

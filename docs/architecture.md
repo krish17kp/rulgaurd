@@ -27,7 +27,7 @@ flowchart LR
 
 ## Cross-dataset path (M10)
 
-Any supported dataset goes `adapter -> canonical Recording -> canonical_feature_row -> SN
+A dataset with an implemented adapter goes `adapter -> canonical Recording -> canonical_feature_row -> SN
 features -> applicability -> HI/RUL -> conformal interval -> routing`; unknown folders stop
 after `profiler.profile_folder`. Full diagram, dataset differences and limitations:
 `docs/cross-dataset.md`.
@@ -44,8 +44,10 @@ Every feature row carries: source dataset, bearing/run id, file id(s), row range
 - FEMTO: `Learning_set` (6 bearings) for all fitting (scalers, PCA, HI, model). `Test_set` prefixes may be scored once the pipeline is frozen. `Full_Test_Set` (hidden continuation) used only to compute final RUL error after freeze - never for fitting.
 - College: time-ordered expanding-window / rolling-origin backtest on the single trajectory. No cross-bearing generalization claimed.
 
+Fold-local fitting does not make the HI design independent of the learning set: see D20 and D28. The HTTP service separately gates cached RUL/HI prediction to FEMTO; the cross-dataset routing path is offline experimental analysis.
+
 ## Failure behavior
-- Missing/optional dependency (Ollama, FAISS) -> deterministic template report, dashboard still renders.
+- Ollama/FAISS retrieval and report generation are deferred (M7); a deterministic fallback is planned, not a verified runtime reporting capability.
 - Missing temperature file -> feature row keeps an explicit `temp_available=false` flag, no fabricated values.
 - Malformed CSV chunk -> adapter raises with file id + row range, does not silently coerce.
 

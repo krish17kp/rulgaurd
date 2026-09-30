@@ -33,9 +33,7 @@ Evidence: `artifacts/evidence/REVIEW-M4/`.
 
 ## M4b - FEMTO hidden-set (Full_Test_Set) scoring (DONE 2026-08-30)
 The step M4 deliberately deferred: score the frozen pipeline on the 11 censored
-test bearings, whose RUL it has never seen. This is the project's only genuinely
-out-of-sample evaluation - everything before it was leave-one-bearing-out over
-the same 6 learning bearings.
+test bearings, whose RUL it has never seen. This is an independent post-freeze evaluation. Earlier leave-one-bearing-out results hold out bearings from fitting, but reuse the learning set for methodology development (D20).
 Deliverables: `scripts/score_hidden_set.py`, `evaluation.score_hidden_set` /
 `summarize_hidden_set` / `phm2012_score`, `femto.derive_hidden_rul_seconds`,
 `reports/metrics/hidden_set_evaluation.json`.
@@ -54,7 +52,7 @@ term to 0 and understating naive's accuracy at MAE 9,459 s / a false 2.08x margi
 corrected here).
 
 ## M5 - degradation-stage classification (DONE 2026-08-30)
-Purpose: turn the health indicator into an actionable severity band.
+Purpose: turn the health indicator into an experimental severity band for offline evaluation.
 Blocked until 2026-08-30 by the HI defect in `docs/decisions.md` D18 - a severity band on an
 indicator that was pinned at 1.0 for 88% of two bearings' lives would have been meaningless.
 
@@ -93,7 +91,7 @@ Clean-environment run-through, final Ponytail-style simplicity pass, final scien
 Adapters (FEMTO, college, IMS, XJTU-SY) onto one canonical recording; dataset profiler and
 full data-quality audit; fixed-duration-window common features with real sampling rates;
 self-normalised cross-domain features; model applicability (HIGH/MEDIUM/LOW + reasons);
-tree-spread diagnostic and weighted split-conformal intervals; deterministic, causal
+tree-spread diagnostic and weighted residual-calibrated intervals with empirical coverage (D28); deterministic, causal
 per-recording routing that suppresses RUL; zero-shot / calibrated / within-domain /
 multi-dataset experiments; two new dashboard pages. Acceptance: legacy features reproduced
 bit-identically through the adapter path; bearing-level leakage guards tested; every metric
@@ -127,7 +125,7 @@ cycles - see the branch's commit history for the specific defects found and fixe
 - `vercel.json`, `api/index.py`: Vercel build wiring, including the `/api`-prefix mount
   Vercel's Python runtime actually requires (found and fixed during review).
 - `tests/test_api.py`, `tests/test_api_e2e.py`: unit tests plus one true end-to-end test
-  (real FEMTO fixture CSV -> `features.py`'s real extraction functions -> live
+  (real FEMTO fixture CSV -> `features.py`'s real extraction functions -> local HTTP
   `/predict/rul`), independently sanity-checked against FEMTO Bearing1_1's known life.
 
 Explicitly NOT done, stated here rather than implied by silence:
