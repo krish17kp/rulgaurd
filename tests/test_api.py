@@ -311,6 +311,8 @@ def test_predict_hi_rejects_rows_missing_feature_columns():
         "/predict/hi", json={"dataset_id": "femto", "rows": [{"sequence_index": 0}]}
     )
     assert response.status_code == 422
+    assert response.json()["code"] == "FEATURES_MISSING"
+    assert response.json()["retryable"] is False
 
 
 @pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
@@ -324,6 +326,8 @@ def test_predict_hi_rejects_a_run_shorter_than_the_reference_window():
     ]
     response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
     assert response.status_code == 422
+    assert response.json()["code"] == "INSUFFICIENT_ROWS"
+    assert response.json()["retryable"] is False
     assert "reference window" in response.json()["detail"].lower()
 
 
@@ -340,6 +344,8 @@ def test_predict_hi_rejects_constant_reference_window_even_when_long_enough():
     ]
     response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
     assert response.status_code == 422
+    assert response.json()["code"] == "DEGENERATE_REFERENCE_WINDOW"
+    assert response.json()["retryable"] is False
     assert "variation" in response.json()["detail"].lower()
 
 
@@ -357,6 +363,8 @@ def test_predict_hi_rejects_reference_window_with_only_float_jitter():
     ]
     response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
     assert response.status_code == 422
+    assert response.json()["code"] == "DEGENERATE_REFERENCE_WINDOW"
+    assert response.json()["retryable"] is False
     assert "variation" in response.json()["detail"].lower()
 
 
@@ -372,6 +380,8 @@ def test_predict_hi_rejects_reference_window_with_only_one_varying_feature():
         rows.append(row)
     response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
     assert response.status_code == 422
+    assert response.json()["code"] == "DEGENERATE_REFERENCE_WINDOW"
+    assert response.json()["retryable"] is False
 
 
 @pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
@@ -394,6 +404,8 @@ def test_predict_hi_rejects_non_finite_feature_values():
         "/predict/hi", content=body, headers={"Content-Type": "application/json"}
     )
     assert response.status_code == 422
+    assert response.json()["code"] == "NON_FINITE_FEATURES"
+    assert response.json()["retryable"] is False
     assert "non-finite" in response.json()["detail"].lower()
 
 
@@ -436,6 +448,8 @@ def test_predict_rul_returns_503_when_model_artifact_missing(monkeypatch):
 def test_predict_rul_rejects_mostly_missing_features():
     response = client.post("/predict/rul", json={"dataset_id": "femto", "features": {}})
     assert response.status_code == 422
+    assert response.json()["code"] == "FEATURES_MISSING"
+    assert response.json()["retryable"] is False
     assert "missing" in response.json()["detail"].lower()
 
 
