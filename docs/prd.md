@@ -1,7 +1,7 @@
 # PRD - bearing_pdm
 
 ## Problem
-Rolling-bearing failure is a leading cause of unplanned rotating-machinery downtime. This capstone estimates degradation state and Remaining Useful Life (RUL) from vibration (+ temperature where available) and explains predictions with cited evidence.
+Rolling-bearing failure is a leading cause of unplanned rotating-machinery downtime. This capstone estimates degradation state and Remaining Useful Life (RUL) from vibration (+ temperature where available) and documents evaluation evidence. Cited retrieval/report generation is a deferred requirement (M7).
 
 ## Users
 - Student researchers (this capstone).
@@ -54,7 +54,7 @@ M5 stage classification polish, M6 1D-CNN-over-HI experiment, M7 full RAG, M9 fi
 
 ## Success metrics
 - FEMTO: naive baseline beaten by >=1 tree-based model on grouped MAE.
-- College: walk-forward MAE trend improves over the naive linear-life baseline on at least one held-out late segment.
+- College: report chronological held-out errors and their direction on the observed trajectory. The naive baseline uses the known terminal time and is an oracle identity (D10), so beating it is not a valid success criterion.
 - All committed feature-formula and parser tests pass on fixtures.
 - Dashboard starts, loads cached artifacts, renders all required panels without training on page load.
 
@@ -74,4 +74,4 @@ Tracked inline here (no separate `docs/risk-register.md` exists). Data drive is 
 Each milestone's own gate in `docs/milestone.md`.
 
 ## Explicit non-claims
-No guaranteed physical root-cause diagnosis. No production safety certification. No cross-bearing validation from the single college run. No LLM-generated numeric prediction. No real-time industrial deployment.
+No physical root-cause diagnosis. No production safety certification. No cross-bearing validation from the single college run. No LLM-generated numeric prediction. No real-time industrial deployment.

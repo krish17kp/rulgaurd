@@ -1,8 +1,6 @@
 # Cross-dataset / adaptive RUL framework
 
-Status: implemented 2026-09-25 (branch `cross-dataset`). Numbers are **not** typed in this
-document; they live in the generated `docs/cross-dataset-results.md` (from
-`reports/metrics/cross_dataset.json`) so the two can never disagree. Dataset facts and
+Status: implemented 2026-09-25 (branch `cross-dataset`). The numeric summaries below are historical; the generated `docs/cross-dataset-results.md` identifies its source as `reports/metrics/cross_dataset.json`. That JSON is absent in this audit worktree, so these summaries have not been revalidated here. Dataset facts and
 provenance: `docs/external-datasets.md`. Design decisions: `docs/decisions.md` D23-D26.
 
 ## 1. What changed and why
@@ -30,7 +28,7 @@ model applicable to that machine?", no uncertainty, and no external benchmark.
 MULTIPLE DATASETS    FEMTO | college | IMS (NASA) | XJTU-SY | unknown folder
         │
 DATASET ADAPTERS     adapters.py  (femto.py, college.py, ims.py, xjtu.py stay parsing-only)
-        │                        profiler.py profiles ANY folder, detects known datasets
+        │                        profiler.py attempts folder inspection, detects known dataset formats
 CANONICAL FORMAT     BearingRun + Recording: vibration_x/_y, temperature_bearing/_ambient,
         │            sampling_rate_hz, rpm, radial_load_n, elapsed_s, role
 DATA QUALITY         features.signal_quality (per recording), profiler.audit_recordings (full),
@@ -45,7 +43,7 @@ UNCERTAINTY          uncertainty.py - tree spread (diagnostic) + weighted split 
         │
 ROUTING              routing.py - deterministic: quality -> skill -> applicability ->
         │            RUL_AVAILABLE / RUL_EXPERIMENTAL / RUL_SUPPRESSED (health always shown)
-OUTPUT               scripts/analyze_dataset.py, dashboard "Universal Machine Analysis" and
+OUTPUT               scripts/analyze_dataset.py, dashboard cross-dataset analysis (currently titled "Universal Machine Analysis") and
                      "Cross-Dataset Validation" pages (dashboard_cross.py)
 ```
 
@@ -85,7 +83,9 @@ channel: amplitude/ratio features become `log(x) - median(log x over the referen
 Properties, each tested: unit-invariant; causal (changing late recordings never changes an
 earlier value); reference rows are excluded from evaluation.
 
-## 4. Leakage controls (all tested)
+## 4. Leakage controls
+
+These controls separate fitted parameters from held-out bearings. They do not undo development-set design choices (D20) or the post-inspection amplitude-HI selection (D26).
 
 - Splits are by **whole bearing** (`experiments._check_disjoint` raises on overlap).
 - Every fitted object - model, median fill, conformal calibrator, applicability scaler and
@@ -134,9 +134,7 @@ training bearing's whole life (LOW for a seconds model, MEDIUM for the life-frac
 *diagnostic*, and measured to under-cover, i.e. it is **not** a calibrated confidence;
 (2) split conformal intervals, normalised by tree spread and plain absolute-residual, with
 each calibration bearing weighted equally and a finite-sample correction on the number of
-bearings. Coverage is reported by bearing and by dataset. Conformal guarantees assume the
-test bearing is exchangeable with the calibration bearings; across datasets it is not, and
-the measured loss of coverage there is a result, not a bug.
+bearings. Coverage is reported by bearing and by dataset. This weighted out-of-fold calibration is an empirical uncertainty method; a formal coverage guarantee for this implementation has not been established by this audit (D28). Exchangeability is not justified across rigs. Neither these intervals nor tree spread express the probability that a particular prediction is correct.
 
 **Routing** (routing.py) is deterministic: quality gate -> only models with *validated
 skill* (life-fraction skill > 0 in their own out-of-fold validation) are eligible -> first
@@ -155,7 +153,7 @@ Values below are copied from the generated `docs/cross-dataset-results.md` (run 
    0.300, MAE 4,899.5 s vs naive 6,555.8 s on post-reference rows. Hidden set (11 bearings,
    frozen model): MAE 4,555.436 s, skill 0.174 - this is the historical "~4555 s" figure, and
    it reproduces from current code. It over-estimates on 8 of the 11 hidden bearings (72.7%).
-2. **Zero-shot from FEMTO fails exactly where the life time-scale differs.** College skill
+2. **Zero-shot from FEMTO fails on the evaluated college and IMS cases.** College skill
    -0.734 and IMS -0.555 (raw model): a tree trained on <= 7.8 h lives predicts <= ~3 h for a
    128 h (college) or multi-day (IMS) run, and its conformal intervals collapse (coverage 0.073
    and 0.021). XJTU-SY, whose lives overlap FEMTO's, keeps a small positive zero-shot skill
@@ -220,8 +218,7 @@ anomaly, excluded from the SN reference window by `reference_window = (1, 5)`.
   the zero-shot experiment shows it does not: the label range (<= 7.8 h) cannot represent a
   128 h life. The system detects this (life-scale + feature shift) and suppresses RUL.
 - *How are features comparable across datasets?* Same formulas, same 0.1 s physical window,
-  real sampling rate; for cross-domain use, self-normalised log-ratios that cancel units,
-  sensor gain and load level.
+  real sampling rate; for cross-domain use, self-normalised log-ratios that cancel a constant multiplicative scale. They do not establish invariance to arbitrary sensor response or changing load.
 - *How do you know test data did not leak?* Bearing-level splits asserted; every fitted
   object fit on train bearings only; inner-fold calibration; a test that corrupts held-out
   labels and gets identical predictions; forbidden columns excluded and tested.
@@ -241,19 +238,19 @@ anomaly, excluded from the SN reference window by `reference_window = (1, 5)`.
   separates catastrophic from tolerable transfer (section 7.5).
 - *How is uncertainty measured?* Conformal intervals with measured coverage; tree spread only
   as a diagnostic.
-- *Completely unknown machine / no labels?* Profiling and quality checks work on any folder;
+- *Completely unknown machine / no labels?* The profiler attempts structural inspection of readable files;
   without an adapter the system stops at the profile. With an adapter but no labels it gives
   health, stage and applicability; RUL only if a validated model is applicable.
 - *When does it refuse?* Failed quality gate; no model with validated skill; LOW applicability.
-- *Is the cross-dataset claim genuine?* Only the claim below is made; every number comes from
-  held-out bearings, with the category stated.
+- *Is the cross-dataset claim genuine?* Use the scoped claim below. RUL experiment categories distinguish held-out predictions; HI selection used observed learning and college behavior (D20/D26), so not every displayed statistic is independent validation.
 
 ## 9. Defensible claim
 
-> The framework supports heterogeneous bearing-monitoring datasets through dataset adapters
-> and a common feature representation, evaluates model applicability on unseen operating
-> domains, and provides uncertainty-aware RUL prediction where the trained model is
-> applicable.
+> The offline framework parses the implemented FEMTO, college, IMS and XJTU-SY formats
+> and evaluates explicitly labelled within-domain and transfer experiments. Routing uses
+> measured skill, data quality and similarity to suppress unsupported RUL outputs.
+> Reported intervals describe empirical coverage, not guaranteed reliability on a new
+> machine. The HTTP RUL/HI service remains FEMTO-only.
 
 Not claimed: that it works on every machine or dataset; that zero-shot RUL transfers between
 rigs with different life time-scales; that applicability predicts error magnitude; any fault
@@ -261,13 +258,13 @@ type diagnosis; any live or real-time deployment (all data is recorded and repla
 
 ## 10. Limitations
 
-- One college bearing: no college-internal validation is possible; it is a single test case.
+- One college bearing: no independent cross-bearing college validation is possible. Legacy chronological walk-forward evaluates portions of that same trajectory only; amplitude-HI selection inspected its outcome (D26).
 - IMS: 4 failed bearings, one operating condition, units unstated, set 3 truncated at its
   documented end (D25); survivors carry no labels.
 - Labels are "time to end of recorded run" under four different stop rules.
 - Reference windows are fixed per dataset; a bearing instrumented mid-life would violate the
   "healthy reference" assumption.
-- Conformal coverage is marginal and assumes exchangeable bearings - not true across domains.
+- Coverage is measured empirically; exchangeability across domains and a coverage theorem for this weighted out-of-fold procedure are not established (D28).
 - Applicability thresholds (1, 2) are a convention; the pre-registered policy is conservative
   (post-hoc analysis in the results document, not used to tune it).
 - Stage thresholds are FEMTO-fit: before 80% of life 21-39% of recordings are already
