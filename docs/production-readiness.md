@@ -24,7 +24,7 @@ plus the one frontend build-time variable:
 | `LOG_LEVEL` | `src/bearing_pdm/api.py` (`logging.basicConfig`) | `INFO` | Python `logging` level name for the root logger. Only applied on first import in a process (the `if not logger.handlers` guard skips it on subsequent imports/reloads). |
 | `RULGUARD_HISTORY_DB` | `src/bearing_pdm/history.py` (`configured_history_store`) | unset | Path to a local SQLite file for the prediction-history store. When unset, `configured_history_store()` returns the in-memory `InMemoryHistoryStore` instead; when set, it returns a `SQLiteHistoryStore` at that path (parent directory must already exist — see `docs/prediction-history.md`). |
 | `RULGUARD_HISTORY_LIMIT` | `src/bearing_pdm/history.py` (`configured_history_store`) | `200` | Number of most-recent prediction records retained by either history store (older rows are pruned). Must parse as a positive integer; applies regardless of which store is selected. |
-| `NEXT_PUBLIC_API_BASE_URL` | `frontend/src/lib/api.ts` | `http://localhost:8000` | Base URL the frontend calls for every backend request (`/health`, `/predict/rul`, `/predict/hi`, `/models/info`, `/models/evaluation`, `/models/compatibility`, `/predictions/history`, `/dataset/inspect`, `/analyze/features`, `/analyze/rul`). Must be set to the deployed backend's public URL (including the `/api` prefix Vercel routing expects — see below) in any non-local environment. A Next.js `NEXT_PUBLIC_*` variable is baked in at build time, not read at request time. |
+| `NEXT_PUBLIC_API_BASE_URL` | `frontend/src/lib/api.ts` | `http://localhost:8000` | Base URL the frontend calls for every backend request (`/health`, `/predict/rul`, `/predict/hi`, `/models/info`, `/models/evaluation`, `/dataset/inspect` — the only six routes `frontend/src/lib/api.ts` actually calls today; `/models/compatibility`, `/analyze/features`, `/analyze/rul` and `/predictions/history` exist server-side but have no frontend caller yet). Must be set to the deployed backend's public URL (including the `/api` prefix Vercel routing expects — see below) in any non-local environment. A Next.js `NEXT_PUBLIC_*` variable is baked in at build time, not read at request time. |
 
 No API keys or third-party credentials are read by either the backend or the frontend, and
 there is still no authentication on any route. There is now an optional local **database**:
@@ -186,10 +186,11 @@ Enforced in `src/bearing_pdm/api.py` for every multipart-upload route —
 - `_MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 2 * 1024 * 1024` — cap on the whole request body
   (file plus multipart overhead), enforced two ways so a request can't be buffered unbounded
   in either case:
-  - `_log_requests` middleware rejects a request up front with `413` if its declared
-    `Content-Length` header already exceeds this, before any body is read.
-  - `_BodyLimitMiddleware` (pure-ASGI) counts bytes as they arrive and raises `413` once the
-    running total passes this limit, covering chunked requests with no `Content-Length`.
+  - `_BodyLimitMiddleware` (pure-ASGI, api.py:263) does both checks itself: it rejects a
+    request up front with `413` if its declared `Content-Length` header already exceeds
+    this, before any body is read, and separately counts bytes as they arrive and raises
+    `413` once the running total passes this limit, covering chunked requests with no
+    `Content-Length`. `_log_requests` (the request-logging middleware) has no size check.
 - An empty upload (`0` bytes written) returns `422`, not `413`.
 
 No limit is documented or enforced on the JSON bodies of `/predict/rul`, `/predict/hi`, or
