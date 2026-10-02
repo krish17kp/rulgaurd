@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ApiError, PredictRulResponse, predictRul } from "@/lib/api";
+import { ApplicabilityNote } from "@/components/ApplicabilityNote";
 
 type SubmitState =
   | { status: "idle" }
@@ -81,6 +82,7 @@ export default function PredictPage() {
               <span className="font-mono text-xs">{result.data.features_missing.join(", ")}</span>
             </p>
           )}
+          <ApplicabilityNote result={result.data} />
         </div>
       )}
     </main>

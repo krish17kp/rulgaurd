@@ -219,13 +219,24 @@ def _missing_cap(missing_fraction: float) -> str:
 
 
 def assess(df_bearing: pd.DataFrame, model: ApplicabilityModel,
-           distances: np.ndarray | None = None) -> dict:
+           distances: np.ndarray | None = None, single_recording: bool = False) -> dict:
     """Applicability of `model` to one bearing, summarising ALL rows passed.
 
     With the whole record passed this is a retrospective whole-run summary (used
     for the offline applicability-vs-error analysis). The per-recording, causal
     equivalent - what the system would have said at each moment - is
-    `causal_levels`; at the last recording the two agree."""
+    `causal_levels`; at the last recording the two agree.
+
+    `single_recording=True` changes only how the missing-feature cap is
+    aggregated, for callers scoring exactly one acquisition's feature row
+    (e.g. the online prediction API) rather than a whole run of many
+    recordings. Per-column `isna().mean()` over a single row is just a 0/1
+    indicator ("is this one feature present"), and taking its max (the
+    run-level question: "what is this run's worst-covered feature") would
+    then trip the LOW cap from a single absent feature, however small a
+    fraction of the whole feature set that is. The correct single-row
+    question is "what fraction of the required feature set is present in
+    this one submission" - the mean of that same indicator, not its max."""
     if distances is None:
         distances = recording_distances(df_bearing, model)
     median_distance = float(np.median(distances))
@@ -241,7 +252,8 @@ def assess(df_bearing: pd.DataFrame, model: ApplicabilityModel,
     missing = [c for c in cols if missing_fraction[c] > MISSING_FEATURE_FRACTION]
     partial = [c for c in cols if PARTIAL_MISSING_FRACTION < missing_fraction[c]
                <= MISSING_FEATURE_FRACTION]
-    level = _worse(level, _missing_cap(float(missing_fraction.max())))
+    missing_cap_input = float(missing_fraction.mean()) if single_recording else float(missing_fraction.max())
+    level = _worse(level, _missing_cap(missing_cap_input))
     if missing:
         reasons.append(f"{len(missing)} model feature(s) unavailable, e.g. {missing[0]} "
                        "(sensor channel not present in this dataset)")
@@ -273,7 +285,7 @@ def assess(df_bearing: pd.DataFrame, model: ApplicabilityModel,
     return {
         "level": level, "shift_ratio": float(shift_ratio), "median_distance": median_distance,
         "in_domain_distance": model.in_domain_distance, "reasons": reasons,
-        "missing_features": missing, "shifted_features": shifted,
+        "missing_features": missing, "partial_features": partial, "shifted_features": shifted,
         "outlived_fraction": float(outlived.mean()) if len(outlived) else 0.0,
     }
 

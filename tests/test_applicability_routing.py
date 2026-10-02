@@ -67,6 +67,28 @@ def test_missing_feature_and_metadata_are_reported():
     assert any("speed" in r for r in a["reasons"]) and any("sampling rate" in r for r in a["reasons"])
 
 
+def test_single_recording_missing_cap_uses_fraction_not_worst_column():
+    """Regression for a defect found integrating applicability.py into the
+    online prediction API (api.py's _assess_applicability): assess() was
+    designed to summarise a whole bearing RUN (many rows), where
+    `isna().mean()` per column answers "what fraction of recordings lack
+    this feature" and the worst (max) column is the right run-level signal.
+    Applied to exactly ONE recording's feature row, that same per-column
+    mean is just a 0/1 indicator, so max() trips LOW the instant even one of
+    many features is absent - however small a fraction of the whole feature
+    set that is. single_recording=True must use the mean of that indicator
+    (the fraction of the feature set actually present) instead."""
+    model = fit_applicability(_bearings(), FEATS)
+    one = _bearings(1, seed=9).iloc[[0]].assign(f3=np.nan)  # 1 of 3 features missing (33%)
+
+    default = assess(one, model)
+    assert default["level"] == LOW  # old (run-level) semantics: max() -> 100% "missing"
+
+    single = assess(one, model, single_recording=True)
+    assert single["level"] == MEDIUM  # correct: 1/3 features actually absent -> partial, not absent
+    assert single["missing_features"] == ["f3"]
+
+
 def test_life_time_scale_caps_level_by_target_type():
     train = _bearings()
     long_lived = _bearings(1, seed=9, life_s=10_000.0)      # outlives every training bearing
@@ -301,6 +323,14 @@ def test_partly_missing_feature_caps_at_medium():
     b.loc[b.index[:60], "f2"] = np.nan              # 30% missing
     a = assess(b, model)
     assert a["level"] == MEDIUM and any("partly missing" in r for r in a["reasons"])
+    # Regression: api.py's _classify attributes a RETRAIN_REQUIRED downgrade
+    # to its cause using missing_features/partial_features - a feature only
+    # partly missing (not >50%, so absent from missing_features) must still
+    # be visible via partial_features, or a multi-window upload whose only
+    # problem is a partly-dropped channel gets a vacuous "due to the
+    # applicability check" message with no real cause named.
+    assert a["missing_features"] == []
+    assert a["partial_features"] == ["f2"]
 
 
 def test_analyze_bearing_decisions_are_causal():

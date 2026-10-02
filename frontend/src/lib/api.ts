@@ -86,6 +86,12 @@ export interface PredictRulResponse {
   rul_hours: number;
   features_used: string[];
   features_missing: string[];
+  /** Real model-domain compatibility (applicability.py), not just a
+   * sampling-rate/structural check - see docs/dataset-compatibility.md. */
+  compatibility: Compatibility;
+  applicability_level: "HIGH" | "MEDIUM" | "LOW" | null;
+  applicability_shift_ratio: number | null;
+  applicability_reasons: string[];
 }
 
 /** FastAPI/Pydantic 422s put `detail` as a list of error objects, not a

@@ -33,11 +33,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from bearing_pdm.applicability import MEDIUM_SHIFT_RATIO
+from bearing_pdm.applicability import assess as applicability_assess
 from bearing_pdm.features import frequency_domain_features, time_domain_features
 from bearing_pdm.femto import ACC_COLUMNS
 from bearing_pdm.health import apply_reference_hi
 from bearing_pdm.profiler import profile_file
+from bearing_pdm.routing import candidates_from_bundle
 from bearing_pdm.stages import assign_stages
+
+CROSS_DOMAIN_BUNDLE_NAME = "cross_domain_bundle.joblib"
 
 # FEMTO's acc_*.csv is a fixed, headerless, positional 6-column layout at a
 # known sampling rate (femto.py's own docstring) - this is a *known adapter*
@@ -51,6 +56,16 @@ FEMTO_SAMPLE_RATE_HZ = 25600.0
 # isn't degenerate (x.size<2) and a handful of rows can't be mistaken for a
 # real vibration window, not a claim about the true per-file row count.
 MIN_FEMTO_ACQUISITION_ROWS = 256
+# The applicability reference population is fitted on FEMTO's acquisition
+# window (2560 samples). Several features (total_spectral_energy, min/max,
+# peak-to-peak, crest factor, spectral resolution) scale with window length,
+# so scoring a differently-sized window against that reference compares
+# apples to oranges regardless of how in-domain the signal itself is - found
+# in review: two real, individually-HIGH fixture acquisitions concatenated
+# into one longer file scored MEDIUM purely from length. Any generic upload
+# must be chopped into this same window size before extraction, never
+# treated as one arbitrarily-long window.
+FEMTO_ACQUISITION_SAMPLES = 2560
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = REPO_ROOT / "artifacts" / "models"
@@ -97,6 +112,109 @@ def _derive_sampling_rate_hz(path: Path, profile: dict) -> tuple[float | None, s
     return None, None
 
 
+def _applicability_candidate(dataset_id: str):
+    """The routing candidate (fitted RUL model + its matching fitted
+    applicability.ApplicabilityModel) whose training domain this dataset_id
+    is. Only 'femto' has a feature-extraction path wired up anywhere in this
+    module (_extract_femto_acquisition_features / _extract_generic_vibration_features),
+    so that's the only id this resolves. None (never a guess) when the
+    cross-domain bundle artifact itself is missing - the caller degrades
+    gracefully, it does not silently claim HIGH applicability instead."""
+    if dataset_id != "femto":
+        return None
+    bundle = _load_joblib(CROSS_DOMAIN_BUNDLE_NAME)
+    if bundle is None:
+        return None
+    for cand in candidates_from_bundle(bundle):
+        if cand.name == "raw_seconds":
+            return cand
+    return None
+
+
+def _assess_applicability(
+    features: dict[str, float] | list[dict[str, float]], dataset_id: str
+) -> dict | None:
+    """Real model-domain compatibility - reuses applicability.py's own
+    HIGH/MEDIUM/LOW decision exactly as routing.py does for the batch
+    pipeline, not reimplemented here. None only when the fitted
+    candidate/bundle itself is unavailable.
+
+    `single_recording=True` (applicability.assess's own missing-feature
+    semantics: "fraction of this row's features present", not a whole-run
+    "worst column across many rows") is used whenever there is exactly ONE
+    acquisition-sized row to score - whether that arrived as a single dict
+    (e.g. the raw FEMTO upload endpoint) or a one-element list (a generic
+    upload exactly one window long, see _extract_generic_vibration_features).
+    Review found these two single-row cases must be scored identically -
+    keying off `isinstance(features, dict)` alone gave a 2560-row upload a
+    different (wrong, harsher) missing-feature penalty than the same feature
+    row submitted as a dict. Only a genuine multi-window list (more than one
+    recording of one run) uses the normal single_recording=False path."""
+    candidate = _applicability_candidate(dataset_id)
+    if candidate is None:
+        return None
+    cols = list(candidate.applicability.feature_columns)
+    rows = [features] if isinstance(features, dict) else features
+    df = pd.DataFrame([{c: row.get(c, np.nan) for c in cols} for row in rows])
+    result = applicability_assess(df, candidate.applicability, single_recording=len(rows) == 1)
+    return {
+        "level": result["level"],
+        "shift_ratio": result["shift_ratio"],
+        "reasons": result["reasons"],
+        "missing_features": result["missing_features"],
+        "partial_features": result["partial_features"],
+    }
+
+
+def _extract_generic_vibration_features(
+    path: Path, profile: dict, sampling_rate_hz: float
+) -> tuple[list[dict[str, float]], int]:
+    """The same features.py functions _extract_femto_acquisition_features uses,
+    generalised from FEMTO's fixed positional columns to whichever high-confidence,
+    usable vibration column(s) a header-based file has - profile_file has already
+    identified which columns those are and confirmed they're numeric/non-constant/
+    mostly-present; this only reads their real values and extracts features from
+    them, it does not re-decide which columns are usable.
+
+    Chopped into FEMTO_ACQUISITION_SAMPLES-sized windows so a longer upload is
+    scored as several acquisition-sized recordings, not one arbitrarily long
+    window whose length-dependent features (energy, peak-to-peak, spectral
+    resolution) would not be comparable to the training reference regardless
+    of how in-domain the signal itself is. A file SHORTER than one window is
+    never scored here at all (that length mismatch is exactly the same
+    artifact in the other direction) - the caller checks row count first and
+    skips calling this when too short. Returns (one dict per full window,
+    count of trailing rows that didn't fill a full window and were dropped -
+    the caller must disclose that, never drop data silently)."""
+    delimiter = profile.get("delimiter")
+    sep = r"\s+" if delimiter in (None, "whitespace") else delimiter
+    df = pd.read_csv(path, sep=sep, header=0)
+    usable_cols = [
+        col for col in profile.get("columns", [])
+        if col["canonical"] in _REQUIRED_ANY
+        and col["numeric"] and not col["constant"] and col["nan_fraction"] <= 0.5 and col["inf_count"] == 0
+    ]
+    if not usable_cols:
+        return [], 0
+
+    n = len(df)
+    window = FEMTO_ACQUISITION_SAMPLES
+    n_windows = n // window
+    windows: list[dict[str, float]] = []
+    for i in range(n_windows):
+        start = i * window
+        row: dict[str, float] = {}
+        for col in usable_cols:
+            axis = col["canonical"].rsplit("_", 1)[-1]  # vibration_x -> x
+            signal = pd.to_numeric(
+                df[col["name"]].iloc[start:start + window], errors="coerce"
+            ).to_numpy()
+            row.update(time_domain_features(signal, f"vibration_{axis}"))
+            row.update(frequency_domain_features(signal, sampling_rate_hz, f"vibration_{axis}"))
+        windows.append(row)
+    return windows, n - n_windows * window
+
+
 def _classify(
     profile: dict,
     path: Path | None = None,
@@ -106,10 +224,11 @@ def _classify(
     """Compatibility state for the uploaded file, from profile_file's output
     plus (for the sampling-rate/units steps only) the caller's own
     declaration or a timestamp column already in the file - never guessed.
-    This is a column/header-level check; it does not run the trained
-    applicability model in applicability.py (that needs parsed recordings
-    from a known adapter, not an arbitrary upload) - see
-    docs/dataset-compatibility.md."""
+    Once sampling rate/units are resolved and match a trained model's
+    domain, this also runs the real applicability.py model-domain check
+    (extracting features from the usable vibration column(s), windowed to
+    the training acquisition size) rather than treating a matching rate
+    alone as sufficient - see docs/dataset-compatibility.md."""
     if not profile.get("readable"):
         return INVALID_INPUT, profile.get("warnings", ["file could not be read"])
 
@@ -195,19 +314,95 @@ def _classify(
     if missing_metadata:
         return ADAPTER_REQUIRED, missing_metadata
 
+    rate_model_id = None
     for model_id, model_rate_hz in _KNOWN_MODEL_SAMPLE_RATES_HZ.items():
         if abs(sampling_rate_hz - model_rate_hz) <= _SAMPLE_RATE_TOLERANCE * model_rate_hz:
-            return FULLY_SUPPORTED, [
-                f"sampling rate {sampling_rate_hz:.1f} Hz (source: {rate_source}) matches the "
-                f"{model_id} model's trained rate ({model_rate_hz:.1f} Hz)"
-            ]
+            rate_model_id = model_id
+            break
+    if rate_model_id is None:
+        return RETRAIN_REQUIRED, [
+            f"sampling rate {sampling_rate_hz:.1f} Hz (source: {rate_source}) does not match any "
+            f"trained model's domain ({', '.join(f'{k}: {v:.1f} Hz' for k, v in _KNOWN_MODEL_SAMPLE_RATES_HZ.items())}). "
+            "The vibration channel(s) and metadata are structurally usable, but no existing model "
+            "was fit at this rate - this machine/configuration would need a model trained for it, "
+            "not just a parsing adapter."
+        ]
+
+    rate_reason = (
+        f"sampling rate {sampling_rate_hz:.1f} Hz (source: {rate_source}) matches the "
+        f"{rate_model_id} model's trained rate ({_KNOWN_MODEL_SAMPLE_RATES_HZ[rate_model_id]:.1f} Hz)"
+    )
+
+    # A matching sampling rate alone does not mean the signal itself looks
+    # like what the model was trained on - this is exactly the real
+    # model-domain check applicability.py exists for (a sensor reading
+    # plausible numbers at the right rate can still be statistically nothing
+    # like a bearing in this model's training population). Never skipped in
+    # favour of the rate check alone.
+    #
+    # A file shorter than one training-sized window can't be scored at all
+    # without hitting the same length-vs-reference mismatch windowing exists
+    # to avoid (found in review: a short, genuinely in-domain file scored
+    # LOW purely from being short, not from looking out-of-domain). Degrade
+    # honestly instead of guessing - same pattern as "bundle unavailable".
+    n_rows = profile.get("rows", 0)
+    dropped_rows = 0
+    if n_rows < FEMTO_ACQUISITION_SAMPLES:
+        applicability = None
+        unavailable_reason = (
+            f"model applicability could not be assessed: {n_rows} rows is less than the "
+            f"{FEMTO_ACQUISITION_SAMPLES}-sample window the reference population is fitted on - "
+            "this result reflects sampling-rate compatibility only, not a real domain-fit check"
+        )
+    else:
+        try:
+            windows, dropped_rows = (
+                _extract_generic_vibration_features(path, profile, sampling_rate_hz) if path else ([], 0)
+            )
+        except (pd.errors.ParserError, ValueError, KeyError):
+            windows = []
+        applicability = _assess_applicability(windows, rate_model_id) if windows else None
+        unavailable_reason = (
+            "model applicability could not be assessed (cross_domain_bundle.joblib missing, "
+            "unreadable, or feature extraction failed) - this result reflects sampling-rate "
+            "compatibility only, not a real domain-fit check"
+        )
+
+    dropped_reason = (
+        [f"{dropped_rows} trailing row(s) did not fill a full {FEMTO_ACQUISITION_SAMPLES}-sample "
+         "window and were not scored"]
+        if dropped_rows else []
+    )
+
+    if applicability is None:
+        return FULLY_SUPPORTED, [rate_reason, unavailable_reason] + dropped_reason
+    if applicability["level"] == "HIGH":
+        return FULLY_SUPPORTED, [rate_reason] + dropped_reason + applicability["reasons"]
+
+    # Attribute the downgrade to its real cause: an elevated feature-distribution
+    # shift, missing features (the applicability missing-feature cap can force
+    # MEDIUM/LOW even when the shift ratio itself is small), or both - found in
+    # review: a message that always blames "the signal itself" was misleading
+    # when the true cause was a sensor channel this upload simply lacks.
+    causes = []
+    if applicability["shift_ratio"] > MEDIUM_SHIFT_RATIO:
+        causes.append(f"feature distribution shift ({applicability['shift_ratio']:.2f}x the in-domain reference)")
+    if applicability["missing_features"]:
+        causes.append(f"{len(applicability['missing_features'])} missing model feature(s)")
+    if applicability["partial_features"]:
+        # A feature missing in 10-50% of windows caps the level via
+        # applicability.py's _missing_cap without ever appearing in
+        # missing_features (that list is only >50%-missing) - found in
+        # review: a multi-window upload with a channel that drops out
+        # partway through could fall into neither bucket above, producing
+        # a vacuous "due to the applicability check" message.
+        causes.append(f"{len(applicability['partial_features'])} partly missing model feature(s)")
+    cause_text = " and ".join(causes) if causes else "the applicability check"
     return RETRAIN_REQUIRED, [
-        f"sampling rate {sampling_rate_hz:.1f} Hz (source: {rate_source}) does not match any "
-        f"trained model's domain ({', '.join(f'{k}: {v:.1f} Hz' for k, v in _KNOWN_MODEL_SAMPLE_RATES_HZ.items())}). "
-        "The vibration channel(s) and metadata are structurally usable, but no existing model "
-        "was fit at this rate - this machine/configuration would need a model trained for it, "
-        "not just a parsing adapter."
-    ]
+        rate_reason,
+        f"sampling rate matches, but model applicability is {applicability['level']} due to "
+        f"{cause_text} - a matching rate alone does not make this dataset supported",
+    ] + dropped_reason + applicability["reasons"]
 
 
 class DatasetProfileResponse(BaseModel):
@@ -334,6 +529,10 @@ class PredictRulResponse(BaseModel):
     rul_hours: float
     features_used: list[str]
     features_missing: list[str]
+    compatibility: str = FULLY_SUPPORTED
+    applicability_level: str | None = None
+    applicability_shift_ratio: float | None = None
+    applicability_reasons: list[str] = Field(default_factory=list)
 
 
 @app.get("/health")
@@ -431,6 +630,23 @@ def _predict_rul_from_features(features: dict[str, float]) -> PredictRulResponse
             ),
         )
 
+    # Real model-domain compatibility (applicability.py, routing.py's own
+    # decision rule) - a sampling-rate/column match upstream is not enough.
+    # Assessed on the caller's own submitted values (pre-median-fill): the
+    # question is whether what was actually measured looks like the training
+    # population, not whether a filled-in row would.
+    applicability = _assess_applicability(features, "femto")
+    if applicability is not None and applicability["level"] == "LOW":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"RUL suppressed: model applicability is LOW (shift ratio "
+                f"{applicability['shift_ratio']:.2f}x the in-domain reference) - this signal does "
+                "not look like the model's training population; a prediction here would not be "
+                "reliable. Reasons: " + "; ".join(applicability["reasons"])
+            ),
+        )
+
     row = {
         c: features[c] if c not in missing else model.median_fill.get(c)
         for c in model.feature_columns
@@ -454,12 +670,38 @@ def _predict_rul_from_features(features: dict[str, float]) -> PredictRulResponse
             detail=f"Feature values are unusable for prediction: {exc}",
         ) from None
 
+    compatibility = FULLY_SUPPORTED
+    applicability_level = applicability["level"] if applicability else None
+    applicability_shift_ratio = applicability["shift_ratio"] if applicability else None
+    if applicability is None:
+        # Same honest-degrade pattern as _classify: never claim a domain-fit
+        # check happened when it didn't (found in review: this previously
+        # returned FULLY_SUPPORTED with an empty reasons list, indistinguishable
+        # from a real HIGH result).
+        applicability_reasons = [
+            "model applicability could not be assessed (cross_domain_bundle.joblib missing or "
+            "unreadable) - this result reflects the prediction only, not a domain-fit check"
+        ]
+    else:
+        applicability_reasons = applicability["reasons"]
+    if applicability_level == "MEDIUM":
+        compatibility = RETRAIN_REQUIRED
+        applicability_reasons = [
+            "model applicability is MEDIUM: prediction returned, but treat it as experimental "
+            "- this configuration differs from the training population more than the model's "
+            "own in-domain bearings do"
+        ] + applicability_reasons
+
     return PredictRulResponse(
         model_name="extra_trees",
         rul_seconds=prediction,
         rul_hours=prediction / 3600.0,
         features_used=list(model.feature_columns),
         features_missing=missing,
+        compatibility=compatibility,
+        applicability_level=applicability_level,
+        applicability_shift_ratio=applicability_shift_ratio,
+        applicability_reasons=applicability_reasons,
     )
 
 

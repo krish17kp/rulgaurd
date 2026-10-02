@@ -148,6 +148,32 @@ cycles - see the branch's commit history for the specific defects found and fixe
   exists. Units have no verified project-wide contract to check a declaration against - that
   limitation is stated in the API's own `reasons` text, not hidden. See
   `docs/dataset-compatibility.md`.
+- Real model-domain compatibility (`applicability.py`) wired into the production path:
+  `/dataset/inspect` (after structural + sampling-rate checks pass, extracts features from the
+  usable vibration column(s) via a new `_extract_generic_vibration_features` and scores them
+  against the FEMTO `raw_seconds` candidate's fitted `ApplicabilityModel` from
+  `artifacts/models/cross_domain_bundle.joblib`) and `/predict/rul`/`/predict/rul/femto-acquisition`
+  (`_predict_rul_from_features` now refuses a LOW-applicability prediction with 422, mirroring
+  `routing.py`'s own `RUL_SUPPRESSED` decision, and flags MEDIUM as `RETRAIN_REQUIRED` with an
+  experimental-prediction caveat). A matching sampling rate alone no longer qualifies a dataset
+  as `FULLY_SUPPORTED`. `applicability.assess()` gained a `single_recording` parameter: it was
+  designed to summarise a whole bearing run's missing-feature rate (worst column across many
+  rows), which degenerates to "any one missing feature triggers LOW" when applied to a single
+  acquisition - `single_recording=True` uses the fraction-present instead (found and fixed
+  during this work, with a dedicated regression test in `tests/test_applicability_routing.py`).
+  Frontend: a new `ApplicabilityNote` component shows the level/shift-ratio/reasons on both
+  `/predict` and `/upload`'s FEMTO result. See `docs/dataset-compatibility.md`.
+  Two further review rounds found and fixed: (1) a generic upload longer than one FEMTO
+  acquisition was scored as one arbitrarily long window against a reference fitted on
+  2560-sample windows - several length-dependent features pushed even genuinely in-domain data
+  toward `RETRAIN_REQUIRED` purely from length; fixed by chopping any generic upload into
+  `FEMTO_ACQUISITION_SAMPLES`-sized windows (`_extract_generic_vibration_features` now returns
+  one feature row per window) and scoring multiple windows the normal whole-run way. (2) that
+  same length mismatch applied in reverse to a file shorter than one window, and a one-window
+  upload was inconsistently routed to the wrong `single_recording` mode depending on whether it
+  arrived as a dict or a one-element list; both now degrade/route consistently, and dropped
+  trailing rows (a file not an exact multiple of the window size) are disclosed in the response
+  rather than silently unscored.
 
 Explicitly NOT done, stated here rather than implied by silence:
 - **No live Vercel deployment.** No Vercel account/API token exists in this environment.

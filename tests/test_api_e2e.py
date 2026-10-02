@@ -117,9 +117,27 @@ def _non_constant_femto_csv(amplitude: float) -> bytes:
 def test_raw_femto_csv_upload_rejects_overflowing_values_with_422_not_500():
     """Regression: an amplitude extreme enough to leave every feature value
     finite but too large for the model's input dtype must still come back
-    422 from _predict_rul_from_features's predict()-time catch, not a raw
-    500. Distinct from the extraction-time overflow test below: at 1e40,
-    features.py itself raises nothing."""
+    422, not a raw 500 - whether it's caught by the applicability check
+    (now the first line of defense: this amplitude is wildly out of the
+    training distribution) or, if that's unavailable, by
+    _predict_rul_from_features's own predict()-time dtype catch."""
+    response = client.post(
+        "/predict/rul/femto-acquisition",
+        files={"file": ("overflow.csv", _non_constant_femto_csv(1e40), "text/csv")},
+    )
+    assert response.status_code == 422
+    detail = response.json()["detail"].lower()
+    assert "unusable for prediction" in detail or "rul suppressed" in detail
+
+
+@pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
+def test_raw_femto_csv_upload_predict_time_overflow_catch_still_works_without_applicability(monkeypatch):
+    """The predict()-time dtype-overflow catch (api.py's ValueError handler
+    around model.model.predict) is a backstop for when applicability itself
+    is unavailable (e.g. the cross-domain bundle artifact is missing) - this
+    pins that it still fires correctly in that situation, independent of
+    the applicability check that now runs first when the bundle is present."""
+    monkeypatch.setattr(api, "_applicability_candidate", lambda dataset_id: None)
     response = client.post(
         "/predict/rul/femto-acquisition",
         files={"file": ("overflow.csv", _non_constant_femto_csv(1e40), "text/csv")},

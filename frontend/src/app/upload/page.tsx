@@ -9,6 +9,7 @@ import {
   inspectDataset,
   predictRulFromFemtoAcquisition,
 } from "@/lib/api";
+import { ApplicabilityNote } from "@/components/ApplicabilityNote";
 
 type DatasetType = "generic" | "femto";
 
@@ -194,7 +195,14 @@ export default function UploadPage() {
           )}
 
           {predictState.status === "ready" && (
-            <div className="flex flex-col gap-2 rounded-lg border border-green-300 bg-green-50 p-4 dark:border-green-900 dark:bg-green-950">
+            <div
+              className={`flex flex-col gap-2 rounded-lg border p-4 ${
+                predictState.data.compatibility === "FULLY_SUPPORTED" &&
+                predictState.data.applicability_level === "HIGH"
+                  ? "border-green-300 bg-green-50 dark:border-green-900 dark:bg-green-950"
+                  : "border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950"
+              }`}
+            >
               <p className="text-sm text-zinc-500">Predicted Remaining Useful Life</p>
               <p className="text-3xl font-semibold tracking-tight">
                 {predictState.data.rul_hours.toFixed(2)} hours
@@ -202,6 +210,7 @@ export default function UploadPage() {
               <p className="text-xs text-zinc-500">
                 ({predictState.data.rul_seconds.toFixed(0)} s) — model: {predictState.data.model_name}
               </p>
+              <ApplicabilityNote result={predictState.data} />
             </div>
           )}
         </>

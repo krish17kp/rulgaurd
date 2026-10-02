@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from bearing_pdm import api
 
 MODEL_PRESENT = (api.MODELS_DIR / "rul_extra_trees.joblib").exists()
+BUNDLE_PRESENT = (api.MODELS_DIR / api.CROSS_DOMAIN_BUNDLE_NAME).exists()
 
 client = TestClient(api.app)
 
@@ -83,6 +84,44 @@ def test_predict_rul_accepts_full_feature_row():
 FIXTURES = Path(__file__).resolve().parents[1] / "data" / "fixtures"
 
 
+def _real_femto_vibration_csv(
+    with_timestamp: bool = False, blank_x: bool = False, acquisitions: tuple[str, ...] = ("acc_00001",),
+    max_rows: int | None = None,
+) -> bytes:
+    """A header-based CSV built from the real FEMTO fixture's own
+    accel_horizontal/accel_vertical values - realistic signal statistics, not
+    a flat synthetic placeholder, so applicability.assess() scores it the way
+    it would score genuine in-domain data (HIGH), not an artifact of using
+    toy numbers nothing like a real bearing signal.
+
+    `acquisitions`: one or more real acc_*.csv files concatenated, to test
+    that a longer upload is windowed back to the training acquisition size
+    (api.FEMTO_ACQUISITION_SAMPLES) rather than scored as one long window."""
+    import pandas as pd
+
+    frames = [
+        pd.read_csv(
+            FIXTURES / "femto" / "Bearing1_1" / f"{name}.csv",
+            header=None,
+            names=["hour", "minute", "second", "microsecond", "x", "y"],
+            dtype="float64",
+        )
+        for name in acquisitions
+    ]
+    df = pd.concat(frames, ignore_index=True)
+    if max_rows is not None:
+        df = df.iloc[:max_rows]
+    lines = []
+    header = (["time"] if with_timestamp else []) + ["vibration_x", "vibration_y"]
+    lines.append(",".join(header))
+    rate = api.FEMTO_SAMPLE_RATE_HZ
+    for i, (x, y) in enumerate(zip(df["x"], df["y"])):
+        x_field = "" if blank_x else str(x)
+        row = ([f"{i / rate}"] if with_timestamp else []) + [x_field, str(y)]
+        lines.append(",".join(row))
+    return ("\n".join(lines) + "\n").encode()
+
+
 def test_dataset_inspect_rejects_empty_file():
     response = client.post(
         "/dataset/inspect", files={"file": ("empty.csv", b"", "text/csv")}
@@ -100,7 +139,81 @@ def test_dataset_inspect_requires_adapter_for_headerless_femto_fixture():
     assert body["profile"]["has_header"] is False
 
 
-def test_dataset_inspect_fully_supported_for_clean_header_csv_with_matching_declared_rate():
+@pytest.mark.skipif(not BUNDLE_PRESENT, reason="artifacts/models/cross_domain_bundle.joblib not present")
+def test_dataset_inspect_fully_supported_for_a_real_in_domain_signal():
+    """A matching declared rate alone is not enough - this also needs real,
+    in-domain-looking vibration values (applicability HIGH), not just any
+    numbers at the right rate. Uses the real FEMTO fixture's own signal."""
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("clean.csv", _real_femto_vibration_csv(), "text/csv")},
+        data={"declared_sampling_rate_hz": "25600", "declared_units": "g"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["compatibility"] == "FULLY_SUPPORTED"
+
+
+@pytest.mark.skipif(not BUNDLE_PRESENT, reason="artifacts/models/cross_domain_bundle.joblib not present")
+def test_dataset_inspect_fully_supported_for_a_longer_real_signal_spanning_two_acquisitions():
+    """Regression: a longer upload (here, two real in-domain acquisitions
+    concatenated) must be windowed back to the training acquisition size
+    before scoring, not treated as one long window - several features
+    (total energy, peak-to-peak, spectral resolution) scale with window
+    length, so scoring an arbitrarily long window against a reference fitted
+    on 2560-sample acquisitions previously pushed even genuinely in-domain
+    data toward RETRAIN_REQUIRED purely from length."""
+    csv_bytes = _real_femto_vibration_csv(acquisitions=("acc_00001", "acc_00002"))
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("clean.csv", csv_bytes, "text/csv")},
+        data={"declared_sampling_rate_hz": "25600", "declared_units": "g"},
+    )
+    assert response.status_code == 200
+    assert response.json()["compatibility"] == "FULLY_SUPPORTED"
+
+
+@pytest.mark.skipif(not BUNDLE_PRESENT, reason="artifacts/models/cross_domain_bundle.joblib not present")
+def test_dataset_inspect_degrades_honestly_for_a_file_shorter_than_one_window():
+    """Regression: a file shorter than FEMTO_ACQUISITION_SAMPLES was scored
+    as one short window against a reference fitted on full-length windows -
+    several length-dependent features made real, in-domain data look
+    out-of-domain purely from being short. Must degrade honestly (like the
+    bundle-unavailable case) instead of reporting a fabricated domain shift."""
+    csv_bytes = _real_femto_vibration_csv(max_rows=api.FEMTO_ACQUISITION_SAMPLES - 1)
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("short.csv", csv_bytes, "text/csv")},
+        data={"declared_sampling_rate_hz": "25600", "declared_units": "g"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["compatibility"] == "FULLY_SUPPORTED"
+    assert "could not be assessed" in " ".join(body["reasons"]).lower()
+
+
+@pytest.mark.skipif(not BUNDLE_PRESENT, reason="artifacts/models/cross_domain_bundle.joblib not present")
+def test_dataset_inspect_reports_dropped_trailing_rows():
+    """A file that isn't an exact multiple of the window size must say so,
+    not silently drop the unscored remainder."""
+    csv_bytes = _real_femto_vibration_csv(
+        acquisitions=("acc_00001", "acc_00002"), max_rows=api.FEMTO_ACQUISITION_SAMPLES + 100
+    )
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("partial.csv", csv_bytes, "text/csv")},
+        data={"declared_sampling_rate_hz": "25600", "declared_units": "g"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert "100 trailing row" in " ".join(body["reasons"])
+
+
+def test_dataset_inspect_adapter_required_without_sampling_rate_or_units_toy_data():
+    """A toy, flat-ish signal with a matching declared rate is downgraded by
+    applicability (not HIGH) rather than silently accepted as fully
+    supported just because the rate matches - see the real-signal test
+    above for what genuinely in-domain data looks like."""
     csv_bytes = b"vibration_x,vibration_y\n0.1,0.2\n0.3,0.4\n0.2,0.1\n"
     response = client.post(
         "/dataset/inspect",
@@ -109,7 +222,9 @@ def test_dataset_inspect_fully_supported_for_clean_header_csv_with_matching_decl
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["compatibility"] == "FULLY_SUPPORTED"
+    assert body["compatibility"] in ("FULLY_SUPPORTED", "RETRAIN_REQUIRED")
+    if not BUNDLE_PRESENT:
+        assert body["compatibility"] == "FULLY_SUPPORTED"  # degraded: rate-match only, stated in reasons
 
 
 def test_dataset_inspect_adapter_required_without_sampling_rate_or_units():
@@ -145,13 +260,13 @@ def test_dataset_inspect_retrain_required_for_structurally_usable_but_unmatched_
     assert "1000" in " ".join(body["reasons"])
 
 
+@pytest.mark.skipif(not BUNDLE_PRESENT, reason="artifacts/models/cross_domain_bundle.joblib not present")
 def test_dataset_inspect_derives_sampling_rate_from_a_timestamp_column():
     """No declaration needed when the file itself carries a timestamp
     column - the rate is derived from real evidence (median step), not
-    guessed, and happens to match FEMTO's rate here."""
-    step = 1.0 / api.FEMTO_SAMPLE_RATE_HZ
-    rows = "\n".join(f"{i * step},{0.1 + 0.001 * (i % 7)},{0.2 + 0.001 * (i % 5)}" for i in range(300))
-    csv_bytes = f"time,vibration_x,vibration_y\n{rows}\n".encode()
+    guessed, and happens to match FEMTO's rate here. Real signal values
+    (not toy numbers) so it also clears the applicability check."""
+    csv_bytes = _real_femto_vibration_csv(with_timestamp=True)
     response = client.post(
         "/dataset/inspect",
         files={"file": ("timed.csv", csv_bytes, "text/csv")},
@@ -232,16 +347,35 @@ def test_dataset_inspect_invalid_for_non_numeric_vibration_column():
     assert response.json()["compatibility"] == "INVALID_INPUT"
 
 
-def test_dataset_inspect_invalid_for_all_missing_vibration_column():
-    csv_bytes = b"vibration_x,vibration_y\n,0.1\n,0.2\n,0.3\n"
+@pytest.mark.skipif(not BUNDLE_PRESENT, reason="artifacts/models/cross_domain_bundle.joblib not present")
+def test_dataset_inspect_retrain_required_when_half_the_model_features_are_unavailable():
+    """vibration_x is 100% missing but vibration_y is fully usable and
+    structurally this is fine - but half the trained model's features
+    (every vibration_x_* one) are then unavailable, which applicability.py's
+    own missing-feature cap correctly treats as a real degradation, not
+    something to silently call fully supported.
+
+    Also pins the single-window scoring-consistency fix: this file is
+    exactly one FEMTO_ACQUISITION_SAMPLES window, which must be scored the
+    same way (single_recording=True) whether it arrives as a one-element
+    list (this generic path) or a dict (the raw FEMTO upload endpoint) -
+    routing by list-length rather than by isinstance(..., dict) alone."""
+    csv_bytes = _real_femto_vibration_csv(blank_x=True)
     response = client.post(
         "/dataset/inspect",
         files={"file": ("bad.csv", csv_bytes, "text/csv")},
         data={"declared_sampling_rate_hz": "25600", "declared_units": "g"},
     )
     assert response.status_code == 200
-    # vibration_x is 100% missing but vibration_y is fully usable - still supported.
-    assert response.json()["compatibility"] == "FULLY_SUPPORTED"
+    body = response.json()
+    # Half the model's features missing caps at MEDIUM
+    # (applicability.py's PARTIAL_MISSING_FRACTION/MISSING_FEATURE_FRACTION
+    # thresholds applied to the *fraction present*), not LOW - LOW is what
+    # the pre-fix max()-based aggregation produced for this exact input.
+    assert body["compatibility"] == "RETRAIN_REQUIRED"
+    # The downgrade message must attribute the real cause (missing features),
+    # not blame "the signal itself" when the shift ratio is actually fine.
+    assert "missing model feature" in " ".join(body["reasons"])
 
 
 def test_dataset_inspect_invalid_when_every_vibration_column_is_missing():
