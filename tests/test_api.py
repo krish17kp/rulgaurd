@@ -8,6 +8,7 @@ depend on the artifact's presence.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -343,3 +344,47 @@ def test_predict_rul_falls_back_to_median_for_missing_features():
     assert response.status_code == 200
     body = response.json()
     assert len(body["features_missing"]) == len(model.feature_columns) - n_provided
+
+
+@pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
+def test_predict_rul_treats_nan_feature_as_missing_not_as_a_real_value():
+    """Regression for a review defect: a present-but-NaN feature (e.g.
+    features.py's own NaN-by-design output for a degenerate signal) used to
+    bypass both the median-fill and the missing-fraction gate, reaching the
+    model with NaN instead of its training median."""
+    model = api._load_joblib("rul_extra_trees.joblib")
+    features = dict(model.median_fill)
+    nan_col = model.feature_columns[0]
+    features[nan_col] = float("nan")
+
+    response = client.post(
+        "/predict/rul",
+        content=json.dumps({"dataset_id": "femto", "features": features}),
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert nan_col in body["features_missing"]
+
+    median_only = {c: v for c, v in model.median_fill.items() if c != nan_col}
+    expected = client.post(
+        "/predict/rul", json={"dataset_id": "femto", "features": median_only}
+    ).json()
+    assert body["rul_seconds"] == pytest.approx(expected["rul_seconds"])
+
+
+@pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
+def test_predict_rul_rejects_too_many_nan_features_instead_of_predicting_on_them():
+    model = api._load_joblib("rul_extra_trees.joblib")
+    n_ok = max(len(model.feature_columns) // 3, 1)  # well under the 50% gate for the rest
+    features = {c: float("nan") for c in model.feature_columns}
+    for c in model.feature_columns[:n_ok]:
+        features[c] = model.median_fill[c]
+
+    response = client.post(
+        "/predict/rul",
+        content=json.dumps({"dataset_id": "femto", "features": features}),
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 422
+    assert "missing" in response.json()["detail"].lower()

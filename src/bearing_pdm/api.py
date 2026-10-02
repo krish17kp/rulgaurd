@@ -26,14 +26,31 @@ from pathlib import Path
 from typing import Any
 
 import joblib
+import numpy as np
+import pandas as pd
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from bearing_pdm.features import frequency_domain_features, time_domain_features
+from bearing_pdm.femto import ACC_COLUMNS
 from bearing_pdm.health import apply_reference_hi
 from bearing_pdm.profiler import profile_file
 from bearing_pdm.stages import assign_stages
+
+# FEMTO's acc_*.csv is a fixed, headerless, positional 6-column layout at a
+# known sampling rate (femto.py's own docstring) - this is a *known adapter*
+# the user is explicitly asserting applies (dataset_id="femto"), not a guess
+# from column names the way /dataset/inspect works. ml-data.md: never guess
+# sampling frequency - this one is a documented constant of a named format,
+# not inferred from the upload.
+FEMTO_SAMPLE_RATE_HZ = 25600.0
+# A real acquisition is "usually 2560 rows" (femto.py docstring); this floor
+# is deliberately far below that - just enough that frequency_domain_features
+# isn't degenerate (x.size<2) and a handful of rows can't be mistaken for a
+# real vibration window, not a claim about the true per-file row count.
+MIN_FEMTO_ACQUISITION_ROWS = 256
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = REPO_ROOT / "artifacts" / "models"
@@ -290,18 +307,10 @@ def models_info() -> dict[str, Any]:
     }
 
 
-@app.post("/predict/rul", response_model=PredictRulResponse)
-def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
-    if request.dataset_id != "femto":
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"dataset_id={request.dataset_id!r} is not supported for RUL prediction. "
-                "Every cached model is fit on FEMTO learning bearings only "
-                "(docs/decisions.md D11); applying it elsewhere would fabricate a result."
-            ),
-        )
-
+def _predict_rul_from_features(features: dict[str, float]) -> PredictRulResponse:
+    """Shared by /predict/rul (caller supplies a pre-extracted feature row)
+    and /predict/rul/femto-acquisition (feature row extracted here from a raw
+    upload) - one feature-contract/missing-value/inference path, not two."""
     model = _load_joblib("rul_extra_trees.joblib")
     if model is None:
         raise HTTPException(
@@ -309,7 +318,17 @@ def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
             detail="rul_extra_trees.joblib is missing. Run scripts/train_models.py first.",
         )
 
-    missing = [c for c in model.feature_columns if c not in request.features]
+    # A present-but-non-finite value (features.py returns NaN by design for a
+    # zero-variance/degenerate signal, see frequency_domain_features) is not a
+    # real measurement either - treating it as "present" let it bypass both
+    # the median-fill below and the missing-fraction gate, reaching the model
+    # with a NaN feature instead of the training median (found in review:
+    # produced a materially different RUL than modeling.predict_tree_baseline
+    # on the same input). Fold it into "missing" so both paths see it.
+    missing = [
+        c for c in model.feature_columns
+        if c not in features or not np.isfinite(features[c])
+    ]
     max_missing_fraction = 0.5  # below this, too few real measurements to trust the prediction
     if len(missing) / len(model.feature_columns) > max_missing_fraction:
         raise HTTPException(
@@ -322,7 +341,7 @@ def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
         )
 
     row = {
-        c: request.features.get(c, model.median_fill.get(c))
+        c: features[c] if c not in missing else model.median_fill.get(c)
         for c in model.feature_columns
     }
     if any(v is None for v in row.values()):
@@ -332,22 +351,138 @@ def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
             detail=f"Missing required features with no fallback median: {unresolvable}",
         )
 
-    import pandas as pd
-
     x = pd.DataFrame([row])[list(model.feature_columns)]
-    prediction = float(model.model.predict(x)[0])
+    try:
+        prediction = float(model.model.predict(x)[0])
+    except ValueError as exc:
+        # Extreme-but-finite input (e.g. 1e300 raw samples) can still overflow
+        # a derived feature like RMS to inf despite passing the raw-value
+        # isfinite check upstream. Fail closed with 422, not a raw 500.
+        raise HTTPException(
+            status_code=422,
+            detail=f"Feature values are unusable for prediction: {exc}",
+        ) from None
 
-    response = PredictRulResponse(
+    return PredictRulResponse(
         model_name="extra_trees",
         rul_seconds=prediction,
         rul_hours=prediction / 3600.0,
         features_used=list(model.feature_columns),
         features_missing=missing,
     )
+
+
+@app.post("/predict/rul", response_model=PredictRulResponse)
+def predict_rul(request: PredictRulRequest) -> PredictRulResponse:
+    if request.dataset_id != "femto":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"dataset_id={request.dataset_id!r} is not supported for RUL prediction. "
+                "Every cached model is fit on FEMTO learning bearings only "
+                "(docs/decisions.md D11); applying it elsewhere would fabricate a result."
+            ),
+        )
+
+    response = _predict_rul_from_features(request.features)
     _record_history(
         "predict_rul",
         {"dataset_id": request.dataset_id, "n_features_provided": len(request.features)},
-        {"rul_hours": response.rul_hours, "n_features_missing": len(missing)},
+        {"rul_hours": response.rul_hours, "n_features_missing": len(response.features_missing)},
+    )
+    return response
+
+
+def _extract_femto_acquisition_features(path: str) -> dict[str, float]:
+    """Exactly the extraction tests/test_api_e2e.py proves matches the
+    trained model's feature contract: time- and frequency-domain features
+    per axis from the real functions in features.py, nothing reimplemented."""
+    df = pd.read_csv(path, header=None, names=ACC_COLUMNS, dtype="float64")
+    features: dict[str, float] = {}
+    for axis, column in (("x", "accel_horizontal"), ("y", "accel_vertical")):
+        signal = df[column].to_numpy()
+        features.update(time_domain_features(signal, f"vibration_{axis}"))
+    for axis, column in (("x", "accel_horizontal"), ("y", "accel_vertical")):
+        signal = df[column].to_numpy()
+        features.update(frequency_domain_features(signal, FEMTO_SAMPLE_RATE_HZ, f"vibration_{axis}"))
+    return features
+
+
+@app.post("/predict/rul/femto-acquisition", response_model=PredictRulResponse)
+async def predict_rul_from_femto_acquisition(file: UploadFile) -> PredictRulResponse:
+    """Raw single-acquisition FEMTO acc_*.csv -> features.py -> /predict/rul,
+    over one HTTP call (goals.md: "automatically extract the required
+    features" / "automatically run the correct trained prediction pipeline").
+
+    Only the FEMTO acc format (docs/decisions.md D11, femto.py) is accepted
+    here - the caller is asserting a known, fixed, headerless 6-column layout
+    at a known sampling rate, not asking this endpoint to guess one from an
+    arbitrary upload (that guess belongs to /dataset/inspect, and it correctly
+    refuses to guess). A dataset_id parameter isn't needed: this route's
+    entire contract already *is* "this is a femto acquisition."
+    """
+    with tempfile.NamedTemporaryFile(suffix=".csv") as tmp:
+        written = 0
+        while chunk := await file.read(UPLOAD_CHUNK_BYTES):
+            written += len(chunk)
+            if written > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB limit.",
+                )
+            tmp.write(chunk)
+        tmp.flush()
+
+        if written == 0:
+            raise HTTPException(status_code=422, detail="Uploaded file is empty.")
+
+        try:
+            raw = pd.read_csv(tmp.name, header=None, dtype="float64")
+        except (ValueError, pd.errors.ParserError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Not a numeric, headerless FEMTO acc_*.csv file: {exc}",
+            ) from None
+
+        if raw.shape[1] != len(ACC_COLUMNS):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Expected {len(ACC_COLUMNS)} columns (FEMTO's fixed acc_*.csv layout: "
+                    f"{ACC_COLUMNS}), got {raw.shape[1]}. This is not a FEMTO acquisition file."
+                ),
+            )
+        if raw.shape[0] < MIN_FEMTO_ACQUISITION_ROWS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Only {raw.shape[0]} rows - at least {MIN_FEMTO_ACQUISITION_ROWS} are required "
+                    "for a meaningful vibration window (a real FEMTO acquisition is usually ~2560)."
+                ),
+            )
+        if not np.isfinite(raw[[4, 5]].to_numpy()).all():
+            raise HTTPException(
+                status_code=422,
+                detail="Non-finite (NaN/inf) values in the vibration columns are not allowed.",
+            )
+
+        try:
+            features = _extract_femto_acquisition_features(tmp.name)
+        except OverflowError as exc:
+            # Finite but extreme raw samples (e.g. a huge-amplitude signal)
+            # can overflow a derived statistic (std**4 etc.) before any
+            # feature value is even produced to check for non-finiteness -
+            # found in review. Fail closed with 422, not a raw 500.
+            raise HTTPException(
+                status_code=422,
+                detail=f"Raw sample values are too extreme to extract features from: {exc}",
+            ) from None
+
+    response = _predict_rul_from_features(features)
+    _record_history(
+        "predict_rul_femto_acquisition",
+        {"filename": file.filename, "n_rows": int(raw.shape[0])},
+        {"rul_hours": response.rul_hours, "n_features_missing": len(response.features_missing)},
     )
     return response
 
@@ -432,9 +567,6 @@ def predict_hi(request: HiRequest) -> HiResponse:
                 f"{len(request.rows)}."
             ),
         )
-
-    import numpy as np
-    import pandas as pd
 
     feature_cols = list(reference_model.features)
     non_finite = [

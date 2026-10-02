@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
@@ -66,6 +67,89 @@ def test_real_femto_acquisition_produces_a_prediction_through_the_live_api():
     # back as seconds or as some absurd multi-year value.
     assert 0 <= body["rul_seconds"] <= 7 * 24 * 3600  # FEMTO learning runs are minutes-to-hours, not days
     assert body["rul_hours"] == pytest.approx(body["rul_seconds"] / 3600.0)
+
+
+@pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
+def test_raw_femto_csv_upload_produces_the_same_prediction_as_manual_extraction():
+    """Proves the new POST /predict/rul/femto-acquisition wiring (raw CSV ->
+    features.py -> model, inside the API process) against the already-trusted
+    manual-extraction path above, not just that it returns *some* 200."""
+    acc_path = FIXTURES / "femto" / "Bearing1_1" / "acc_00001.csv"
+    expected = client.post(
+        "/predict/rul", json={"dataset_id": "femto", "features": _extract_features(acc_path)}
+    ).json()
+
+    with acc_path.open("rb") as fh:
+        response = client.post(
+            "/predict/rul/femto-acquisition",
+            files={"file": ("acc_00001.csv", fh, "text/csv")},
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["rul_seconds"] == pytest.approx(expected["rul_seconds"])
+    assert body["features_missing"] == []
+
+
+def test_raw_femto_csv_upload_rejects_wrong_column_count():
+    bad_csv = "1,2,3\n" * 300
+    response = client.post(
+        "/predict/rul/femto-acquisition",
+        files={"file": ("bad.csv", bad_csv.encode(), "text/csv")},
+    )
+    assert response.status_code == 422
+    assert "columns" in response.json()["detail"]
+
+
+def _non_constant_femto_csv(amplitude: float) -> bytes:
+    """A FEMTO-shaped CSV with real (non-constant) variation at a given
+    amplitude - a constant-value column is caught earlier by the degenerate
+    reference-window style checks upstream of feature extraction, so an
+    overflow regression test needs a signal that actually varies."""
+    rng = np.random.default_rng(0)
+    n = api.MIN_FEMTO_ACQUISITION_ROWS
+    x = rng.normal(size=n) * amplitude
+    y = rng.normal(size=n) * amplitude
+    lines = [f"0,0,0,0,{xi},{yi}" for xi, yi in zip(x, y)]
+    return ("\n".join(lines) + "\n").encode()
+
+
+@pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
+def test_raw_femto_csv_upload_rejects_overflowing_values_with_422_not_500():
+    """Regression: an amplitude extreme enough to leave every feature value
+    finite but too large for the model's input dtype must still come back
+    422 from _predict_rul_from_features's predict()-time catch, not a raw
+    500. Distinct from the extraction-time overflow test below: at 1e40,
+    features.py itself raises nothing."""
+    response = client.post(
+        "/predict/rul/femto-acquisition",
+        files={"file": ("overflow.csv", _non_constant_femto_csv(1e40), "text/csv")},
+    )
+    assert response.status_code == 422
+    assert "unusable for prediction" in response.json()["detail"]
+
+
+def test_raw_femto_csv_upload_rejects_values_overflowing_feature_extraction_itself():
+    """Regression: an amplitude extreme enough to overflow inside
+    features.py's own statistics (std**4 on a Python float raises
+    OverflowError) before any feature value exists to check - this
+    previously reached sklearn/numpy unhandled (500). Does not need the
+    trained model: extraction fails before _predict_rul_from_features runs."""
+    response = client.post(
+        "/predict/rul/femto-acquisition",
+        files={"file": ("overflow.csv", _non_constant_femto_csv(1e80), "text/csv")},
+    )
+    assert response.status_code == 422
+    assert "too extreme to extract" in response.json()["detail"]
+
+
+def test_raw_femto_csv_upload_rejects_too_few_rows():
+    bad_csv = "\n".join(["0,0,0,0,0.1,0.2"] * 5)
+    response = client.post(
+        "/predict/rul/femto-acquisition",
+        files={"file": ("short.csv", bad_csv.encode(), "text/csv")},
+    )
+    assert response.status_code == 422
+    assert "rows" in response.json()["detail"]
 
 
 def test_two_real_acquisitions_from_the_same_bearing_give_different_features():

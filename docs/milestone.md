@@ -126,6 +126,19 @@ cycles - see the branch's commit history for the specific defects found and fixe
 - `tests/test_api.py`, `tests/test_api_e2e.py`: unit tests plus one true end-to-end test
   (real FEMTO fixture CSV -> `features.py`'s real extraction functions -> live
   `/predict/rul`), independently sanity-checked against FEMTO Bearing1_1's known life.
+- `POST /predict/rul/femto-acquisition`: closes the "features.py only reachable by
+  pre-extracting client-side" gap - accepts a raw FEMTO `acc_*.csv` upload directly, extracts
+  features with the same `features.py` functions the e2e test already trusts, and runs the
+  existing `/predict/rul` feature-contract/inference path (refactored into
+  `_predict_rul_from_features`, shared by both routes). FEMTO's acc layout (6 columns,
+  headerless, 25.6kHz) is a known fixed format, not inferred from the upload - this endpoint
+  does not replace `/dataset/inspect`'s column-name-based, format-agnostic classification.
+  Rejects wrong column count, too few rows, and non-finite vibration values with 422.
+  Tested in `tests/test_api_e2e.py` against the real fixture (same prediction as the manual
+  extraction path) plus two negative cases. Not yet wired into the frontend upload page -
+  `/dataset/inspect`'s generic classifier reports a headerless FEMTO file as
+  `ADAPTER_REQUIRED` (correctly, per its own documented scope), so the UI needs an explicit
+  "this is a FEMTO acquisition" affordance rather than silently routing through it.
 
 Explicitly NOT done, stated here rather than implied by silence:
 - **No live Vercel deployment.** No Vercel account/API token exists in this environment.

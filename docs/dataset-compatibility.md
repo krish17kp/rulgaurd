@@ -42,3 +42,22 @@ A `FULLY_SUPPORTED` result from this endpoint means the file's columns look
 usable — it is not a claim that the full pipeline (feature extraction → HI →
 RUL) has been run against it, and it is not a substitute for the
 `quality_gate`/applicability checks the batch pipeline runs downstream.
+
+## Raw-upload → RUL for a known format: `POST /predict/rul/femto-acquisition`
+
+This endpoint does not use `_classify`/`profile_file` at all — it is a separate route for a
+single named, fixed format: FEMTO's `acc_*.csv` (headerless, 6 positional columns, 25.6kHz).
+A headerless file can never be classified `FULLY_SUPPORTED` by `/dataset/inspect` (above),
+because column meaning can't be read from names that don't exist — that is correct, documented
+behaviour for the generic inspector, not a gap. This route instead takes the caller's explicit
+assertion "this is a FEMTO acquisition" (the route itself, not a `dataset_id` field, carries
+that contract) and validates the *structural* claim before extracting features: exact column
+count, a row-count floor, and finite raw vibration samples. It then runs `features.py`'s real
+extraction functions and the same `/predict/rul` inference path, which treats any resulting
+non-finite *derived* feature (e.g. a degenerate/zero-variance window makes
+`frequency_domain_features` return NaN by design) as missing rather than feeding it to the
+model, and fails closed with 422 if a feature value overflows to infinity. It still never
+guesses a sampling rate or unit for an unknown format — FEMTO's rate is a documented constant
+of this one named adapter, not inferred from the upload. It also cannot detect swapped axes or
+wrong units in a headerless file; the caller's "this is a FEMTO acquisition" assertion is
+trusted, not independently verified.
