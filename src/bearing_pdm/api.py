@@ -28,7 +28,7 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -64,18 +64,52 @@ UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 FULLY_SUPPORTED = "FULLY_SUPPORTED"
 ADAPTER_REQUIRED = "ADAPTER_REQUIRED"
+RETRAIN_REQUIRED = "RETRAIN_REQUIRED"
 UNSUPPORTED = "UNSUPPORTED"
 INVALID_INPUT = "INVALID_INPUT"
 
 _REQUIRED_ANY = {"vibration_x", "vibration_y", "vibration_z"}
 
+# The only sampling rate any currently trained model was fit at (FEMTO,
+# FEMTO_SAMPLE_RATE_HZ above). A file whose rate is known but doesn't match
+# this is structurally usable, just not covered by an existing model -
+# RETRAIN_REQUIRED, not ADAPTER_REQUIRED (that's for format/column problems).
+_KNOWN_MODEL_SAMPLE_RATES_HZ = {"femto": FEMTO_SAMPLE_RATE_HZ}
+_SAMPLE_RATE_TOLERANCE = 0.01  # 1% - real hardware clocks drift slightly
 
-def _classify(profile: dict) -> tuple[str, list[str]]:
+
+def _derive_sampling_rate_hz(path: Path, profile: dict) -> tuple[float | None, str | None]:
+    """From evidence only, matching profiler._sampling_rate's own rule for a
+    multi-file folder profile: a timestamp column's median step. Never
+    assumed from the file format or row count."""
+    time_cols = [c for c in profile.get("columns", []) if c["canonical"] == "timestamp"]
+    if not time_cols or profile.get("rows", 0) < 2:
+        return None, None
+    delimiter = profile.get("delimiter")
+    sep = r"\s+" if delimiter in (None, "whitespace") else delimiter
+    try:
+        df = pd.read_csv(path, sep=sep, nrows=2000)
+    except (pd.errors.ParserError, ValueError):
+        return None, None
+    step = np.median(np.diff(pd.to_numeric(df[time_cols[0]["name"]], errors="coerce")))
+    if np.isfinite(step) and step > 0:
+        return float(1.0 / step), f"timestamp column '{time_cols[0]['name']}'"
+    return None, None
+
+
+def _classify(
+    profile: dict,
+    path: Path | None = None,
+    declared_sampling_rate_hz: float | None = None,
+    declared_units: str | None = None,
+) -> tuple[str, list[str]]:
     """Compatibility state for the uploaded file, from profile_file's output
-    only - see goals.md's fail-closed dataset-state requirement. This is a
-    column/header-level check; it does not run the trained applicability
-    model in applicability.py (that needs parsed recordings from a known
-    adapter, not an arbitrary upload) - see docs/dataset-compatibility.md."""
+    plus (for the sampling-rate/units steps only) the caller's own
+    declaration or a timestamp column already in the file - never guessed.
+    This is a column/header-level check; it does not run the trained
+    applicability model in applicability.py (that needs parsed recordings
+    from a known adapter, not an arbitrary upload) - see
+    docs/dataset-compatibility.md."""
     if not profile.get("readable"):
         return INVALID_INPUT, profile.get("warnings", ["file could not be read"])
 
@@ -116,7 +150,64 @@ def _classify(profile: dict) -> tuple[str, list[str]]:
                else f"{c['nan_fraction']:.0%} missing")
             for c in vibration_cols
         ]
-    return FULLY_SUPPORTED, []
+
+    # Everything above is structural (can the columns be read at all). Below
+    # is the scientific question ml-data.md requires: is this file's sampling
+    # rate/units known, and if so, does any trained model actually cover it?
+    # Neither is ever inferred from the data's shape or scale - only from a
+    # real timestamp column already in the file, or the caller's own
+    # declaration.
+    declared_units = declared_units.strip() if declared_units else declared_units
+
+    derived_rate, derived_source = _derive_sampling_rate_hz(path, profile) if path else (None, None)
+    # Real evidence (a timestamp column already in the file) always wins over
+    # a declaration - a declared rate is only a fallback for when there is no
+    # such evidence, never a way to override it (found in review: declaring a
+    # rate that contradicted the file's own timestamps silently produced
+    # FULLY_SUPPORTED, exactly the guess ml-data.md forbids).
+    if derived_rate is not None:
+        sampling_rate_hz, rate_source = derived_rate, derived_source
+        if (
+            declared_sampling_rate_hz is not None
+            and abs(declared_sampling_rate_hz - derived_rate) > _SAMPLE_RATE_TOLERANCE * derived_rate
+        ):
+            return ADAPTER_REQUIRED, [
+                f"declared_sampling_rate_hz={declared_sampling_rate_hz:.1f} conflicts with the rate "
+                f"derived from the file's own {derived_source} ({derived_rate:.1f} Hz) - the file's "
+                "own evidence is used, not the declaration; fix the declaration or the file"
+            ]
+    else:
+        sampling_rate_hz, rate_source = declared_sampling_rate_hz, "declared_sampling_rate_hz"
+
+    missing_metadata = []
+    if sampling_rate_hz is None:
+        missing_metadata.append(
+            "sampling rate unknown: no usable timestamp column (none found, or its values "
+            "could not be read as a numeric, varying time series) and no declared_sampling_rate_hz "
+            "- frequency-domain features cannot be computed without it"
+        )
+    if not declared_units:
+        missing_metadata.append(
+            "units not declared (declared_units) - this project keeps no verified units "
+            "contract to check a declaration against, but requires one for traceability "
+            "before a prediction is made"
+        )
+    if missing_metadata:
+        return ADAPTER_REQUIRED, missing_metadata
+
+    for model_id, model_rate_hz in _KNOWN_MODEL_SAMPLE_RATES_HZ.items():
+        if abs(sampling_rate_hz - model_rate_hz) <= _SAMPLE_RATE_TOLERANCE * model_rate_hz:
+            return FULLY_SUPPORTED, [
+                f"sampling rate {sampling_rate_hz:.1f} Hz (source: {rate_source}) matches the "
+                f"{model_id} model's trained rate ({model_rate_hz:.1f} Hz)"
+            ]
+    return RETRAIN_REQUIRED, [
+        f"sampling rate {sampling_rate_hz:.1f} Hz (source: {rate_source}) does not match any "
+        f"trained model's domain ({', '.join(f'{k}: {v:.1f} Hz' for k, v in _KNOWN_MODEL_SAMPLE_RATES_HZ.items())}). "
+        "The vibration channel(s) and metadata are structurally usable, but no existing model "
+        "was fit at this rate - this machine/configuration would need a model trained for it, "
+        "not just a parsing adapter."
+    ]
 
 
 class DatasetProfileResponse(BaseModel):
@@ -649,10 +740,26 @@ def prediction_history() -> dict[str, Any]:
 
 
 @app.post("/dataset/inspect", response_model=DatasetProfileResponse)
-async def inspect_dataset(file: UploadFile) -> DatasetProfileResponse:
+async def inspect_dataset(
+    file: UploadFile,
+    declared_sampling_rate_hz: float | None = Form(None),
+    declared_units: str | None = Form(None),
+) -> DatasetProfileResponse:
     """Upload -> inspect -> classify (goals.md's dataset-detection step), before
     anything is validated/preprocessed/fed to a model. Column-mapping only -
-    see docs/dataset-compatibility.md for what this does and does not check."""
+    see docs/dataset-compatibility.md for what this does and does not check.
+
+    declared_sampling_rate_hz/declared_units are the caller's own assertion,
+    used only when the file carries no timestamp column to derive a rate from
+    - never a guess this endpoint makes itself (ml-data.md)."""
+    if declared_sampling_rate_hz is not None and not (
+        np.isfinite(declared_sampling_rate_hz) and declared_sampling_rate_hz > 0
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"declared_sampling_rate_hz must be a finite positive number, got {declared_sampling_rate_hz!r}.",
+        )
+
     with tempfile.NamedTemporaryFile(suffix=Path(file.filename or "upload").suffix) as tmp:
         written = 0
         while chunk := await file.read(UPLOAD_CHUNK_BYTES):
@@ -671,7 +778,13 @@ async def inspect_dataset(file: UploadFile) -> DatasetProfileResponse:
         profile = profile_file(tmp.name)
         profile["file"] = file.filename or profile["file"]  # real name, not the temp path
 
-    compatibility, reasons = _classify(profile)
+        compatibility, reasons = _classify(
+            profile,
+            path=Path(tmp.name),
+            declared_sampling_rate_hz=declared_sampling_rate_hz,
+            declared_units=declared_units,
+        )
+
     return DatasetProfileResponse(compatibility=compatibility, reasons=reasons, profile=profile)
 
 

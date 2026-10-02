@@ -100,15 +100,129 @@ def test_dataset_inspect_requires_adapter_for_headerless_femto_fixture():
     assert body["profile"]["has_header"] is False
 
 
-def test_dataset_inspect_fully_supported_for_clean_header_csv():
+def test_dataset_inspect_fully_supported_for_clean_header_csv_with_matching_declared_rate():
+    csv_bytes = b"vibration_x,vibration_y\n0.1,0.2\n0.3,0.4\n0.2,0.1\n"
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("clean.csv", csv_bytes, "text/csv")},
+        data={"declared_sampling_rate_hz": "25600", "declared_units": "g"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["compatibility"] == "FULLY_SUPPORTED"
+
+
+def test_dataset_inspect_adapter_required_without_sampling_rate_or_units():
+    """Structurally clean, high-confidence vibration columns - but no
+    timestamp column and no declaration means frequency features can't be
+    computed and units aren't known, so this can't be called FULLY_SUPPORTED
+    without guessing (ml-data.md)."""
     csv_bytes = b"vibration_x,vibration_y\n0.1,0.2\n0.3,0.4\n0.2,0.1\n"
     response = client.post(
         "/dataset/inspect", files={"file": ("clean.csv", csv_bytes, "text/csv")}
     )
     assert response.status_code == 200
     body = response.json()
+    assert body["compatibility"] == "ADAPTER_REQUIRED"
+    reasons = " ".join(body["reasons"]).lower()
+    assert "sampling rate unknown" in reasons
+    assert "units not declared" in reasons
+
+
+def test_dataset_inspect_retrain_required_for_structurally_usable_but_unmatched_rate():
+    """Metadata is fully known (declared), the file is structurally clean -
+    but no trained model was fit at this sampling rate. That's a scientific
+    gap (retraining), not a parsing gap (ADAPTER_REQUIRED)."""
+    csv_bytes = b"vibration_x,vibration_y\n0.1,0.2\n0.3,0.4\n0.2,0.1\n"
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("clean.csv", csv_bytes, "text/csv")},
+        data={"declared_sampling_rate_hz": "1000", "declared_units": "m/s^2"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["compatibility"] == "RETRAIN_REQUIRED"
+    assert "1000" in " ".join(body["reasons"])
+
+
+def test_dataset_inspect_derives_sampling_rate_from_a_timestamp_column():
+    """No declaration needed when the file itself carries a timestamp
+    column - the rate is derived from real evidence (median step), not
+    guessed, and happens to match FEMTO's rate here."""
+    step = 1.0 / api.FEMTO_SAMPLE_RATE_HZ
+    rows = "\n".join(f"{i * step},{0.1 + 0.001 * (i % 7)},{0.2 + 0.001 * (i % 5)}" for i in range(300))
+    csv_bytes = f"time,vibration_x,vibration_y\n{rows}\n".encode()
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("timed.csv", csv_bytes, "text/csv")},
+        data={"declared_units": "g"},
+    )
+    assert response.status_code == 200
+    body = response.json()
     assert body["compatibility"] == "FULLY_SUPPORTED"
-    assert body["reasons"] == []
+    assert "timestamp column" in " ".join(body["reasons"])
+
+
+def test_dataset_inspect_timestamp_evidence_overrides_a_contradicting_declared_rate():
+    """Regression for a review defect: a declared_sampling_rate_hz used to
+    win even when a real timestamp column in the file said otherwise,
+    letting the caller declare their way to FULLY_SUPPORTED - exactly the
+    guess ml-data.md forbids. The file's own evidence must win, and a
+    contradicting declaration must be flagged, not silently overridden."""
+    step = 1.0 / 1000.0  # 1kHz by the file's own timestamps
+    rows = "\n".join(f"{i * step},{0.1 + 0.001 * (i % 7)},{0.2 + 0.001 * (i % 5)}" for i in range(300))
+    csv_bytes = f"time,vibration_x,vibration_y\n{rows}\n".encode()
+
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("timed.csv", csv_bytes, "text/csv")},
+        data={"declared_sampling_rate_hz": "25600", "declared_units": "g"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["compatibility"] == "ADAPTER_REQUIRED"
+    assert "conflicts" in " ".join(body["reasons"]).lower()
+
+    # No conflicting declaration at all: the file's own 1kHz evidence is used
+    # directly, correctly landing on RETRAIN_REQUIRED (not FEMTO's rate).
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("timed.csv", csv_bytes, "text/csv")},
+        data={"declared_units": "g"},
+    )
+    assert response.json()["compatibility"] == "RETRAIN_REQUIRED"
+
+    # A declaration that *agrees* with the file's own timestamps (within
+    # tolerance) must not be flagged as a conflict - only disagreement is.
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("timed.csv", csv_bytes, "text/csv")},
+        data={"declared_sampling_rate_hz": "1005", "declared_units": "g"},
+    )
+    body = response.json()
+    assert body["compatibility"] == "RETRAIN_REQUIRED"
+    assert "conflicts" not in " ".join(body["reasons"]).lower()
+
+
+def test_dataset_inspect_rejects_whitespace_only_declared_units():
+    csv_bytes = b"vibration_x,vibration_y\n0.1,0.2\n0.3,0.4\n0.2,0.1\n"
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("clean.csv", csv_bytes, "text/csv")},
+        data={"declared_sampling_rate_hz": "25600", "declared_units": "   "},
+    )
+    assert response.status_code == 200
+    assert response.json()["compatibility"] == "ADAPTER_REQUIRED"
+
+
+def test_dataset_inspect_rejects_non_positive_declared_sampling_rate():
+    csv_bytes = b"vibration_x\n0.1\n0.2\n0.3\n"
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("clean.csv", csv_bytes, "text/csv")},
+        data={"declared_sampling_rate_hz": "0", "declared_units": "g"},
+    )
+    assert response.status_code == 422
 
 
 def test_dataset_inspect_invalid_for_non_numeric_vibration_column():
@@ -120,7 +234,11 @@ def test_dataset_inspect_invalid_for_non_numeric_vibration_column():
 
 def test_dataset_inspect_invalid_for_all_missing_vibration_column():
     csv_bytes = b"vibration_x,vibration_y\n,0.1\n,0.2\n,0.3\n"
-    response = client.post("/dataset/inspect", files={"file": ("bad.csv", csv_bytes, "text/csv")})
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("bad.csv", csv_bytes, "text/csv")},
+        data={"declared_sampling_rate_hz": "25600", "declared_units": "g"},
+    )
     assert response.status_code == 200
     # vibration_x is 100% missing but vibration_y is fully usable - still supported.
     assert response.json()["compatibility"] == "FULLY_SUPPORTED"

@@ -135,10 +135,19 @@ cycles - see the branch's commit history for the specific defects found and fixe
   does not replace `/dataset/inspect`'s column-name-based, format-agnostic classification.
   Rejects wrong column count, too few rows, and non-finite vibration values with 422.
   Tested in `tests/test_api_e2e.py` against the real fixture (same prediction as the manual
-  extraction path) plus two negative cases. Not yet wired into the frontend upload page -
-  `/dataset/inspect`'s generic classifier reports a headerless FEMTO file as
-  `ADAPTER_REQUIRED` (correctly, per its own documented scope), so the UI needs an explicit
-  "this is a FEMTO acquisition" affordance rather than silently routing through it.
+  extraction path) plus negative cases (3 review rounds: NaN feature bypassing the median-fill
+  gate, predict-time overflow, extraction-time overflow - all now fail closed with 422).
+- Frontend `/upload` page now has an explicit "FEMTO / supported bearing acquisition" vs
+  "Unknown / other dataset" selector, wired to `predictRulFromFemtoAcquisition` and
+  `inspectDataset` respectively - never inferred from the file's own bytes.
+- `/dataset/inspect` deepened: added `RETRAIN_REQUIRED` as a distinct state from
+  `ADAPTER_REQUIRED` (structurally clean + known sampling rate/units, but the rate doesn't
+  match any trained model's domain), sampling-rate derivation from a real timestamp column
+  (`_derive_sampling_rate_hz`, same rule as `profiler._sampling_rate`), and optional
+  `declared_sampling_rate_hz`/`declared_units` form fields used only when no timestamp column
+  exists. Units have no verified project-wide contract to check a declaration against - that
+  limitation is stated in the API's own `reasons` text, not hidden. See
+  `docs/dataset-compatibility.md`.
 
 Explicitly NOT done, stated here rather than implied by silence:
 - **No live Vercel deployment.** No Vercel account/API token exists in this environment.

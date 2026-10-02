@@ -88,6 +88,28 @@ export interface PredictRulResponse {
   features_missing: string[];
 }
 
+/** FastAPI/Pydantic 422s put `detail` as a list of error objects, not a
+ * string - `String(detail)` on that renders "[object Object]". Render
+ * something readable either way. */
+function formatDetail(detail: unknown): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) => (d && typeof d === "object" && "msg" in d ? String((d as { msg: unknown }).msg) : JSON.stringify(d)))
+      .join("; ");
+  }
+  return JSON.stringify(detail);
+}
+
+async function parseErrorResponse(response: Response): Promise<ApiError> {
+  const body = await response.json().catch(() => null);
+  const detail =
+    body && typeof body === "object" && "detail" in body
+      ? formatDetail((body as { detail: unknown }).detail)
+      : `Request failed with status ${response.status}`;
+  return new ApiError(response.status, detail);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -99,14 +121,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(0, `Could not reach the prediction service at ${API_BASE_URL}.`);
   }
 
-  const body = await response.json().catch(() => null);
   if (!response.ok) {
-    const detail =
-      (body && typeof body === "object" && "detail" in body && String(body.detail)) ||
-      `Request failed with status ${response.status}`;
-    throw new ApiError(response.status, detail);
+    throw await parseErrorResponse(response);
   }
-  return body as T;
+  return (await response.json()) as T;
+}
+
+/** Shared by the two multipart-upload endpoints below - same
+ * network-failure/non-2xx handling as `request`, but with a `FormData` body
+ * and no JSON Content-Type header (the browser sets the multipart boundary
+ * itself). */
+async function requestForm<T>(path: string, form: FormData): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { method: "POST", body: form });
+  } catch {
+    throw new ApiError(0, `Could not reach the prediction service at ${API_BASE_URL}.`);
+  }
+  if (!response.ok) {
+    throw await parseErrorResponse(response);
+  }
+  return (await response.json()) as T;
 }
 
 export function getHealth(): Promise<HealthResponse> {
@@ -124,7 +159,24 @@ export function predictRul(payload: PredictRulRequest): Promise<PredictRulRespon
   });
 }
 
-export type Compatibility = "FULLY_SUPPORTED" | "ADAPTER_REQUIRED" | "UNSUPPORTED" | "INVALID_INPUT";
+/**
+ * Raw FEMTO acc_*.csv -> features.py -> RUL, in one call. The caller is
+ * explicitly asserting "this is a FEMTO acquisition" by using this function
+ * at all (see src/bearing_pdm/api.py's /predict/rul/femto-acquisition) -
+ * this is never inferred from an arbitrary upload's contents.
+ */
+export async function predictRulFromFemtoAcquisition(file: File): Promise<PredictRulResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  return requestForm<PredictRulResponse>("/predict/rul/femto-acquisition", form);
+}
+
+export type Compatibility =
+  | "FULLY_SUPPORTED"
+  | "ADAPTER_REQUIRED"
+  | "RETRAIN_REQUIRED"
+  | "UNSUPPORTED"
+  | "INVALID_INPUT";
 
 export interface DatasetColumnProfile {
   name: string;
@@ -150,22 +202,24 @@ export interface DatasetProfileResponse {
   };
 }
 
-export async function inspectDataset(file: File): Promise<DatasetProfileResponse> {
+export interface InspectDatasetOptions {
+  /** The caller's own assertion - used only when the file has no timestamp
+   * column to derive a rate from. Never guessed by the backend. */
+  declaredSamplingRateHz?: number;
+  declaredUnits?: string;
+}
+
+export async function inspectDataset(
+  file: File,
+  options?: InspectDatasetOptions
+): Promise<DatasetProfileResponse> {
   const form = new FormData();
   form.append("file", file);
-  // No Content-Type here - the browser sets the multipart boundary itself.
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}/dataset/inspect`, { method: "POST", body: form });
-  } catch {
-    throw new ApiError(0, `Could not reach the prediction service at ${API_BASE_URL}.`);
+  if (options?.declaredSamplingRateHz !== undefined) {
+    form.append("declared_sampling_rate_hz", String(options.declaredSamplingRateHz));
   }
-  const body = await response.json().catch(() => null);
-  if (!response.ok) {
-    const detail =
-      (body && typeof body === "object" && "detail" in body && String(body.detail)) ||
-      `Request failed with status ${response.status}`;
-    throw new ApiError(response.status, detail);
+  if (options?.declaredUnits) {
+    form.append("declared_units", options.declaredUnits);
   }
-  return body as DatasetProfileResponse;
+  return requestForm<DatasetProfileResponse>("/dataset/inspect", form);
 }
