@@ -1478,6 +1478,32 @@ def _process_femto_acquisition_file(tmp_path: str, source: str) -> PredictRulRes
                 "Non-finite (inf) values in the vibration columns are not allowed.",
                 extra={"compatibility": INVALID_INPUT},
             )
+        # The spectral features assume samples in acquisition order, and the
+        # offline reader (femto.read_acceleration) rejects any missing cell,
+        # timestamps included. Reordered rows leave every time-domain feature
+        # unchanged but scramble the FFT, so a shuffled file would otherwise
+        # get a confident RUL from a meaningless spectrum. Non-decreasing (not
+        # strict) because the archive's %.5g-formatted microsecond field can
+        # round adjacent samples to the same value; one midnight rollover is
+        # unwrapped rather than rejected.
+        clock = raw[[0, 1, 2, 3]].to_numpy()
+        if not np.isfinite(clock).all():
+            raise ApiError(
+                422, "INVALID_TIMESTAMPS",
+                "Every row needs a finite hour, minute, second and microsecond; the sample "
+                "order of this acquisition cannot be verified without them.",
+                extra={"compatibility": INVALID_INPUT},
+            )
+        steps = np.diff(clock @ np.array([3600.0, 60.0, 1.0, 1e-6]))
+        steps = np.where(steps < -43200.0, steps + 86400.0, steps)
+        if (steps < 0).any():
+            raise ApiError(
+                422, "SAMPLES_OUT_OF_ORDER",
+                f"The row timestamps go backwards in {int((steps < 0).sum())} place(s). Samples "
+                "must be in acquisition order; they are never re-sorted before feature "
+                "extraction.",
+                extra={"compatibility": INVALID_INPUT},
+            )
 
         try:
             features = _extract_femto_acquisition_features(tmp_path)

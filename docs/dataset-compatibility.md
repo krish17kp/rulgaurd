@@ -166,7 +166,9 @@ that contract) and validates the *structural* claim before extracting features: 
 count, exactly one complete acquisition (2560 rows — the window the model's features were
 computed on; a truncated or concatenated file is 422 `INCOMPLETE_ACQUISITION`, never trimmed
 or padded, the same `femto-acquisition-v1` contract `POST /analyze/rul` enforces), no missing
-vibration samples (`INCOMPLETE_ACQUISITION`), and finite raw vibration samples. It then runs `features.py`'s real
+vibration samples (`INCOMPLETE_ACQUISITION`), finite raw vibration samples, and a complete,
+non-decreasing row clock (`INVALID_TIMESTAMPS` / `SAMPLES_OUT_OF_ORDER`: reordered rows would
+leave the time-domain features unchanged but scramble the spectrum). It then runs `features.py`'s real
 extraction functions and the same `/predict/rul` inference path, which treats any resulting
 non-finite *derived* feature (e.g. a degenerate/zero-variance window makes
 `frequency_domain_features` return NaN by design) as missing rather than feeding it to the

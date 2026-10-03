@@ -1,0 +1,199 @@
+{
+  "chunked_vs_reference_features": {
+    "acquisitions": 9,
+    "bearings": [
+      "femto:Bearing1_1",
+      "femto:Bearing2_1",
+      "femto:Bearing3_1"
+    ],
+    "chunk_sizes": [
+      1,
+      7,
+      997,
+      2559,
+      2560,
+      2561,
+      4096,
+      65536
+    ],
+    "max_abs_diff": 4.656612873077393e-10,
+    "max_rel_diff": 4.439538821651225e-14,
+    "row_accounting_ok": true,
+    "runs_checked": 48
+  },
+  "analyze_rul_vs_offline": {
+    "runs": [
+      {
+        "bearing": "femto:Bearing1_1",
+        "acquisitions": 3,
+        "status": 200,
+        "offline_rul_seconds": 1410.0,
+        "served_rul_seconds": 1410.0,
+        "abs_diff_seconds": 0.0,
+        "applicability_level": "HIGH",
+        "compatibility": "FULLY_SUPPORTED"
+      },
+      {
+        "bearing": "femto:Bearing2_1",
+        "acquisitions": 3,
+        "status": 200,
+        "offline_rul_seconds": 460.0,
+        "served_rul_seconds": 460.0,
+        "abs_diff_seconds": 0.0,
+        "applicability_level": "HIGH",
+        "compatibility": "FULLY_SUPPORTED"
+      },
+      {
+        "bearing": "femto:Bearing3_1",
+        "acquisitions": 3,
+        "status": 200,
+        "offline_rul_seconds": 260.0,
+        "served_rul_seconds": 260.0,
+        "abs_diff_seconds": 0.0,
+        "applicability_level": "HIGH",
+        "compatibility": "FULLY_SUPPORTED"
+      }
+    ]
+  },
+  "artifact_parity": {
+    "manifest_checksums_match": {
+      "cross_domain_bundle.joblib": true,
+      "pca_hi_model.joblib": true,
+      "reference_hi_model.joblib": true,
+      "rul_extra_trees.joblib": true,
+      "rul_naive.joblib": true,
+      "rul_selected_model.json": true,
+      "stage_thresholds.joblib": true,
+      "transparent_hi_baseline.joblib": true
+    },
+    "rows": 4229,
+    "served_vs_direct_max_abs_diff_seconds": 0.0,
+    "in_sample_abs_error_seconds_max": 0.0,
+    "in_sample_note": "Training rows (in-sample): identity check of the artifact, not accuracy.",
+    "deploy_data_copies_identical": {
+      "reference_hi_model.joblib": true,
+      "stage_thresholds.joblib": true,
+      "rul_naive.joblib": true,
+      "rul_selected_model.json": true
+    }
+  },
+  "hi_parity": {
+    "runs": [
+      {
+        "bearing": "femto:Bearing1_1",
+        "rows": 2803,
+        "status": 200,
+        "max_abs_hi_diff": 0.0,
+        "stages_identical": true
+      },
+      {
+        "bearing": "femto:Bearing2_1",
+        "rows": 911,
+        "status": 200,
+        "max_abs_hi_diff": 0.0,
+        "stages_identical": true
+      },
+      {
+        "bearing": "femto:Bearing3_1",
+        "rows": 515,
+        "status": 200,
+        "max_abs_hi_diff": 0.0,
+        "stages_identical": true
+      }
+    ]
+  },
+  "applicability_real_data": {
+    "femto:Bearing1_1": {
+      "status": 422,
+      "level": null,
+      "code": "APPLICABILITY_LOW"
+    },
+    "femto:Bearing2_1": {
+      "status": 200,
+      "level": "MEDIUM",
+      "code": null
+    },
+    "femto:Bearing3_1": {
+      "status": 200,
+      "level": "HIGH",
+      "code": null
+    },
+    "per_recording_levels_training_bearings": {
+      "femto:Bearing1_1": {
+        "all": {
+          "HIGH": 2702,
+          "MEDIUM": 69,
+          "LOW": 32
+        },
+        "last_10pct_of_life": {
+          "HIGH": 217,
+          "MEDIUM": 45,
+          "LOW": 19
+        }
+      },
+      "femto:Bearing2_1": {
+        "all": {
+          "HIGH": 862,
+          "MEDIUM": 40,
+          "LOW": 9
+        },
+        "last_10pct_of_life": {
+          "HIGH": 61,
+          "MEDIUM": 24,
+          "LOW": 7
+        }
+      },
+      "femto:Bearing3_1": {
+        "all": {
+          "HIGH": 509,
+          "LOW": 4,
+          "MEDIUM": 2
+        },
+        "last_10pct_of_life": {
+          "HIGH": 47,
+          "LOW": 3,
+          "MEDIUM": 2
+        }
+      }
+    },
+    "college:nsk6205#201": {
+      "status": 422,
+      "code": "APPLICABILITY_LOW",
+      "rul_seconds": null,
+      "sample_rate_hz": 25600.0,
+      "level": null,
+      "compatibility": "RETRAIN_REQUIRED"
+    },
+    "college:nsk6205#2014": {
+      "status": 422,
+      "code": "APPLICABILITY_LOW",
+      "rul_seconds": null,
+      "sample_rate_hz": 25600.0,
+      "level": null,
+      "compatibility": "RETRAIN_REQUIRED"
+    },
+    "college:nsk6205#3827": {
+      "status": 200,
+      "code": null,
+      "rul_seconds": 11077.9,
+      "sample_rate_hz": 25600.0,
+      "level": "MEDIUM",
+      "compatibility": "RETRAIN_REQUIRED"
+    }
+  },
+  "leakage_spy": {
+    "status": 200,
+    "fit_calls": [
+      {
+        "call": "NearestNeighbors.fit",
+        "rows": 5000
+      },
+      {
+        "call": "NearestNeighbors.fit",
+        "rows": 5000
+      }
+    ],
+    "reference_rows": 5000,
+    "applicability_reference_unchanged": true
+  }
+}

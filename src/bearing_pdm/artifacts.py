@@ -180,6 +180,37 @@ def _verified(path: Path, expected_sha256: str) -> bool:
     return path.exists() and _sha256_of(path) == expected_sha256
 
 
+# (path, size, mtime_ns) -> sha256, so a multi-hundred-MB local artifact is
+# hashed once per process rather than on every lookup.
+_local_digests: dict[tuple[str, int, int], str] = {}
+
+
+def _local_matches_manifest(path: Path) -> bool:
+    """A local artifact that the manifest beside it records under a different
+    sha256 is a stale or wrong model, not the validated one - refuse it
+    rather than serve predictions from it. No manifest beside it, or no
+    recorded sha256, keeps the local-development behaviour (used as-is)."""
+    manifest_path = path.parent / MANIFEST_PATH.name
+    if not manifest_path.exists():
+        return True
+    try:
+        entry = json.loads(manifest_path.read_text()).get("artifacts", {}).get(path.name)
+    except (json.JSONDecodeError, OSError, AttributeError):
+        logger.warning("manifest.json beside %s could not be parsed - refusing it", path.name)
+        return False
+    if not isinstance(entry, dict) or not entry.get("sha256"):
+        return True
+    stat = path.stat()
+    key = (str(path), stat.st_size, stat.st_mtime_ns)
+    if key not in _local_digests:
+        _local_digests[key] = _sha256_of(path)
+    if _local_digests[key] != entry["sha256"]:
+        logger.warning("Local artifact %s does not match its manifest sha256 - refusing it",
+                       path.name)
+        return False
+    return True
+
+
 def _is_safe_artifact_name(name: str) -> bool:
     """Defense in depth (security.md: validate any caller-supplied path, no
     traversal) - no current caller passes a non-literal name, but a bare
@@ -191,7 +222,9 @@ def ensure_artifact(name: str) -> Path | None:
     """The path to read `name` from, or None if it cannot be obtained -
     never a guess, never a silently-wrong file. Checks, in order:
     1. Already present in the repo's own artifacts/models/ (local dev, or
-       a deployment that mounted them some other way) - used as-is.
+       a deployment that mounted them some other way) - used as-is unless
+       the manifest beside it records a different sha256, in which case it
+       is refused (None), never silently served.
     2. Already fetched and checksum-verified earlier this process's
        lifetime (cached under _cache_dir()) - re-verified every call, not
        just trusted because a file exists at that path.
@@ -212,7 +245,7 @@ def ensure_artifact(name: str) -> Path | None:
 
     local_path = MODELS_DIR / name
     if local_path.exists():
-        return local_path
+        return local_path if _local_matches_manifest(local_path) else None
 
     manifest = load_manifest()
     entry = manifest.get(name)
