@@ -7,22 +7,31 @@ import {
   DatasetProfileResponse,
   PredictRulResponse,
   inspectDataset,
+  inspectDatasetBlob,
   predictRulFromFemtoAcquisition,
+  predictRulFromFemtoAcquisitionBlob,
 } from "@/lib/api";
 import { ApplicabilityNote } from "@/components/ApplicabilityNote";
+import { BlobUploadError, DIRECT_UPLOAD_THRESHOLD_BYTES, uploadFileToBlob } from "@/lib/blobUpload";
 
 type DatasetType = "generic" | "femto";
 
+// "uploading" is the direct-to-storage leg (browser -> Blob, has real
+// progress); "loading" is the backend processing leg once the upload is
+// done or the file was small enough to send directly - kept distinct so
+// the UI never claims "processing" while bytes are still in flight.
 type InspectState =
   | { status: "idle" }
+  | { status: "uploading"; progress: number }
   | { status: "loading" }
-  | { status: "error"; error: string }
+  | { status: "error"; error: string; retry: () => void }
   | { status: "ready"; data: DatasetProfileResponse };
 
 type PredictState =
   | { status: "idle" }
+  | { status: "uploading"; progress: number }
   | { status: "loading" }
-  | { status: "error"; error: string }
+  | { status: "error"; error: string; retry: () => void }
   | { status: "ready"; data: PredictRulResponse };
 
 const BADGE: Record<Compatibility, string> = {
@@ -47,26 +56,55 @@ export default function UploadPage() {
 
   async function handleGenericFile(file: File) {
     const seq = ++requestSeq.current;
-    setInspectState({ status: "loading" });
+    const retry = () => handleGenericFile(file);
+    const options = {
+      declaredSamplingRateHz: declaredSamplingRateHz ? Number(declaredSamplingRateHz) : undefined,
+      declaredUnits: declaredUnits || undefined,
+    };
     try {
-      const data = await inspectDataset(file, {
-        declaredSamplingRateHz: declaredSamplingRateHz ? Number(declaredSamplingRateHz) : undefined,
-        declaredUnits: declaredUnits || undefined,
-      });
+      let data: DatasetProfileResponse;
+      if (file.size >= DIRECT_UPLOAD_THRESHOLD_BYTES) {
+        setInspectState({ status: "uploading", progress: 0 });
+        const blobUrl = await uploadFileToBlob(file, (progress) => {
+          if (seq === requestSeq.current) setInspectState({ status: "uploading", progress });
+        });
+        if (seq !== requestSeq.current) return;
+        setInspectState({ status: "loading" });
+        data = await inspectDatasetBlob(blobUrl, options);
+      } else {
+        setInspectState({ status: "loading" });
+        data = await inspectDataset(file, options);
+      }
       if (seq === requestSeq.current) setInspectState({ status: "ready", data });
     } catch (err) {
-      if (seq === requestSeq.current) setInspectState({ status: "error", error: (err as ApiError).detail });
+      if (seq !== requestSeq.current) return;
+      const message = err instanceof BlobUploadError ? err.message : (err as ApiError).detail;
+      setInspectState({ status: "error", error: message, retry });
     }
   }
 
   async function handleFemtoFile(file: File) {
     const seq = ++requestSeq.current;
-    setPredictState({ status: "loading" });
+    const retry = () => handleFemtoFile(file);
     try {
-      const data = await predictRulFromFemtoAcquisition(file);
+      let data: PredictRulResponse;
+      if (file.size >= DIRECT_UPLOAD_THRESHOLD_BYTES) {
+        setPredictState({ status: "uploading", progress: 0 });
+        const blobUrl = await uploadFileToBlob(file, (progress) => {
+          if (seq === requestSeq.current) setPredictState({ status: "uploading", progress });
+        });
+        if (seq !== requestSeq.current) return;
+        setPredictState({ status: "loading" });
+        data = await predictRulFromFemtoAcquisitionBlob(blobUrl);
+      } else {
+        setPredictState({ status: "loading" });
+        data = await predictRulFromFemtoAcquisition(file);
+      }
       if (seq === requestSeq.current) setPredictState({ status: "ready", data });
     } catch (err) {
-      if (seq === requestSeq.current) setPredictState({ status: "error", error: (err as ApiError).detail });
+      if (seq !== requestSeq.current) return;
+      const message = err instanceof BlobUploadError ? err.message : (err as ApiError).detail;
+      setPredictState({ status: "error", error: message, retry });
     }
   }
 
@@ -172,6 +210,7 @@ export default function UploadPage() {
 
       <input
         key={datasetType}
+        data-testid="file-input"
         type="file"
         accept={datasetType === "femto" ? ".csv" : ".csv,.txt,.tsv,.dat"}
         onChange={(e) => {
@@ -186,12 +225,22 @@ export default function UploadPage() {
 
       {datasetType === "femto" && (
         <>
+          {predictState.status === "uploading" && (
+            <p className="text-sm">Uploading… {Math.round(predictState.progress * 100)}%</p>
+          )}
           {predictState.status === "loading" && <p className="text-sm">Extracting features and predicting…</p>}
 
           {predictState.status === "error" && (
-            <p className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-              {predictState.error}
-            </p>
+            <div className="flex flex-col gap-2 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+              <p>{predictState.error}</p>
+              <button
+                type="button"
+                onClick={predictState.retry}
+                className="self-start rounded border border-red-400 px-2 py-1 text-xs font-medium"
+              >
+                Retry
+              </button>
+            </div>
           )}
 
           {predictState.status === "ready" && (
@@ -218,12 +267,22 @@ export default function UploadPage() {
 
       {datasetType === "generic" && (
         <>
+          {inspectState.status === "uploading" && (
+            <p className="text-sm">Uploading… {Math.round(inspectState.progress * 100)}%</p>
+          )}
           {inspectState.status === "loading" && <p className="text-sm">Inspecting…</p>}
 
           {inspectState.status === "error" && (
-            <p className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-              {inspectState.error}
-            </p>
+            <div className="flex flex-col gap-2 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+              <p>{inspectState.error}</p>
+              <button
+                type="button"
+                onClick={inspectState.retry}
+                className="self-start rounded border border-red-400 px-2 py-1 text-xs font-medium"
+              >
+                Retry
+              </button>
+            </div>
           )}
 
           {inspectState.status === "ready" && (

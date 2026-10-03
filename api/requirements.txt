@@ -1,6 +1,7 @@
 fastapi
 pydantic
 python-multipart
+httpx
 joblib
 scikit-learn
 numpy

@@ -177,6 +177,20 @@ export async function predictRulFromFemtoAcquisition(file: File): Promise<Predic
   return requestForm<PredictRulResponse>("/predict/rul/femto-acquisition", form);
 }
 
+/**
+ * Direct-to-storage counterpart of predictRulFromFemtoAcquisition: `blobUrl`
+ * is an object this app's own client upload (lib/blobUpload.ts) just wrote
+ * to Vercel Blob - the backend downloads it itself, in bounded chunks, and
+ * deletes it once processed (src/bearing_pdm/api.py's
+ * predict_rul_from_femto_acquisition_blob).
+ */
+export function predictRulFromFemtoAcquisitionBlob(blobUrl: string): Promise<PredictRulResponse> {
+  return request<PredictRulResponse>("/predict/rul/femto-acquisition/blob", {
+    method: "POST",
+    body: JSON.stringify({ blob_url: blobUrl }),
+  });
+}
+
 export type Compatibility =
   | "FULLY_SUPPORTED"
   | "ADAPTER_REQUIRED"
@@ -228,4 +242,20 @@ export async function inspectDataset(
     form.append("declared_units", options.declaredUnits);
   }
   return requestForm<DatasetProfileResponse>("/dataset/inspect", form);
+}
+
+/** Direct-to-storage counterpart of inspectDataset - see
+ * predictRulFromFemtoAcquisitionBlob's note above. */
+export function inspectDatasetBlob(
+  blobUrl: string,
+  options?: InspectDatasetOptions
+): Promise<DatasetProfileResponse> {
+  return request<DatasetProfileResponse>("/dataset/inspect/blob", {
+    method: "POST",
+    body: JSON.stringify({
+      blob_url: blobUrl,
+      declared_sampling_rate_hz: options?.declaredSamplingRateHz,
+      declared_units: options?.declaredUnits,
+    }),
+  });
 }

@@ -24,7 +24,9 @@ from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+import httpx
 import joblib
 import numpy as np
 import pandas as pd
@@ -516,6 +518,140 @@ def _load_joblib(name: str) -> Any | None:
     return model
 
 
+# Direct-to-storage uploads (frontend -> Vercel Blob -> this API) only ever
+# name an object this deployment's own client-upload token minted - never an
+# arbitrary caller-supplied URL (security.md: validate caller-supplied
+# paths/URLs, no open proxy/SSRF). ALLOW_LOCAL_BLOB_HOSTS is an opt-in escape
+# hatch for tests/local dev only, never set in a deployed environment.
+#
+# BLOB_STORE_HOSTNAME (set once a real Blob store is connected - see
+# docs/vercel-deployment.md) pins this to THIS PROJECT's own store exactly.
+# Without it, every *.blob.vercel-storage.com host is accepted - that
+# suffix is shared by every Vercel customer's store, not just this
+# project's, so this fallback is deliberately looser (review flagged this:
+# it lets the backend fetch/delete another customer's public blob, not
+# true internal-network SSRF since Blob objects are public HTTPS URLs, but
+# still not a real identity check). Deploy with BLOB_STORE_HOSTNAME set.
+_BLOB_HOST_SUFFIXES = (".public.blob.vercel-storage.com", ".blob.vercel-storage.com")
+
+
+def _get_http_client() -> httpx.Client:
+    """Seam for tests to substitute a MockTransport instead of a real
+    network call - see tests/test_api_blob.py. follow_redirects is left at
+    its httpx default (False) deliberately - a redirect must never be able
+    to carry a validated blob_url to a host that bypassed validation."""
+    return httpx.Client(timeout=30.0)
+
+
+def _validate_blob_url(url: str) -> None:
+    # urlsplit silently drops ASCII control characters (tab/CR/LF) from a
+    # hostname instead of erroring, which let a crafted
+    # "https://evil.com\t.blob.vercel-storage.com/x" pass this check and
+    # then crash httpx.Client.stream() with httpx.InvalidURL (a 500, not a
+    # clean 422) - found in review. Reject any such character up front.
+    if any(ord(ch) < 0x20 for ch in url):
+        raise HTTPException(status_code=422, detail="blob_url contains invalid characters.")
+
+    parsed = urlsplit(url)
+    # Read live, not cached at import time, so a test can toggle this via
+    # monkeypatch.setenv without needing to reimport the module.
+    allow_local = os.environ.get("ALLOW_LOCAL_BLOB_HOSTS") == "1"
+    if allow_local and parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1"):
+        return
+    if parsed.scheme != "https":
+        raise HTTPException(status_code=422, detail="blob_url must be an https URL.")
+
+    pinned_host = os.environ.get("BLOB_STORE_HOSTNAME")
+    if pinned_host:
+        if parsed.hostname != pinned_host:
+            raise HTTPException(
+                status_code=422,
+                detail="blob_url is not an object in this deployment's own Blob store.",
+            )
+        return
+    if not (parsed.hostname and any(parsed.hostname.endswith(suf) for suf in _BLOB_HOST_SUFFIXES)):
+        raise HTTPException(
+            status_code=422,
+            detail="blob_url must be an https *.blob.vercel-storage.com object, not an arbitrary URL.",
+        )
+
+
+class BlobUploadRequest(BaseModel):
+    blob_url: str = Field(..., description="A client-uploaded Vercel Blob object URL.")
+
+
+def _stream_blob_to_tempfile(blob_url: str, tmp, max_bytes: int) -> int:
+    """Bounded-memory download of a direct-to-storage upload (python.md:
+    'all raw reads are chunked') - this server never buffers the whole
+    object in memory, the same chunked pattern as the existing UploadFile
+    read loops above. A missing object (expired/already cleaned up) and a
+    connection dropping mid-transfer are reported as distinct, truthful
+    error states rather than one generic failure."""
+    written = 0
+    try:
+        with _get_http_client() as client, client.stream("GET", blob_url) as response:
+            if response.status_code == 404:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        "Uploaded object not found - it may have expired or already been "
+                        "cleaned up. Please re-upload."
+                    ),
+                )
+            if response.status_code >= 400:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Could not fetch the uploaded object (storage returned {response.status_code}).",
+                )
+            for chunk in response.iter_bytes(UPLOAD_CHUNK_BYTES):
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Uploaded object exceeds the {max_bytes // (1024 * 1024)}MB limit.",
+                    )
+                tmp.write(chunk)
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
+        # httpx.InvalidURL is not an httpx.HTTPError subclass (verified in
+        # review) - a URL that passed _validate_blob_url's hostname check
+        # but still isn't well-formed enough for httpx to request (e.g. a
+        # stray non-ASCII byte) must still fail clean, not 500.
+        raise HTTPException(
+            status_code=502,
+            detail=f"Upload was interrupted while downloading from storage: {exc}",
+        ) from None
+    tmp.flush()
+    if written == 0:
+        raise HTTPException(status_code=422, detail="Uploaded object is empty.")
+    return written
+
+
+def _delete_blob(blob_url: str) -> None:
+    """Best-effort upload-lifecycle cleanup: once a direct-to-storage upload
+    has been processed (successfully or not), it has no further purpose and
+    left behind is a stale object taking up storage. Never raises - a failed
+    cleanup must not turn a successful prediction/inspection into an error."""
+    token = os.environ.get("BLOB_READ_WRITE_TOKEN")
+    if not token:
+        return
+    try:
+        with _get_http_client() as client:
+            response = client.post(
+                "https://blob.vercel-storage.com/delete",
+                json={"urls": [blob_url]},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if response.status_code >= 400:
+            # client.post doesn't raise on a 4xx/5xx body - a failed delete
+            # (e.g. the token lacks access, or the API changed) was
+            # otherwise silently swallowed. Never logs the token itself.
+            logger.warning(
+                "Blob delete request for %s returned %s", blob_url, response.status_code
+            )
+    except httpx.HTTPError:
+        logger.warning("Failed to delete blob after processing: %s", blob_url)
+
+
 class PredictRulRequest(BaseModel):
     dataset_id: str = Field(..., description="Must be 'femto' - see docs/decisions.md D11.")
     features: dict[str, float] = Field(
@@ -741,6 +877,67 @@ def _extract_femto_acquisition_features(path: str) -> dict[str, float]:
     return features
 
 
+def _process_femto_acquisition_file(tmp_path: str, written: int, filename: str | None) -> PredictRulResponse:
+    """The validation + feature-extraction + prediction core shared by both
+    the direct-multipart-upload endpoint and the direct-to-storage blob
+    endpoint below. Both paths funnel through this single function so they
+    are scientifically identical by construction - not two implementations
+    that could silently drift apart (ml-data.md: chunked results must match
+    the trusted reference pipeline)."""
+    if written == 0:
+        raise HTTPException(status_code=422, detail="Uploaded file is empty.")
+
+    try:
+        raw = pd.read_csv(tmp_path, header=None, dtype="float64")
+    except (ValueError, pd.errors.ParserError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Not a numeric, headerless FEMTO acc_*.csv file: {exc}",
+        ) from None
+
+    if raw.shape[1] != len(ACC_COLUMNS):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Expected {len(ACC_COLUMNS)} columns (FEMTO's fixed acc_*.csv layout: "
+                f"{ACC_COLUMNS}), got {raw.shape[1]}. This is not a FEMTO acquisition file."
+            ),
+        )
+    if raw.shape[0] < MIN_FEMTO_ACQUISITION_ROWS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Only {raw.shape[0]} rows - at least {MIN_FEMTO_ACQUISITION_ROWS} are required "
+                "for a meaningful vibration window (a real FEMTO acquisition is usually ~2560)."
+            ),
+        )
+    if not np.isfinite(raw[[4, 5]].to_numpy()).all():
+        raise HTTPException(
+            status_code=422,
+            detail="Non-finite (NaN/inf) values in the vibration columns are not allowed.",
+        )
+
+    try:
+        features = _extract_femto_acquisition_features(tmp_path)
+    except OverflowError as exc:
+        # Finite but extreme raw samples (e.g. a huge-amplitude signal)
+        # can overflow a derived statistic (std**4 etc.) before any
+        # feature value is even produced to check for non-finiteness -
+        # found in review. Fail closed with 422, not a raw 500.
+        raise HTTPException(
+            status_code=422,
+            detail=f"Raw sample values are too extreme to extract features from: {exc}",
+        ) from None
+
+    response = _predict_rul_from_features(features)
+    _record_history(
+        "predict_rul_femto_acquisition",
+        {"filename": filename, "n_rows": int(raw.shape[0])},
+        {"rul_hours": response.rul_hours, "n_features_missing": len(response.features_missing)},
+    )
+    return response
+
+
 @app.post("/predict/rul/femto-acquisition", response_model=PredictRulResponse)
 async def predict_rul_from_femto_acquisition(file: UploadFile) -> PredictRulResponse:
     """Raw single-acquisition FEMTO acc_*.csv -> features.py -> /predict/rul,
@@ -753,6 +950,9 @@ async def predict_rul_from_femto_acquisition(file: UploadFile) -> PredictRulResp
     arbitrary upload (that guess belongs to /dataset/inspect, and it correctly
     refuses to guess). A dataset_id parameter isn't needed: this route's
     entire contract already *is* "this is a femto acquisition."
+
+    For a file too large for a normal request body, see the direct-to-storage
+    /predict/rul/femto-acquisition/blob variant below.
     """
     with tempfile.NamedTemporaryFile(suffix=".csv") as tmp:
         written = 0
@@ -765,59 +965,33 @@ async def predict_rul_from_femto_acquisition(file: UploadFile) -> PredictRulResp
                 )
             tmp.write(chunk)
         tmp.flush()
+        return _process_femto_acquisition_file(tmp.name, written, file.filename)
 
-        if written == 0:
-            raise HTTPException(status_code=422, detail="Uploaded file is empty.")
 
+@app.post("/predict/rul/femto-acquisition/blob", response_model=PredictRulResponse)
+def predict_rul_from_femto_acquisition_blob(request: BlobUploadRequest) -> PredictRulResponse:
+    """Direct-to-storage counterpart of /predict/rul/femto-acquisition: the
+    browser uploads the raw file straight to Vercel Blob (bypassing the
+    platform's ~4.5MB serverless request-body limit) and only hands this
+    endpoint the resulting object URL. Downloads it in MAX_UPLOAD_BYTES/
+    UPLOAD_CHUNK_BYTES-bounded chunks, then runs the exact same
+    _process_femto_acquisition_file the direct-upload path uses, and always
+    deletes the now-unneeded blob afterward (lifecycle cleanup) whether
+    processing succeeded or failed."""
+    _validate_blob_url(request.blob_url)
+    with tempfile.NamedTemporaryFile(suffix=".csv") as tmp:
         try:
-            raw = pd.read_csv(tmp.name, header=None, dtype="float64")
-        except (ValueError, pd.errors.ParserError) as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Not a numeric, headerless FEMTO acc_*.csv file: {exc}",
-            ) from None
-
-        if raw.shape[1] != len(ACC_COLUMNS):
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Expected {len(ACC_COLUMNS)} columns (FEMTO's fixed acc_*.csv layout: "
-                    f"{ACC_COLUMNS}), got {raw.shape[1]}. This is not a FEMTO acquisition file."
-                ),
+            # Cleanup must cover the download itself, not just processing -
+            # review found that an oversized/missing/interrupted download
+            # (a 413/404/502 raised inside _stream_blob_to_tempfile) left
+            # the blob behind forever, since _delete_blob previously sat in
+            # a `finally` that only wrapped the step after this one.
+            written = _stream_blob_to_tempfile(request.blob_url, tmp, MAX_UPLOAD_BYTES)
+            return _process_femto_acquisition_file(
+                tmp.name, written, request.blob_url.rsplit("/", 1)[-1]
             )
-        if raw.shape[0] < MIN_FEMTO_ACQUISITION_ROWS:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Only {raw.shape[0]} rows - at least {MIN_FEMTO_ACQUISITION_ROWS} are required "
-                    "for a meaningful vibration window (a real FEMTO acquisition is usually ~2560)."
-                ),
-            )
-        if not np.isfinite(raw[[4, 5]].to_numpy()).all():
-            raise HTTPException(
-                status_code=422,
-                detail="Non-finite (NaN/inf) values in the vibration columns are not allowed.",
-            )
-
-        try:
-            features = _extract_femto_acquisition_features(tmp.name)
-        except OverflowError as exc:
-            # Finite but extreme raw samples (e.g. a huge-amplitude signal)
-            # can overflow a derived statistic (std**4 etc.) before any
-            # feature value is even produced to check for non-finiteness -
-            # found in review. Fail closed with 422, not a raw 500.
-            raise HTTPException(
-                status_code=422,
-                detail=f"Raw sample values are too extreme to extract features from: {exc}",
-            ) from None
-
-    response = _predict_rul_from_features(features)
-    _record_history(
-        "predict_rul_femto_acquisition",
-        {"filename": file.filename, "n_rows": int(raw.shape[0])},
-        {"rul_hours": response.rul_hours, "n_features_missing": len(response.features_missing)},
-    )
-    return response
+        finally:
+            _delete_blob(request.blob_url)
 
 
 class HiRequest(BaseModel):
@@ -981,6 +1155,42 @@ def prediction_history() -> dict[str, Any]:
     }
 
 
+def _validate_declared_sampling_rate(declared_sampling_rate_hz: float | None) -> None:
+    if declared_sampling_rate_hz is not None and not (
+        np.isfinite(declared_sampling_rate_hz) and declared_sampling_rate_hz > 0
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"declared_sampling_rate_hz must be a finite positive number, got {declared_sampling_rate_hz!r}.",
+        )
+
+
+def _process_dataset_inspect_file(
+    tmp_path: str,
+    written: int,
+    filename: str | None,
+    declared_sampling_rate_hz: float | None,
+    declared_units: str | None,
+) -> DatasetProfileResponse:
+    """Shared by the direct-multipart /dataset/inspect and the direct-to-
+    storage /dataset/inspect/blob below - same reasoning as
+    _process_femto_acquisition_file: one implementation, never two that
+    could drift apart."""
+    if written == 0:
+        raise HTTPException(status_code=422, detail="Uploaded file is empty.")
+
+    profile = profile_file(tmp_path)
+    profile["file"] = filename or profile["file"]  # real name, not the temp path
+
+    compatibility, reasons = _classify(
+        profile,
+        path=Path(tmp_path),
+        declared_sampling_rate_hz=declared_sampling_rate_hz,
+        declared_units=declared_units,
+    )
+    return DatasetProfileResponse(compatibility=compatibility, reasons=reasons, profile=profile)
+
+
 @app.post("/dataset/inspect", response_model=DatasetProfileResponse)
 async def inspect_dataset(
     file: UploadFile,
@@ -993,14 +1203,11 @@ async def inspect_dataset(
 
     declared_sampling_rate_hz/declared_units are the caller's own assertion,
     used only when the file carries no timestamp column to derive a rate from
-    - never a guess this endpoint makes itself (ml-data.md)."""
-    if declared_sampling_rate_hz is not None and not (
-        np.isfinite(declared_sampling_rate_hz) and declared_sampling_rate_hz > 0
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail=f"declared_sampling_rate_hz must be a finite positive number, got {declared_sampling_rate_hz!r}.",
-        )
+    - never a guess this endpoint makes itself (ml-data.md).
+
+    For a file too large for a normal request body, see the direct-to-storage
+    /dataset/inspect/blob variant below."""
+    _validate_declared_sampling_rate(declared_sampling_rate_hz)
 
     with tempfile.NamedTemporaryFile(suffix=Path(file.filename or "upload").suffix) as tmp:
         written = 0
@@ -1013,21 +1220,38 @@ async def inspect_dataset(
                 )
             tmp.write(chunk)
         tmp.flush()
-
-        if written == 0:
-            raise HTTPException(status_code=422, detail="Uploaded file is empty.")
-
-        profile = profile_file(tmp.name)
-        profile["file"] = file.filename or profile["file"]  # real name, not the temp path
-
-        compatibility, reasons = _classify(
-            profile,
-            path=Path(tmp.name),
-            declared_sampling_rate_hz=declared_sampling_rate_hz,
-            declared_units=declared_units,
+        return _process_dataset_inspect_file(
+            tmp.name, written, file.filename, declared_sampling_rate_hz, declared_units
         )
 
-    return DatasetProfileResponse(compatibility=compatibility, reasons=reasons, profile=profile)
+
+class BlobInspectRequest(BaseModel):
+    blob_url: str = Field(..., description="A client-uploaded Vercel Blob object URL.")
+    declared_sampling_rate_hz: float | None = None
+    declared_units: str | None = None
+
+
+@app.post("/dataset/inspect/blob", response_model=DatasetProfileResponse)
+def inspect_dataset_blob(request: BlobInspectRequest) -> DatasetProfileResponse:
+    """Direct-to-storage counterpart of /dataset/inspect - see
+    predict_rul_from_femto_acquisition_blob's docstring for the shared
+    rationale (bypasses the serverless request-body limit, bounded-memory
+    chunked download, shared processing core, best-effort blob cleanup)."""
+    _validate_declared_sampling_rate(request.declared_sampling_rate_hz)
+    _validate_blob_url(request.blob_url)
+    suffix = Path(urlsplit(request.blob_url).path).suffix or ".csv"
+    with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+        try:
+            written = _stream_blob_to_tempfile(request.blob_url, tmp, MAX_UPLOAD_BYTES)
+            return _process_dataset_inspect_file(
+                tmp.name,
+                written,
+                request.blob_url.rsplit("/", 1)[-1],
+                request.declared_sampling_rate_hz,
+                request.declared_units,
+            )
+        finally:
+            _delete_blob(request.blob_url)
 
 
 # Vercel's Python runtime forwards the original request path (e.g. /api/health)

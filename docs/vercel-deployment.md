@@ -11,6 +11,24 @@
   scikit-learn, numpy, pandas) — deliberately not the full dev `requirements.txt`
   (streamlit/duckdb/matplotlib/etc. would bloat the serverless bundle for no reason).
 - `vercel.json` — builds the frontend, routes `/api/*` to the Python function.
+- `frontend/src/app/blob-upload/route.ts` + `frontend/src/lib/blobUpload.ts` — direct-to-
+  storage upload (browser -> Vercel Blob) for any raw dataset upload at or above 4MB, so it
+  never has to fit inside a serverless function's ~4.5MB request-body limit. Deliberately
+  **not** under `/api/` — `vercel.json` rewrites `/api/(.*)` to the Python function, which has
+  no such route; an independent review caught that the first version of this route lived at
+  `/api/blob-upload` and would have 404'd in production despite working in local dev. The
+  backend then downloads the resulting Blob object itself, in bounded chunks
+  (`_stream_blob_to_tempfile` in `src/bearing_pdm/api.py`), through the
+  `/predict/rul/femto-acquisition/blob` and `/dataset/inspect/blob` endpoints, and always
+  deletes the blob afterward — including when the download itself fails (413/404/502), not
+  only when processing does (also an independent-review finding; the first version left
+  oversized/missing/interrupted blobs behind forever). Requires `BLOB_READ_WRITE_TOKEN` (see
+  `frontend/.env.example`) — Vercel sets this automatically once a Blob store is connected to
+  the project; this environment has no Vercel account, so that connection has not been
+  made/verified. The route and the backend both also accept `BLOB_STORE_HOSTNAME` /
+  `ALLOWED_ORIGINS` to pin validation to this project's own store and origin rather than
+  any `*.blob.vercel-storage.com` object (every Vercel customer's store matches that suffix) —
+  set these once a real store/domain exists.
 
 ## Known, unresolved blocker before this can actually deploy
 
@@ -45,6 +63,13 @@ go-ahead, per this project's "never push/deploy without asking" policy.
 - [ ] Model artifacts reachable at runtime without committing them to Git.
 - [ ] An actual `vercel deploy` (or `vercel dev`) run, verified against a live URL.
 - [ ] CORS `ALLOWED_ORIGINS` set to the real deployed frontend origin, not `localhost:3000`.
+- [ ] **Blocked, needs your credentials:** connecting a real Vercel Blob store to the project
+      (`vercel blob store add` / dashboard), setting `BLOB_READ_WRITE_TOKEN`, and setting
+      `BLOB_STORE_HOSTNAME` (both frontend and backend env) to that store's exact hostname so
+      validation is pinned to this project's own store, not any Vercel customer's. The code
+      path is implemented and tested locally against a mocked Blob response
+      (`tests/test_api_blob.py`); it has not been exercised against a real Blob store because
+      no Vercel account/token is available in this environment.
 
 ## Running locally in the meantime
 
