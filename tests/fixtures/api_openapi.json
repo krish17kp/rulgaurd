@@ -1,0 +1,1438 @@
+{
+  "components": {
+    "schemas": {
+      "AnalyzeFeaturesResponse": {
+        "properties": {
+          "channel": {
+            "additionalProperties": true,
+            "title": "Channel",
+            "type": "object"
+          },
+          "compatibility": {
+            "title": "Compatibility",
+            "type": "string"
+          },
+          "feature_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Feature Names",
+            "type": "array"
+          },
+          "file": {
+            "title": "File",
+            "type": "string"
+          },
+          "health_indicator_produced": {
+            "default": false,
+            "title": "Health Indicator Produced",
+            "type": "boolean"
+          },
+          "non_finite_feature_values": {
+            "title": "Non Finite Feature Values",
+            "type": "integer"
+          },
+          "note": {
+            "default": "Per-window signal features only. No health indicator, stage or RUL is computed, and no model is applied. Amplitude features are in the channel's recorded units, which this endpoint does not determine; frequency features (Hz) depend on the sampling rate reported in `sampling`.",
+            "title": "Note",
+            "type": "string"
+          },
+          "prediction_produced": {
+            "default": false,
+            "title": "Prediction Produced",
+            "type": "boolean"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "sampling": {
+            "additionalProperties": true,
+            "title": "Sampling",
+            "type": "object"
+          },
+          "signal": {
+            "additionalProperties": true,
+            "title": "Signal",
+            "type": "object"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineStage"
+            },
+            "title": "Stages",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "truncation_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncation Note"
+          },
+          "window": {
+            "additionalProperties": true,
+            "title": "Window",
+            "type": "object"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/AnalyzedWindow"
+            },
+            "title": "Windows",
+            "type": "array"
+          },
+          "windows_returned": {
+            "title": "Windows Returned",
+            "type": "integer"
+          },
+          "windows_total": {
+            "title": "Windows Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stages",
+          "file",
+          "channel",
+          "compatibility",
+          "reasons",
+          "sampling",
+          "window",
+          "signal",
+          "windows_total",
+          "windows_returned",
+          "truncated",
+          "truncation_note",
+          "feature_names",
+          "non_finite_feature_values",
+          "windows"
+        ],
+        "title": "AnalyzeFeaturesResponse",
+        "type": "object"
+      },
+      "AnalyzeRulResponse": {
+        "properties": {
+          "applicability_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicability Level"
+          },
+          "applicability_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applicability Reasons",
+            "type": "array"
+          },
+          "applicability_shift_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicability Shift Ratio"
+          },
+          "compatibility": {
+            "title": "Compatibility",
+            "type": "string"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HiResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "health_indicator_produced": {
+            "title": "Health Indicator Produced",
+            "type": "boolean"
+          },
+          "model": {
+            "additionalProperties": true,
+            "title": "Model",
+            "type": "object"
+          },
+          "prediction_produced": {
+            "default": true,
+            "title": "Prediction Produced",
+            "type": "boolean"
+          },
+          "preprocessing_version": {
+            "title": "Preprocessing Version",
+            "type": "string"
+          },
+          "reliability": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reliability"
+          },
+          "rul_hours": {
+            "title": "Rul Hours",
+            "type": "number"
+          },
+          "rul_seconds": {
+            "title": "Rul Seconds",
+            "type": "number"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineStage"
+            },
+            "title": "Stages",
+            "type": "array"
+          },
+          "supporting": {
+            "additionalProperties": true,
+            "title": "Supporting",
+            "type": "object"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "stages",
+          "compatibility",
+          "model",
+          "preprocessing_version",
+          "rul_seconds",
+          "rul_hours",
+          "health_indicator_produced",
+          "health",
+          "warnings",
+          "reliability",
+          "supporting"
+        ],
+        "title": "AnalyzeRulResponse",
+        "type": "object"
+      },
+      "AnalyzedWindow": {
+        "properties": {
+          "features": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Features",
+            "type": "object"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "row_start": {
+            "description": "Zero-based data row (header excluded), inclusive.",
+            "title": "Row Start",
+            "type": "integer"
+          },
+          "row_stop": {
+            "description": "Zero-based data row, exclusive.",
+            "title": "Row Stop",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index",
+          "row_start",
+          "row_stop",
+          "features"
+        ],
+        "title": "AnalyzedWindow",
+        "type": "object"
+      },
+      "BlobInspectRequest": {
+        "properties": {
+          "blob_url": {
+            "description": "A client-uploaded Vercel Blob object URL.",
+            "title": "Blob Url",
+            "type": "string"
+          },
+          "declared_sampling_rate_hz": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declared Sampling Rate Hz"
+          },
+          "declared_units": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declared Units"
+          }
+        },
+        "required": [
+          "blob_url"
+        ],
+        "title": "BlobInspectRequest",
+        "type": "object"
+      },
+      "BlobUploadRequest": {
+        "properties": {
+          "blob_url": {
+            "description": "A client-uploaded Vercel Blob object URL.",
+            "title": "Blob Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blob_url"
+        ],
+        "title": "BlobUploadRequest",
+        "type": "object"
+      },
+      "Body_analyze_features_analyze_features_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_analyze_features_analyze_features_post",
+        "type": "object"
+      },
+      "Body_analyze_rul_analyze_rul_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_analyze_rul_analyze_rul_post",
+        "type": "object"
+      },
+      "Body_inspect_dataset_dataset_inspect_post": {
+        "properties": {
+          "declared_sampling_rate_hz": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declared Sampling Rate Hz"
+          },
+          "declared_units": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declared Units"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_inspect_dataset_dataset_inspect_post",
+        "type": "object"
+      },
+      "Body_predict_rul_from_femto_acquisition_predict_rul_femto_acquisition_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_predict_rul_from_femto_acquisition_predict_rul_femto_acquisition_post",
+        "type": "object"
+      },
+      "CompatibilityRequest": {
+        "properties": {
+          "dataset_id": {
+            "description": "Adapter id, e.g. 'femto'.",
+            "maxLength": 100,
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "feature_names": {
+            "description": "Feature column names the dataset provides (names only, never values).",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10000,
+            "title": "Feature Names",
+            "type": "array"
+          },
+          "sampling_rate_hz": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Acquisition rate of the recordings the features were computed from.",
+            "title": "Sampling Rate Hz"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "feature_names"
+        ],
+        "title": "CompatibilityRequest",
+        "type": "object"
+      },
+      "CompatibilityResponse": {
+        "properties": {
+          "adapter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adapter"
+          },
+          "compatibility": {
+            "title": "Compatibility",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "feature_schema": {
+            "additionalProperties": true,
+            "title": "Feature Schema",
+            "type": "object"
+          },
+          "model": {
+            "additionalProperties": true,
+            "title": "Model",
+            "type": "object"
+          },
+          "prediction_produced": {
+            "default": false,
+            "title": "Prediction Produced",
+            "type": "boolean"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "required_action": {
+            "$ref": "#/components/schemas/RequiredAction"
+          },
+          "required_signals": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Signals",
+            "type": "array"
+          },
+          "sampling": {
+            "additionalProperties": true,
+            "title": "Sampling",
+            "type": "object"
+          }
+        },
+        "required": [
+          "compatibility",
+          "dataset_id",
+          "reasons",
+          "required_action",
+          "model",
+          "adapter",
+          "feature_schema",
+          "required_signals",
+          "sampling"
+        ],
+        "title": "CompatibilityResponse",
+        "type": "object"
+      },
+      "DatasetProfileResponse": {
+        "properties": {
+          "compatibility": {
+            "title": "Compatibility",
+            "type": "string"
+          },
+          "profile": {
+            "additionalProperties": true,
+            "title": "Profile",
+            "type": "object"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "required_action": {
+            "$ref": "#/components/schemas/RequiredAction"
+          },
+          "sampling": {
+            "additionalProperties": true,
+            "title": "Sampling",
+            "type": "object"
+          }
+        },
+        "required": [
+          "compatibility",
+          "reasons",
+          "profile",
+          "required_action",
+          "sampling"
+        ],
+        "title": "DatasetProfileResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HiRequest": {
+        "properties": {
+          "dataset_id": {
+            "description": "Must be 'femto' - see docs/decisions.md D11.",
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "rows": {
+            "description": "Feature rows for ONE bearing run, in acquisition order. Each row must include sequence_index plus the reference HI model's feature columns (see GET /models/info's hi_feature_columns).",
+            "items": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "type": "object"
+            },
+            "minItems": 1,
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "rows"
+        ],
+        "title": "HiRequest",
+        "type": "object"
+      },
+      "HiResponse": {
+        "properties": {
+          "hi_critical_threshold": {
+            "title": "Hi Critical Threshold",
+            "type": "number"
+          },
+          "hi_warn_threshold": {
+            "title": "Hi Warn Threshold",
+            "type": "number"
+          },
+          "note": {
+            "default": "Stage is a severity band on the health indicator, not a physical fault-type diagnosis (no inner/outer-race/ball/cage claim).",
+            "title": "Note",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/HiRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows",
+          "hi_warn_threshold",
+          "hi_critical_threshold"
+        ],
+        "title": "HiResponse",
+        "type": "object"
+      },
+      "HiRow": {
+        "properties": {
+          "health_indicator": {
+            "title": "Health Indicator",
+            "type": "number"
+          },
+          "sequence_index": {
+            "title": "Sequence Index",
+            "type": "integer"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence_index",
+          "health_indicator",
+          "stage"
+        ],
+        "title": "HiRow",
+        "type": "object"
+      },
+      "PipelineStage": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "description": "ok | failed | skipped",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "detail"
+        ],
+        "title": "PipelineStage",
+        "type": "object"
+      },
+      "PredictRulRequest": {
+        "properties": {
+          "dataset_id": {
+            "description": "Must be 'femto' - see docs/decisions.md D11.",
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "features": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Feature-row values keyed by column name, matching model.feature_columns.",
+            "title": "Features",
+            "type": "object"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "features"
+        ],
+        "title": "PredictRulRequest",
+        "type": "object"
+      },
+      "PredictRulResponse": {
+        "properties": {
+          "applicability_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicability Level"
+          },
+          "applicability_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applicability Reasons",
+            "type": "array"
+          },
+          "applicability_shift_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicability Shift Ratio"
+          },
+          "compatibility": {
+            "default": "FULLY_SUPPORTED",
+            "title": "Compatibility",
+            "type": "string"
+          },
+          "features_missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Features Missing",
+            "type": "array"
+          },
+          "features_used": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Features Used",
+            "type": "array"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "reliability": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reliability"
+          },
+          "rul_hours": {
+            "title": "Rul Hours",
+            "type": "number"
+          },
+          "rul_seconds": {
+            "title": "Rul Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "model_name",
+          "rul_seconds",
+          "rul_hours",
+          "features_used",
+          "features_missing"
+        ],
+        "title": "PredictRulResponse",
+        "type": "object"
+      },
+      "RequiredAction": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "message",
+          "missing"
+        ],
+        "title": "RequiredAction",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Read-only inference over cached bearing_pdm artifacts. Never fits a model.",
+    "title": "RULGuard prediction service",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/analyze/features": {
+      "post": {
+        "description": "Upload -> dataset detection -> validation -> preprocessing -> feature\nextraction, with a `stages` array on success and on every staged failure\n(docs/feature-analysis.md). The raw upload lives only in a temporary file\nremoved when the request ends.",
+        "operationId": "analyze_features_analyze_features_post",
+        "parameters": [
+          {
+            "description": "Vibration header column (or its canonical name).",
+            "in": "query",
+            "name": "channel",
+            "required": true,
+            "schema": {
+              "description": "Vibration header column (or its canonical name).",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Channel",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required unless regular timestamps in seconds determine it.",
+            "in": "query",
+            "name": "sampling_rate_hz",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 1000000.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Required unless regular timestamps in seconds determine it.",
+              "title": "Sampling Rate Hz"
+            }
+          },
+          {
+            "in": "query",
+            "name": "window_samples",
+            "required": false,
+            "schema": {
+              "default": 2560,
+              "maximum": 1048576,
+              "minimum": 2,
+              "title": "Window Samples",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overlap_samples",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 1048576,
+              "minimum": 0,
+              "title": "Overlap Samples",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_features_analyze_features_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeFeaturesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Features"
+      }
+    },
+    "/analyze/rul": {
+      "post": {
+        "description": "Ordered FEMTO acquisitions (two named axes, g) to the latest RUL.\n\nDataset/units are caller attestations, never inferred from signal shape.\nReuse the staged feature pipeline for each axis and public prediction paths;\nnever fit, fill a missing feature, or predict from a truncated run.",
+        "operationId": "analyze_rul_analyze_rul_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "units",
+            "required": true,
+            "schema": {
+              "maxLength": 40,
+              "minLength": 1,
+              "title": "Units",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "preprocessing_version",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Preprocessing Version",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sampling_rate_hz",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 1000000.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sampling Rate Hz"
+            }
+          },
+          {
+            "in": "query",
+            "name": "window_samples",
+            "required": false,
+            "schema": {
+              "default": 2560,
+              "maximum": 1048576,
+              "minimum": 2,
+              "title": "Window Samples",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overlap_samples",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 1048576,
+              "minimum": 0,
+              "title": "Overlap Samples",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_rul_analyze_rul_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeRulResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Rul"
+      }
+    },
+    "/dataset/inspect": {
+      "post": {
+        "description": "Upload -> inspect -> classify (goals.md's dataset-detection step), before\nanything is validated/preprocessed/fed to a model - see\ndocs/dataset-compatibility.md for what this does and does not check.\n\ndeclared_sampling_rate_hz/declared_units are the caller's own assertion,\nused only when the file carries no regular timestamps in seconds to derive\na rate from - never a guess this endpoint makes itself (ml-data.md).\n\nFor a file too large for a normal request body, see the direct-to-storage\n/dataset/inspect/blob variant below.",
+        "operationId": "inspect_dataset_dataset_inspect_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_inspect_dataset_dataset_inspect_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inspect Dataset"
+      }
+    },
+    "/dataset/inspect/blob": {
+      "post": {
+        "description": "Direct-to-storage counterpart of /dataset/inspect - see\npredict_rul_from_femto_acquisition_blob's docstring for the shared\nrationale (bypasses the serverless request-body limit, bounded-memory\nchunked download, shared processing core, best-effort blob cleanup).",
+        "operationId": "inspect_dataset_blob_dataset_inspect_blob_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlobInspectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inspect Dataset Blob"
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/models/compatibility": {
+      "post": {
+        "description": "Is a dataset compatible with the selected cached RUL model? Metadata only:\nno raw data is accepted and no prediction is produced. The mapping of each\nstate to model.md section 8 is justified in docs/dataset-compatibility.md.",
+        "operationId": "model_compatibility_models_compatibility_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompatibilityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompatibilityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Model Compatibility"
+      }
+    },
+    "/models/evaluation": {
+      "get": {
+        "description": "Real leave-one-bearing-out (FEMTO) and walk-forward (college) numbers,\nread verbatim from reports/metrics/rul_evaluation.json - goals.md's\n\"provide confidence/validation/reliability information\" requirement,\nwithout hand-typing a metric (general.md: every number traces to a\ngenerated file).\n\nml-data.md D10 is non-negotiable: college's naive baseline scores\nMAE=0.0 by construction (it has access to the true total run length),\nnot because it predicts well. college_naive_caveat is returned alongside\nthe college numbers specifically so a client cannot show the college\nnaive/extra_trees comparison without also carrying that caveat - it must\nnever be presented as a fair comparison.",
+        "operationId": "models_evaluation_models_evaluation_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Models Evaluation Models Evaluation Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Models Evaluation"
+      }
+    },
+    "/models/info": {
+      "get": {
+        "operationId": "models_info_models_info_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Models Info Models Info Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Models Info"
+      }
+    },
+    "/predict/hi": {
+      "post": {
+        "description": "Mirrors dashboard.py's Health Indicator tab exactly: same\napply_reference_hi/assign_stages calls, same FEMTO-only domain gate\n(D11 - a FEMTO-fit reference HI applied to college's feature scale is\nout-of-domain, confirmed in dashboard.py's own history to swing outside\nthe HI's valid (0,1) range).",
+        "operationId": "predict_hi_predict_hi_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HiRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Predict Hi"
+      }
+    },
+    "/predict/rul": {
+      "post": {
+        "operationId": "predict_rul_predict_rul_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PredictRulRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PredictRulResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Predict Rul"
+      }
+    },
+    "/predict/rul/femto-acquisition": {
+      "post": {
+        "description": "Raw single-acquisition FEMTO acc_*.csv -> features.py -> /predict/rul,\nover one HTTP call (goals.md: \"automatically extract the required\nfeatures\" / \"automatically run the correct trained prediction pipeline\").\n\nOnly the FEMTO acc format (docs/decisions.md D11, femto.py) is accepted\nhere - the caller is asserting a known, fixed, headerless 6-column layout\nat a known sampling rate, not asking this endpoint to guess one from an\narbitrary upload (that guess belongs to /dataset/inspect, and it correctly\nrefuses to guess). A dataset_id parameter isn't needed: this route's\nentire contract already *is* \"this is a femto acquisition.\"\n\nFor a file too large for a normal request body, see the direct-to-storage\n/predict/rul/femto-acquisition/blob variant below.",
+        "operationId": "predict_rul_from_femto_acquisition_predict_rul_femto_acquisition_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_predict_rul_from_femto_acquisition_predict_rul_femto_acquisition_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PredictRulResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Predict Rul From Femto Acquisition"
+      }
+    },
+    "/predict/rul/femto-acquisition/blob": {
+      "post": {
+        "description": "Direct-to-storage counterpart of /predict/rul/femto-acquisition: the\nbrowser uploads the raw file straight to Vercel Blob (bypassing the\nplatform's ~4.5MB serverless request-body limit) and only hands this\nendpoint the resulting object URL. Downloads it in MAX_UPLOAD_BYTES/\nUPLOAD_CHUNK_BYTES-bounded chunks, then runs the exact same\n_process_femto_acquisition_file the direct-upload path uses, and always\ndeletes the now-unneeded blob afterward (lifecycle cleanup) whether\nprocessing succeeded or failed.",
+        "operationId": "predict_rul_from_femto_acquisition_blob_predict_rul_femto_acquisition_blob_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlobUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PredictRulResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Predict Rul From Femto Acquisition Blob"
+      }
+    },
+    "/predictions/history": {
+      "get": {
+        "description": "Bounded prediction summaries, newest first, from the configured store\n(process-local unless RULGUARD_HISTORY_DB is set - see docs/prediction-history.md).",
+        "operationId": "prediction_history_predictions_history_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Prediction History Predictions History Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Prediction History"
+      }
+    }
+  }
+}

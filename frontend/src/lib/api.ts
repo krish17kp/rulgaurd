@@ -223,8 +223,8 @@ export interface DatasetProfileResponse {
 }
 
 export interface InspectDatasetOptions {
-  /** The caller's own assertion - used only when the file has no timestamp
-   * column to derive a rate from. Never guessed by the backend. */
+  /** The caller's own assertion - used only when the file has no regular
+   * timestamps in seconds to derive a rate from. Never guessed by the backend. */
   declaredSamplingRateHz?: number;
   declaredUnits?: string;
 }

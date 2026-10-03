@@ -172,8 +172,8 @@ export default function UploadPage() {
             <span className="text-zinc-500">
               Inspects the file&apos;s structure (delimiter, header, column meanings) and
               reports compatibility — it does not run a prediction. Optionally declare the
-              sampling rate and units below if the file has no timestamp column; they are never
-              guessed.
+              sampling rate and units below if the file has no timestamp column in seconds; they
+              are never guessed.
             </span>
           </span>
         </label>
@@ -182,9 +182,10 @@ export default function UploadPage() {
       {datasetType === "generic" && (
         <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
           <label className="flex flex-col gap-1 text-sm">
-            Declared sampling rate (Hz) — optional. Used only if no timestamp column is found; if
-            the file has one and it disagrees with this value, the upload is rejected rather than
-            silently preferring either source.
+            Declared sampling rate (Hz) — optional. Used only if the file has no regular
+            timestamps in seconds (a time_s/seconds column or ISO datetimes); if it has them and
+            they disagree with this value, the upload is rejected rather than silently preferring
+            either source.
             <input
               type="number"
               min="0"

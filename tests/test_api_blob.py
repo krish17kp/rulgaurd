@@ -38,7 +38,12 @@ def test_stream_blob_to_tempfile_reassembles_multiple_chunks_byte_exact(monkeypa
     (1MB), so the parity tests below never actually exercise more than one
     iteration of _stream_blob_to_tempfile's chunk loop - found in review.
     This proves multi-chunk reassembly directly, decoupled from CSV parsing."""
-    content = os.urandom(3 * api.UPLOAD_CHUNK_BYTES + 12345)  # spans 4 chunk reads
+    # Random but text-shaped (hex lines): blob downloads get the same text-head
+    # check as direct uploads, so binary bytes would be rejected before reassembly.
+    content = b"\n".join(
+        os.urandom(32).hex().encode() for _ in range((3 * api.UPLOAD_CHUNK_BYTES + 12345) // 65 + 1)
+    )
+    assert len(content) > 3 * api.UPLOAD_CHUNK_BYTES  # spans 4 chunk reads
     monkeypatch.setattr(api, "_get_http_client", lambda: _mock_client_serving(content))
 
     tmp_file = tmp_path / "blob_download"
@@ -131,10 +136,30 @@ def test_interrupted_download_returns_502(blob_url, monkeypatch):
 
 
 def test_oversized_blob_object_returns_413(blob_url, monkeypatch):
-    oversized = b"0" * (api.MAX_UPLOAD_BYTES + 1024)
+    oversized = b"0\n" * ((api.MAX_UPLOAD_BYTES + 1024) // 2)
     monkeypatch.setattr(api, "_get_http_client", lambda: _mock_client_serving(oversized))
     response = client.post("/predict/rul/femto-acquisition/blob", json={"blob_url": blob_url})
     assert response.status_code == 413
+    assert response.json()["code"] == "UPLOAD_TOO_LARGE"
+
+
+@pytest.mark.parametrize("content, status, code", [
+    (b"PK\x03\x04binary", 415, "UNSUPPORTED_FILE_TYPE"),
+    (b"\xff\xfe\xfa,b\n1,2\n", 422, "UNDECODABLE_FILE"),
+])
+@pytest.mark.parametrize("route", ["/predict/rul/femto-acquisition/blob", "/dataset/inspect/blob"])
+def test_blob_download_gets_the_same_text_checks_as_a_direct_upload(
+        blob_url, monkeypatch, content, status, code, route):
+    """Regression: a binary or non-UTF-8 object fetched from storage was
+    profiled as if it were text (a misleading 200 profile) instead of being
+    rejected the way the same bytes are on the direct-upload path."""
+    deleted: list[str] = []
+    monkeypatch.setattr(api, "_get_http_client", lambda: _mock_client_serving(content))
+    monkeypatch.setattr(api, "_delete_blob", lambda url: deleted.append(url))
+    response = client.post(route, json={"blob_url": blob_url})
+    assert response.status_code == status
+    assert response.json()["code"] == code
+    assert deleted == [blob_url]
 
 
 def test_empty_blob_object_returns_422(blob_url, monkeypatch):
@@ -154,6 +179,19 @@ def test_delete_blob_logs_but_does_not_raise_on_an_error_response(monkeypatch):
         api, "_get_http_client", lambda: httpx.Client(transport=httpx.MockTransport(handler))
     )
     api._delete_blob("https://example.public.blob.vercel-storage.com/x.csv")  # must not raise
+
+
+def test_delete_blob_failure_log_never_contains_the_url(monkeypatch, caplog):
+    # The URL carries the uploaded filename; observability.md forbids filenames in logs.
+    monkeypatch.setenv("BLOB_READ_WRITE_TOKEN", "fake-token")
+    monkeypatch.setattr(
+        api, "_get_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500))),
+    )
+    with caplog.at_level("DEBUG", logger="bearing_pdm.api"):
+        api._delete_blob("https://example.public.blob.vercel-storage.com/patient-SECRET.csv")
+    assert "returned 500" in caplog.text
+    assert "SECRET" not in caplog.text and "fake-token" not in caplog.text
 
 
 def test_delete_blob_is_best_effort_on_a_transport_error(monkeypatch):

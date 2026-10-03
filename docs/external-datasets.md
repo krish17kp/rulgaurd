@@ -1,5 +1,7 @@
 # External bearing datasets: background and provenance (verified 2026-09-25)
 
+Scope: dataset suitability and source fault labels below describe research inputs, not cached-model support or implemented fault diagnosis. The HTTP prediction service remains FEMTO-only (D11); external adapters support offline experiments.
+
 Compiled for the cross-dataset work (docs/cross-dataset.md). The raw data is **not** in this
 repository or its git history: it lives outside the repo (`~/work/external_data/` on the build
 machine) and is read through `src/bearing_pdm/ims.py` / `xjtu.py` via `adapters.py`.

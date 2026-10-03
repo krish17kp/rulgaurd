@@ -92,10 +92,10 @@ Resolution: `storage.batch_roles()` reads the `role` column from the batch's own
 
 Related regression, same review, same root cause: `dashboard.py` had been left on the old unfiltered "newest batch" selection, so after the censored batch was built the FEMTO view silently lost all six learning bearings and showed eleven censored test bearings with no ground-truth RUL - and `tests/test_dashboard.py` still passed, because it only asserts "no exception" and "five tabs". The dashboard now annotates every batch with its real role, defaults to the role carrying ground truth (`learning` for FEMTO, `college_run` for college), lets the user switch when several batches exist, and warns explicitly when a batch without ground-truth RUL is selected.
 
-## D16: FEMTO hidden-set (Full_Test_Set) scoring - the project's first genuinely out-of-sample result (2026-08-30)
+## D16: FEMTO hidden-set (Full_Test_Set) scoring - independent post-freeze evaluation (2026-08-30)
 **Superseded by D20 item 1**: the naive MAE reported below (9,459.4 s / 9,691.3 s) was miscomputed - `score_hidden_set` gave the naive baseline no history to compute elapsed time from, so its prediction collapsed to one constant per variant. The corrected naive MAE is 5,203.9 s (archive-derived) / 5,122.5 s (official); see D20 for the full explanation and corrected table.
 
-Through M8 the pipeline was frozen and ready but had never been scored on held-out data; every reported number was leave-one-bearing-out over the same 6 learning bearings. This closes that gap.
+Through M8 the pipeline was frozen and ready but had not been scored on the independent hidden set; earlier leave-one-bearing-out results held out each bearing from fitting but reused the learning set for development. This adds post-freeze evidence.
 
 Method: build features for the 11 censored `Test_set` bearings (13,959 acquisitions, every per-bearing count matching `docs/dataset-audit.md`), apply the frozen models fit on the 6 learning bearings, and take **one prediction per bearing at the last acquisition of the censored prefix** - so n=11 scored points, not 13,959. Ground truth is re-derived from the archives by `femto.derive_hidden_rul_seconds()` rather than hardcoded, and cross-checked against the official table before scoring is allowed to proceed.
 
@@ -246,7 +246,7 @@ Resolution: added `stages.UNKNOWN` (deliberately excluded from `STAGE_ORDER` - n
 **6. DISCLOSURE - reference-HI hyperparameters were chosen using the six FEMTO learning bearings.** `REFERENCE_HI_FEATURES`, `REFERENCE_HI_SKIP = 10`, `REFERENCE_HI_N = 50`, and `REFERENCE_HI_SMOOTH_WINDOW = 11` (`health.py`) were all selected by inspecting the six learning bearings' own measured behaviour (the run-in transient, the terminal-cliff width) - documented in D18's prose and the smoothing-window sweep, but not previously flagged as a methodology-selection step distinct from within-fold fitting. To be explicit about what "leave-one-bearing-out" does and does not cover here:
 
 - **Fitting within a LOBO fold**: `ReferenceHIModel.scales`, `healthy_score`, `failure_score`, and `StageThresholds` ARE refit per fold on the 5 training bearings only, and never see the held-out bearing - this part is leakage-safe as claimed.
-- **Methodology/hyperparameter choices** (which features, `SKIP`, `N`, `smooth_window`): these are fixed constants, chosen once by looking at patterns common to all six learning bearings (the same six that supply every LOBO fold), not re-selected per fold. This is standard practice - hyperparameters are not supposed to be re-tuned inside a leave-one-out loop - but it means the six learning bearings are not a fully "untouched" evaluation set for the HI design as a whole, only for the per-fold anchor/scale numbers. This is analogous to, and consistent with, the existing feature-selection-on-train-fold discipline elsewhere in the project; it is called out here because D18/D19's prose could be read as claiming the six bearings were never looked at during design, which is not true.
+- **Methodology/hyperparameter choices** (which features, `SKIP`, `N`, `smooth_window`): these are fixed constants, chosen once by looking at patterns common to all six learning bearings (the same six that supply every LOBO fold), not re-selected per fold. These are development-set design choices; estimating the full selection procedure would require nested selection or independent evaluation. It means the six learning bearings are not a fully "untouched" evaluation set for the HI design as a whole, only for the per-fold anchor/scale numbers. This is analogous to, and consistent with, the existing feature-selection-on-train-fold discipline elsewhere in the project; it is called out here because D18/D19's prose could be read as claiming the six bearings were never looked at during design, which is not true.
 - **Hidden/censored bearings** (the 11 `test_censored` + `Bearing1_4`'s `Validation_Set` continuation): never used to choose a feature, a constant, or a threshold - only ever scored, once, per D16/finding 1 above.
 
 **7. REPOSITORY HYGIENE - CRLF in committed blobs.** Re-scanning every tracked non-binary blob at `HEAD` (not just the working tree, which is CRLF-normalized separately per `.claude/rules/git.md`) found 12 files with `\r` bytes baked into the committed content, not just the working-tree checkout: `docs/decisions.md` (mixed - 61 of 196 lines CRLF, the rest LF) and 11 files committed fully in CRLF (`pyproject.toml`, `scripts/build_features.py`, `scripts/evaluate_models.py`, `scripts/train_models.py`, `src/bearing_pdm/config.py`, `src/bearing_pdm/evaluation.py`, `src/bearing_pdm/femto.py`, `src/bearing_pdm/pipeline.py`, `src/bearing_pdm/storage.py`, `tests/test_femto.py`, `tests/test_pipeline.py`). `.gitattributes` has no `text=auto`/`eol` directive, so nothing normalizes this automatically. Normalized all 12 to LF as a mechanical, content-preserving change (verified: `git diff --ignore-cr-at-eol` empty for all 12 before the commit, i.e. no textual change beyond line endings).
@@ -428,8 +428,8 @@ bearing's failure. Two causes, one of them a bug.
    this machine.
 
 Resolution: a second cross-domain HI on SN log-RMS and log-peak-to-peak only
-(`experiments.CROSS_DOMAIN_HIS["amplitude_hi"]`) - energy growth, the generic degradation
-signature - chosen **after** seeing the college result, so all three HIs are always reported
+(`experiments.CROSS_DOMAIN_HIS["amplitude_hi"]`) - energy growth, a candidate degradation
+signature on the inspected datasets - chosen **after** seeing the college result, so all three HIs are always reported
 (`docs/cross-dataset-results.md`, "Health indicator across datasets"). Mean Spearman(HI,
 elapsed), amplitude vs fused SN HI: FEMTO -0.259 vs -0.717 (amplitude is worse), IMS -0.682 vs
 -0.341, XJTU-SY -0.636 vs -0.408 (amplitude is better); prognosability FEMTO 0.729 vs 0.898,
@@ -453,3 +453,54 @@ sensitive early flag, not a failure prediction. On college specifically, the FEM
 healthy-band edge (HI 0.928) lies inside the machine's own hour-to-hour variation, so the stage
 flickers during the first ~35% of life; the thresholds are deliberately not re-tuned on the one
 college run.
+
+## D28: claims audit separates validation evidence from deployment support (2026-09-30)
+
+The documentation audit found methodology wording that needs qualification before
+continuing: D20 called design choices made on all learning bearings standard practice
+without explaining the need for nested selection or independent data when estimating
+the performance of the entire selection procedure. Fold-local fitting remains separate
+from design selection; the learning-bearing HI results are development evidence.
+D26 already discloses that the amplitude HI was selected after inspecting college.
+Neither result establishes generalisation to a new college bearing.
+
+The weighted out-of-fold residual calibration in `uncertainty.py` is described as
+split conformal. This audit does not establish a coverage theorem for that procedure
+with dependent rows and refitted models. Report empirical coverage and interval width;
+do not promise a per-prediction probability or distribution-free coverage on new rigs.
+This is a limitation of the claim, not a newly demonstrated leakage defect.
+
+Resolution for this documentation-only task: qualify those claims, preserve recorded
+results and all pipeline behavior, and distinguish the FEMTO-only HTTP prediction
+contract (D11) from offline cross-dataset experiments (D23-D27). Source metric JSONs
+are absent from `reports/metrics/` in this worktree; generated result tables are
+historical records, not newly reproduced evidence. See `docs/claims-audit.md` for
+source locations and deferred API/UI wording changes. No new model or dataset support
+is approved by this audit.
+
+## Goal 21: Reliability information comes only from cached, traceable sources
+
+`/predict/rul` returns a `reliability` block (`docs/prediction-reliability.md`). Its parts are:
+
+- held-out leave-one-bearing-out error from `reports/metrics/rul_evaluation.json`;
+- tree disagreement, labelled as a diagnostic;
+- the conformal interval from the calibrator already cached in `cross_domain_bundle.joblib`;
+- `applicability.assess` against that bundle's cached applicability model.
+
+The API never fits a calibrator. A cached calibrator is applied only if the bundled model
+reproduces the served prediction, and no interval is reported for a LOW-applicability row,
+because the exchangeability assumption behind the coverage target fails there. Missing parts are
+null and carry a reason. No confidence score or probability is synthesised.
+
+## Goal 12: Timestamp units and regularity
+
+The previous profiler treated every numeric timestamp alias as seconds and used
+its median interval even when intervals were irregular. A numeric `time` column
+does not establish a unit. Sampling derivation now requires explicit seconds
+(`time_s` or `seconds`) or ISO date-time values, and at least three samples with
+all intervals positive, finite, and within 1% of their median. Unknown units
+require metadata. The existing synthetic profiler fixture now names its known
+seconds unit explicitly; its rate, provenance, and warning assertions remain.
+The upload endpoint accepts explicit user rates without claiming that they
+repair irregular timing or validate any trained model for the dataset.
+

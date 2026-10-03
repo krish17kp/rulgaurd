@@ -44,3 +44,43 @@ Every adapter (`femto.py`, `college.py`) emits rows matching this contract befor
 
 ## Schema version
 `v1` as defined above. Any breaking change bumps to `v2` and the DuckDB `feature_batches.schema_version` records which version produced each Parquet file.
+
+## Incremental headered CSV feature windows
+
+`bearing_pdm.chunked.iter_csv_window_features` is a standalone library iterator,
+not an upload endpoint or a dataset compatibility decision. Callers supply the
+vibration column, positive integer window length and chunk size, integer overlap
+in `[0, window_samples)`, and a known finite positive sampling rate. There is no
+assumed sensor unit or sampling rate and no model invocation.
+
+Each `WindowFeatures` record contains zero-based `row_start`, exclusive
+`row_stop`, and the existing time-domain and FFT feature dictionary for that
+complete window. The stride is `window_samples - overlap_samples`. CSV chunk
+boundaries never define scientific windows. Only the selected column is loaded,
+with a fixed float64 dtype. Missing samples and blank rows retain their positions;
+features.py's existing within-window NaN omission and all-missing NaN outputs
+apply unchanged. In particular, its documented FFT spacing limitation on missing
+samples still applies. There is no global imputation or padding.
+
+Pass a fresh `WindowReport` and exhaust the iterator to obtain `completed=True`,
+rows read, windows emitted, trailing partial rows, and peak rows held. The trailing
+count is the length of the incomplete window at the next stride position, so it
+includes retained overlap even if those samples appeared in the last full window.
+A file shorter than one window emits nothing and reports its entire length as
+partial; a header-only file reports zero. Invalid numeric data or a missing column
+raises an error; a failed or abandoned stream is not marked completed. Consumers
+must discard partial results on failure and close an iterator abandoned early.
+
+The retained input storage is one pandas chunk plus one preallocated window;
+`peak_rows_held` counts these row slots, bounded by `chunk_rows + window_samples`.
+This is not a process RSS measurement: pandas parser buffers, temporary arrays
+inside the unchanged feature formulas, and feature records retained by a caller
+are excluded. Consume records incrementally to avoid accumulating output in RAM.
+
+`bearing_pdm.chunked.scan_csv_column` is the matching validation pass: it reads the
+same column with the same header/blank-row handling, one chunk at a time, and
+returns counts only (rows, missing, non-numeric, infinite, finite min/max, and
+optionally rows where a numeric order column is not strictly increasing). Values
+are never retained. `POST /analyze/features` (`docs/feature-analysis.md`) runs it
+before the iterator so the window count is known and data problems are attributed
+to validation rather than to feature extraction.

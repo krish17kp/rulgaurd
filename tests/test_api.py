@@ -112,7 +112,7 @@ def _real_femto_vibration_csv(
     if max_rows is not None:
         df = df.iloc[:max_rows]
     lines = []
-    header = (["time"] if with_timestamp else []) + ["vibration_x", "vibration_y"]
+    header = (["time_s"] if with_timestamp else []) + ["vibration_x", "vibration_y"]
     lines.append(",".join(header))
     rate = api.FEMTO_SAMPLE_RATE_HZ
     for i, (x, y) in enumerate(zip(df["x"], df["y"])):
@@ -286,7 +286,7 @@ def test_dataset_inspect_timestamp_evidence_overrides_a_contradicting_declared_r
     contradicting declaration must be flagged, not silently overridden."""
     step = 1.0 / 1000.0  # 1kHz by the file's own timestamps
     rows = "\n".join(f"{i * step},{0.1 + 0.001 * (i % 7)},{0.2 + 0.001 * (i % 5)}" for i in range(300))
-    csv_bytes = f"time,vibration_x,vibration_y\n{rows}\n".encode()
+    csv_bytes = f"time_s,vibration_x,vibration_y\n{rows}\n".encode()
 
     response = client.post(
         "/dataset/inspect",
@@ -317,6 +317,80 @@ def test_dataset_inspect_timestamp_evidence_overrides_a_contradicting_declared_r
     body = response.json()
     assert body["compatibility"] == "RETRAIN_REQUIRED"
     assert "conflicts" not in " ".join(body["reasons"]).lower()
+
+
+def test_dataset_inspect_never_assumes_a_generic_time_column_is_in_seconds():
+    """Regression: any timestamp-mapped column's median step used to be read
+    as seconds, so a millisecond `time` column at 25.6 kHz (step 0.0390625)
+    'derived' 25.6 Hz - or a ms column whose numbers happened to look like
+    seconds derived a fabricated rate. Only time_s/seconds (or ISO datetimes)
+    are read as seconds; anything else needs a declaration and says so."""
+    step_ms = 1000.0 / api.FEMTO_SAMPLE_RATE_HZ
+    rows = "\n".join(f"{i * step_ms},{0.1 + 0.001 * (i % 7)},{0.2 + 0.001 * (i % 5)}"
+                     for i in range(300))
+    csv_bytes = f"time,vibration_x,vibration_y\n{rows}\n".encode()
+
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("timed.csv", csv_bytes, "text/csv")},
+        data={"declared_units": "g"},
+    )
+    body = response.json()
+    assert body["compatibility"] == "ADAPTER_REQUIRED"
+    assert body["required_action"]["kind"] == "METADATA_REQUIRED"
+    assert body["sampling"]["rate_hz"] is None
+    assert "not used to derive or cross-check" in " ".join(body["reasons"])
+
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("timed.csv", csv_bytes, "text/csv")},
+        data={"declared_sampling_rate_hz": "25600", "declared_units": "g"},
+    )
+    body = response.json()
+    assert body["sampling"] | {"message": None} == {
+        "rate_hz": 25600.0, "source": "user", "regular": None, "required": False, "message": None}
+    assert "not used to derive or cross-check" in " ".join(body["reasons"])
+
+
+def test_dataset_inspect_irregular_timestamps_fail_closed_even_with_a_declaration():
+    rows = "\n".join(f"{t},{0.1 + 0.001 * (i % 7)}" for i, t in enumerate([0, 0.01, 0.03, 0.04]))
+    response = client.post(
+        "/dataset/inspect",
+        files={"file": ("timed.csv", f"time_s,vibration_x\n{rows}\n".encode(), "text/csv")},
+        data={"declared_sampling_rate_hz": "25600", "declared_units": "g"},
+    )
+    body = response.json()
+    assert body["compatibility"] == "ADAPTER_REQUIRED"
+    assert body["required_action"]["kind"] == "TIMESTAMPS_IRREGULAR"
+    assert body["sampling"]["regular"] is False
+
+
+@pytest.mark.parametrize("data, state, kind", [
+    ({}, "ADAPTER_REQUIRED", "METADATA_REQUIRED"),
+    ({"declared_sampling_rate_hz": "1000", "declared_units": "g"}, "RETRAIN_REQUIRED",
+     "RETRAIN_REQUIRED"),
+])
+def test_dataset_inspect_states_carry_a_required_action(data, state, kind):
+    csv_bytes = b"vibration_x,vibration_y\n0.1,0.2\n0.3,0.4\n0.2,0.1\n"
+    response = client.post(
+        "/dataset/inspect", files={"file": ("clean.csv", csv_bytes, "text/csv")}, data=data)
+    body = response.json()
+    assert (body["compatibility"], body["required_action"]["kind"]) == (state, kind)
+    assert body["required_action"]["missing"]
+
+
+@pytest.mark.parametrize("body", [
+    b'{"dataset_id": NaN, "features": {}}',
+    b'{"dataset_id": "femto", "features": Infinity}',
+])
+@pytest.mark.parametrize("path", ["/predict/rul", "/predict/hi"])
+def test_non_finite_literal_in_an_invalid_body_is_422_not_500(path, body):
+    """Regression: FastAPI's default handler echoed the NaN/Infinity `input`
+    back into a JSON response it then could not serialise - a 500."""
+    response = TestClient(api.app, raise_server_exceptions=False).post(
+        path, content=body, headers={"Content-Type": "application/json"})
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
 
 
 def test_dataset_inspect_rejects_whitespace_only_declared_units():

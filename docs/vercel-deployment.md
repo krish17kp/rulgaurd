@@ -105,3 +105,11 @@ cp .env.example .env.local
 npm install
 npm run dev
 ```
+
+## Prediction history storage
+
+History defaults to memory. An optional local SQLite backend supports durable
+history on a persistent host; see [prediction history](prediction-history.md)
+for configuration and retention. Vercel/serverless local storage is ephemeral
+and instance-local, so enabling SQLite there does not provide durable history.
+Durability on Vercel needs an external store, which is out of scope.

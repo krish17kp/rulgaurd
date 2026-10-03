@@ -33,7 +33,7 @@ For this capstone the value delivered is **academic and methodological**: a leak
 
 ## 4. Objectives (business-level)
 
-1. Prove a valid, leakage-safe RUL baseline on a recognised benchmark (FEMTO) and on original lab data (college run).
+1. Evaluate a RUL baseline with fold-local fitting on a recognised benchmark (FEMTO) and on original lab data (college run).
 2. Show the full path from raw sensor data to an explainable decision surface (dashboard).
 3. Keep every claim defensible: no fabricated labels, no fault-type claims without geometry, no numeric prediction from the LLM.
 4. Ship review-ready by 2026-07-25 with real evidence for each completed milestone.
@@ -73,9 +73,9 @@ For this capstone the value delivered is **academic and methodological**: a leak
 
 ## 9. Expected outcomes / benefits (delivered)
 
-- A benchmark-validated RUL baseline: FEMTO leave-one-bearing-out mean MAE **5,061 s** (ExtraTrees) vs **6,585 s** naive - the tree model beats naive on the grouped metric.
-- A leakage-safe college walk-forward result (ExtraTrees MAE ~117k-132k s, i.e. ~33-37 h on a ~128 h run) with the trivial naive identity honestly flagged.
-- A quantitatively-compared health indicator (transparent HI selected, mean trend corr **-0.53** vs PCA **-0.46**).
+- FEMTO grouped evaluation shows an aggregate improvement over naive, not uniform per-bearing superiority. D21 distinguishes pooled row errors from fold means; D20 reports the corrected hidden-set comparison.
+- College chronological walk-forward results describe the same bearing only. D10 identifies the naive oracle; D21 records systematic ExtraTrees overestimation.
+- Health indicators were compared during development; the reference HI superseded the legacy choice (D18-D20). Design selection and fold-local fitting are distinct.
 - A working dashboard demonstrating raw signal -> FFT -> features -> HI -> RUL -> metrics -> limitations.
 - A documented trail of 11 real findings/bugs caught by checking against real data (`docs/decisions.md`) - evidence of a working verification process.
 
@@ -83,7 +83,7 @@ For this capstone the value delivered is **academic and methodological**: a leak
 
 - Review MVP complete and defensible by 2026-07-25 with real-data evidence per milestone. **Met.**
 - Naive RUL baseline beaten by a tree model on FEMTO grouped MAE. **Met.**
-- Every headline claim traceable to a generated metric or an inspected file; no unsupported claim survives. **Met.**
+- Claims require traceable evidence and explicit domain limits. The documentation audit records remaining API/UI wording issues in `docs/claims-audit.md`; this is not blanket scientific acceptance.
 - All committed parser/feature tests pass on fixtures; dashboard starts from cached artifacts without training on load. **Met.**
 - Full capstone (M5-M7, M9, full college run, hidden-set scoring) scoped and tracked for post-review. **Planned, not yet delivered.**
 

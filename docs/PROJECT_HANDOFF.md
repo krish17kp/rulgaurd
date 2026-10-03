@@ -10,7 +10,7 @@ Two copies of this project exist on disk:
 
 ## Technology stack
 
-Python >=3.11. Core libs: numpy, pandas, scipy, scikit-learn, pyarrow, duckdb, joblib, matplotlib, plotly, streamlit, py7zr, reportlab (`requirements.txt`); pytest + ruff for dev/test. Optional, M7-only, not installed: faiss-cpu, ollama (`requirements-rag.txt`). Storage: Parquet (features) + DuckDB (metadata/lineage only) + joblib (models) + flat JSON under `reports/metrics/`. Frontend: Streamlit only, no API server. No CI/CD, no containers.
+Python >=3.11. Core libs: numpy, pandas, scipy, scikit-learn, pyarrow, duckdb, joblib, matplotlib, plotly, streamlit, py7zr, reportlab (`requirements.txt`); pytest + ruff for dev/test. Optional, M7-only, not installed: faiss-cpu, ollama (`requirements-rag.txt`). Storage: Parquet (features) + DuckDB (metadata/lineage only) + joblib (models) + flat JSON under `reports/metrics/`. Frontend: legacy Streamlit plus a Next.js frontend and separate FEMTO-gated FastAPI service; see `docs/milestone.md` M11 for deployment limitations. No CI/CD, no containers.
 
 ## Architecture
 
@@ -37,22 +37,22 @@ Source: `docs/architecture.md`, `docs/database-structure.md`.
 ## DONE
 
 - **M0-M4 + minimal M8** (review-day, 2026-07-25): foundation docs, both adapters, feature pipeline, health-indicator baselines, RUL baselines with leakage-safe evaluation, Streamlit dashboard. Evidence: `artifacts/evidence/REVIEW-M{0,1,2,3,4,8}/`.
-- **M4b** (2026-08-30): FEMTO hidden-set (`Full_Test_Set`) scoring — the project's only genuinely out-of-sample result. ExtraTrees MAE 4,555s vs. naive 5,204s (naive's earlier "9,459s" framing was itself a bug, corrected per D20), PHM2012 score 0.068 vs. 0.029. `docs/decisions.md` D16/D17/D20.
+- **M4b** (2026-08-30): FEMTO hidden-set (`Full_Test_Set`) scoring — an independent post-freeze FEMTO evaluation. ExtraTrees MAE 4,555s vs. naive 5,204s (naive's earlier "9,459s" framing was itself a bug, corrected per D20), PHM2012 score 0.068 vs. 0.029. `docs/decisions.md` D16/D17/D20.
 - **M5** (2026-08-30): degradation-stage classification (HEALTHY/DEGRADING/CRITICAL), gated behind fixing a health-indicator defect that pinned 47.5% of learning acquisitions at HI=1.0. `docs/decisions.md` D18/D19.
 - Windows -> Linux migration issues (persisted-path separators, ruff version drift): fixed. `docs/decisions.md` D13/D14.
 
 ## CURRENT (known, real limitations — not silently missing)
 
-- College feature extraction still uses a 1-in-5 file sample (26/129 files), not the full run.
+- Legacy review college feature extraction uses a sampled run; the separate canonical cross-dataset experiment covers the full run (D26).
 - College naive RUL baseline is a mathematical identity (MAE=0.0 on the review-scope evaluation) — never quote it as a real result (D10).
-- FEMTO-fit HI/RUL models are never applied to college data — the dashboard gates on `dataset_id` and shows a mismatch message instead of a wrong number (D11).
+- The API and legacy dashboard gate FEMTO-fit HI/RUL models by dataset (D11). Offline cross-dataset experiments explicitly measure transfer failures; they do not enable college HTTP prediction.
 - No physical fault-type diagnosis anywhere; stage labels are a severity band, not a fault type.
 - DuckDB schema is ~50% materialized (`schema_version`, `datasets`, `bearing_runs`, `acquisitions`, `feature_batches` exist; `model_runs`, `evaluation_metrics`, `predictions`, `knowledge_documents`, `retrieval_events`, `generated_reports` are designed in `docs/database-schema.md` but not created — metrics live as JSON instead).
 - `context/` (local-only, gitignored reference material) previously duplicated ~19GB of raw data already published in `datasets/` — cleared during the 2026-09-01 repo cleanup pass; `datasets/` remains the sole canonical raw-data location.
 
 ## NEXT (deliberately deferred, in the order that unblocks the most)
 
-1. Full 129-file college run (currently 1-in-5 sampled) — re-run `build_features.py --dataset college` without `--sample-stride` if pursued.
+1. Full legacy college feature run (review features remain sampled; canonical full-run experiments are separate) — re-run `build_features.py --dataset college` without `--sample-stride` if pursued.
 2. **M6** — optional 1D-CNN-over-HI comparison against the classical baseline, one controlled config + ablation, only if M4/M4b evidence justifies it. Not a replacement for ExtraTrees.
 3. **M7** — RAG/local-LLM report generation (Ollama + FAISS or NumPy fallback). Not installed on this machine.
 4. **M9** — final reproducibility/scientific audit, clean-environment run-through, final simplicity pass.

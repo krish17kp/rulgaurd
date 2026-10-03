@@ -33,9 +33,7 @@ Evidence: `artifacts/evidence/REVIEW-M4/`.
 
 ## M4b - FEMTO hidden-set (Full_Test_Set) scoring (DONE 2026-08-30)
 The step M4 deliberately deferred: score the frozen pipeline on the 11 censored
-test bearings, whose RUL it has never seen. This is the project's only genuinely
-out-of-sample evaluation - everything before it was leave-one-bearing-out over
-the same 6 learning bearings.
+test bearings, whose RUL it has never seen. This is an independent post-freeze evaluation. Earlier leave-one-bearing-out results hold out bearings from fitting, but reuse the learning set for methodology development (D20).
 Deliverables: `scripts/score_hidden_set.py`, `evaluation.score_hidden_set` /
 `summarize_hidden_set` / `phm2012_score`, `femto.derive_hidden_rul_seconds`,
 `reports/metrics/hidden_set_evaluation.json`.
@@ -54,7 +52,7 @@ term to 0 and understating naive's accuracy at MAE 9,459 s / a false 2.08x margi
 corrected here).
 
 ## M5 - degradation-stage classification (DONE 2026-08-30)
-Purpose: turn the health indicator into an actionable severity band.
+Purpose: turn the health indicator into an experimental severity band for offline evaluation.
 Blocked until 2026-08-30 by the HI defect in `docs/decisions.md` D18 - a severity band on an
 indicator that was pinned at 1.0 for 88% of two bearings' lives would have been meaningless.
 
@@ -93,7 +91,7 @@ Clean-environment run-through, final Ponytail-style simplicity pass, final scien
 Adapters (FEMTO, college, IMS, XJTU-SY) onto one canonical recording; dataset profiler and
 full data-quality audit; fixed-duration-window common features with real sampling rates;
 self-normalised cross-domain features; model applicability (HIGH/MEDIUM/LOW + reasons);
-tree-spread diagnostic and weighted split-conformal intervals; deterministic, causal
+tree-spread diagnostic and weighted residual-calibrated intervals with empirical coverage (D28); deterministic, causal
 per-recording routing that suppresses RUL; zero-shot / calibrated / within-domain /
 multi-dataset experiments; two new dashboard pages. Acceptance: legacy features reproduced
 bit-identically through the adapter path; bearing-level leakage guards tested; every metric
@@ -116,15 +114,19 @@ cycles - see the branch's commit history for the specific defects found and fixe
   `/predict/hi` (FEMTO-gated, D11; rejects non-finite values and degenerate/constant
   reference windows relative to the model's own fitted scale), `/dataset/inspect` (upload -
   inspect - classify into FULLY_SUPPORTED/ADAPTER_REQUIRED/UNSUPPORTED/INVALID_INPUT,
-  fail-closed), `/predictions/history` (in-memory only, explicitly not durable). Request
-  logging middleware, Content-Length-based upload size rejection.
+  fail-closed), `/predictions/history` (memory by default; optional local SQLite persistence,
+  see [prediction history](prediction-history.md)). Request
+  logging middleware, request-size rejection (413 above 66MB: from a declared Content-Length
+  before reading, or, for chunked requests with no Content-Length, by counting bytes as they
+  arrive and aborting once the limit is passed; `/dataset/inspect` additionally caps the file
+  itself at 64MB).
 - `frontend/`: Next.js 16 app (`/`, `/upload`, `/degradation`, `/predict`, `/evaluation`),
   calls the backend only through a typed client, no client-side prediction math, honest
   loading/error states, explicit scope/limitations panel.
 - `vercel.json`, `api/index.py`: Vercel build wiring, including the `/api`-prefix mount
   Vercel's Python runtime actually requires (found and fixed during review).
 - `tests/test_api.py`, `tests/test_api_e2e.py`: unit tests plus one true end-to-end test
-  (real FEMTO fixture CSV -> `features.py`'s real extraction functions -> live
+  (real FEMTO fixture CSV -> `features.py`'s real extraction functions -> local HTTP
   `/predict/rul`), independently sanity-checked against FEMTO Bearing1_1's known life.
 - `POST /predict/rul/femto-acquisition`: closes the "features.py only reachable by
   pre-extracting client-side" gap - accepts a raw FEMTO `acc_*.csv` upload directly, extracts
@@ -143,7 +145,8 @@ cycles - see the branch's commit history for the specific defects found and fixe
 - `/dataset/inspect` deepened: added `RETRAIN_REQUIRED` as a distinct state from
   `ADAPTER_REQUIRED` (structurally clean + known sampling rate/units, but the rate doesn't
   match any trained model's domain), sampling-rate derivation from a real timestamp column
-  (`_derive_sampling_rate_hz`, same rule as `profiler._sampling_rate`), and optional
+  (`_derive_sampling_rate_hz`; since replaced by `profiler.sampling_info`, see the
+  reconciliation entry below), and optional
   `declared_sampling_rate_hz`/`declared_units` form fields used only when no timestamp column
   exists. Units have no verified project-wide contract to check a declaration against - that
   limitation is stated in the API's own `reasons` text, not hidden. See
@@ -174,6 +177,24 @@ cycles - see the branch's commit history for the specific defects found and fixe
   arrived as a dict or a one-element list; both now degrade/route consistently, and dropped
   trailing rows (a file not an exact multiple of the window size) are disclosed in the response
   rather than silently unscored.
+- Reconciled with the previously accepted `overnight/capstone/integration` work, which had
+  branched from the same base (074bd54) and was missing here: the machine-readable error
+  contract (`docs/api-errors.md`, NaN/Infinity-safe validation errors), body-size limit for
+  chunked requests, JSON error boundary, structured access logging (`docs/observability.md`),
+  durable prediction history recorded on success and failure (`docs/prediction-history.md`),
+  reliability information (`docs/prediction-reliability.md`), `POST /models/compatibility`,
+  `POST /analyze/features` and `POST /analyze/rul` with their compute bound
+  (`COMPUTE_LIMIT_EXCEEDED`) and incomplete-acquisition gate (`INCOMPLETE_ACQUISITION`), and
+  upload hardening (binary/non-UTF-8 rejection, request-owned temp files). Integrated by hand,
+  keeping this line's newer contracts where they differ: `/dataset/inspect` keeps
+  `declared_*` form fields and its applicability-based `RETRAIN_REQUIRED`, and LOW applicability
+  still suppresses RUL everywhere, including `/analyze/rul`. Fixes made while reconciling:
+  `/predict/rul/femto-acquisition` now requires exactly one complete 2560-row acquisition with
+  no missing samples (it accepted any file of 256+ rows); `/dataset/inspect` derives a rate only
+  from timestamps explicitly in seconds and fails closed on irregular timestamps; blob downloads
+  get the same text checks as direct uploads; history never records filenames; reliability's
+  applicability uses the same single-recording semantics as the gate, and the conformal
+  interval is reported only at HIGH applicability.
 
 Explicitly NOT done, stated here rather than implied by silence:
 - **No live Vercel deployment.** No Vercel account/API token exists in this environment.
@@ -181,7 +202,7 @@ Explicitly NOT done, stated here rather than implied by silence:
   security policy, so a real Vercel deploy currently has no model to load - needs external
   storage (Vercel Blob/S3/a GitHub Release asset), not implemented. See
   `docs/vercel-deployment.md`.
-- No database-backed prediction history, no auth, no chunked large-file upload beyond the
+- No external/serverless-durable prediction history, no auth, no resumable/large-file upload beyond the
   64MB `/dataset/inspect` cap, no Codex/watchdog failover system - all need real
   infrastructure or tooling not present in this environment.
 

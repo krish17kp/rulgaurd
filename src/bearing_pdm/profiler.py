@@ -3,6 +3,7 @@
 Works on ANY folder, including one no adapter knows. Reads are bounded: at most
 `sample_files` files and `sample_rows` rows each; exact row counts only for
 files under `exact_count_mb` (larger ones are estimated from size and flagged).
+Timestamp regularity checks read the complete timestamp column of sampled files.
 
 Column mapping is conservative:
     high     the (normalised) header equals a known alias exactly
@@ -163,17 +164,65 @@ def profile_file(path: str | Path, sample_rows: int = 5000, exact_count_mb: floa
                   "columns": columns}
 
 
+SAMPLING_RTOL = 0.01
+MAX_SAMPLING_RATE_HZ = 1_000_000.0
+
+
+def sampling_info(profile: dict, path: str | Path) -> dict:
+    """Require explicit seconds and three samples; check every interval within 1%."""
+    result = {"rate_hz": None, "source": "unknown", "regular": None,
+              "required": True,
+              "message": "Provide sampling_rate_hz metadata for frequency analysis; "
+                         "no justified sampling rate is available."}
+    columns = [c for c in profile.get("columns", []) if c["canonical"] == "timestamp"]
+    if len(columns) != 1 or not profile.get("readable"):
+        return result
+    col = columns[0]
+    sep = r"\s+" if profile["delimiter"] == "whitespace" else profile["delimiter"]
+    try:
+        values = pd.read_csv(path, sep=sep, usecols=[col["name"]])[col["name"]]
+        if normalise_name(col["name"]) in {"time_s", "seconds"}:
+            times = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+        elif not col["numeric"]:
+            if not values.astype(str).str.match(r"^\d{4}-\d{2}-\d{2}[T ]").all():
+                return result
+            dates = pd.to_datetime(values, errors="coerce", utc=True)
+            if dates.isna().any():
+                return result
+            times = (dates - dates.iloc[0]).dt.total_seconds().to_numpy()
+        else:
+            return result
+    except (ValueError, OSError, pd.errors.ParserError):
+        return result
+    if len(times) < 3:
+        return result
+    steps = np.diff(times)
+    median = float(np.median(steps))
+    regular = bool(np.isfinite(times).all() and np.isfinite(steps).all()
+                   and (steps > 0).all() and median > 0
+                   and np.allclose(steps, median, rtol=SAMPLING_RTOL, atol=0))
+    result["regular"] = regular
+    if not regular:
+        result["message"] = ("Timestamps are invalid or irregular (1% relative interval "
+                             "tolerance); provide sampling metadata and resolve timing "
+                             "before frequency analysis.")
+        return result
+    rate = 1.0 / median
+    if not np.isfinite(rate) or rate > MAX_SAMPLING_RATE_HZ:
+        return result
+    return result | {"rate_hz": rate, "source": "timestamps", "required": False,
+                     "message": "Derived from timestamps in seconds; all intervals are "
+                                "within 1% of the median (zero absolute tolerance)."}
+
+
 def _sampling_rate(profile: dict, folder: Path) -> tuple[float | None, str]:
-    """Only from evidence: a time column's median step, else a matching adapter's
-    documented rate. Never assumed."""
+    """Reuse conservative timestamp checks, otherwise documented adapter metadata."""
     for f in profile["files"]:
-        time_cols = [c for c in f.get("columns", []) if c["canonical"] == "timestamp"]
-        if time_cols and f.get("rows", 0) > 1:
-            sep = r"\s+" if f["delimiter"] == "whitespace" else f["delimiter"]
-            df = pd.read_csv(folder / f["relative_path"], nrows=2000, sep=sep)
-            step = np.median(np.diff(pd.to_numeric(df[time_cols[0]["name"]], errors="coerce")))
-            if np.isfinite(step) and step > 0:
-                return float(1.0 / step), f"time column '{time_cols[0]['name']}'"
+        info = sampling_info(f, folder / f["relative_path"])
+        if info["regular"] is False:
+            return None, info["message"]
+        if info["rate_hz"] is not None:
+            return info["rate_hz"], "time column: " + info["message"]
     if profile["known_datasets"]:
         run = profile["known_datasets"][0]
         return run["sampling_rate_hz"], f"documented rate of the {run['dataset_id']} adapter"

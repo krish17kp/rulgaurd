@@ -106,7 +106,7 @@ def _non_constant_femto_csv(amplitude: float) -> bytes:
     reference-window style checks upstream of feature extraction, so an
     overflow regression test needs a signal that actually varies."""
     rng = np.random.default_rng(0)
-    n = api.MIN_FEMTO_ACQUISITION_ROWS
+    n = api.FEMTO_ACQUISITION_SAMPLES
     x = rng.normal(size=n) * amplitude
     y = rng.normal(size=n) * amplitude
     lines = [f"0,0,0,0,{xi},{yi}" for xi, yi in zip(x, y)]
@@ -168,6 +168,70 @@ def test_raw_femto_csv_upload_rejects_too_few_rows():
     )
     assert response.status_code == 422
     assert "rows" in response.json()["detail"]
+
+
+def _real_acquisition_lines() -> list[str]:
+    return (FIXTURES / "femto" / "Bearing1_1" / "acc_00001.csv").read_text().splitlines()
+
+
+@pytest.mark.parametrize("n_rows", [256, 2559, 2561, 5120])
+def test_raw_femto_csv_upload_rejects_an_incomplete_or_concatenated_acquisition(n_rows, monkeypatch):
+    """Regression (femto-acquisition-v1, the contract /analyze/rul enforces):
+    the model's features were computed on complete 2560-sample acquisitions.
+    A truncated file, or two concatenated, previously reached the model
+    (anything >= 256 rows was accepted) with length-dependent features it was
+    never trained on, gated only by whether applicability happened to flag it."""
+    lines = _real_acquisition_lines()
+    rows = (lines * 2)[:n_rows]
+    monkeypatch.setattr(api, "_predict_rul_from_features",
+                        lambda *_: pytest.fail("RUL must not run"))
+    response = client.post(
+        "/predict/rul/femto-acquisition",
+        files={"file": ("acc.csv", ("\n".join(rows) + "\n").encode(), "text/csv")},
+    )
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "INCOMPLETE_ACQUISITION"
+    assert body["compatibility"] == "INVALID_INPUT"
+    assert f"Got {n_rows} rows" in body["detail"]
+
+
+def test_raw_femto_csv_upload_rejects_missing_samples(monkeypatch):
+    lines = _real_acquisition_lines()
+    fields = lines[100].split(",")
+    lines[100] = ",".join(fields[:5] + [""])  # one blank vibration sample
+    monkeypatch.setattr(api, "_predict_rul_from_features",
+                        lambda *_: pytest.fail("RUL must not run"))
+    response = client.post(
+        "/predict/rul/femto-acquisition",
+        files={"file": ("acc.csv", ("\n".join(lines) + "\n").encode(), "text/csv")},
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "INCOMPLETE_ACQUISITION"
+    assert "1 vibration sample(s) are missing" in response.json()["detail"]
+
+
+def test_raw_femto_csv_upload_rejects_binary_and_records_no_filename(monkeypatch):
+    from bearing_pdm.history import InMemoryHistoryStore
+
+    store = InMemoryHistoryStore()
+    monkeypatch.setattr(api, "_history_store", store)
+    response = client.post(
+        "/predict/rul/femto-acquisition",
+        files={"file": ("acc.csv", b"PK\x03\x04binary", "text/csv")},
+    )
+    assert response.status_code == 415
+    assert response.json()["code"] == "UNSUPPORTED_FILE_TYPE"
+
+    secret = "patient-7-SECRETNAME.csv"
+    lines = _real_acquisition_lines()[:10]
+    client.post("/predict/rul/femto-acquisition",
+                files={"file": (secret, ("\n".join(lines) + "\n").encode(), "text/csv")})
+    record = store.recent()[0]
+    assert record["kind"] == "predict_rul_femto_acquisition"
+    assert record["status"] == "failed" and record["error_code"] == "INCOMPLETE_ACQUISITION"
+    assert record["request"] == {"dataset_id": "femto", "source": "upload", "n_rows": 10}
+    assert "SECRETNAME" not in str(store.recent())
 
 
 def test_two_real_acquisitions_from_the_same_bearing_give_different_features():

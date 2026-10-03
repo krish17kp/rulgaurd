@@ -25,18 +25,52 @@ declaration, into one of:
 
 Per `ml-data.md`, neither is ever guessed. The sampling rate comes from one of
 two sources, both evidence, never the file's shape or row count:
-1. A real `timestamp`-mapped column already in the file — `_derive_sampling_rate_hz`
-   takes the median step between samples, the same rule `profiler._sampling_rate`
-   uses for a multi-file folder profile. **This always wins when present** —
-   a declaration cannot override it. If a `declared_sampling_rate_hz` is also
-   given and disagrees with the derived rate by more than 1%, the request is
-   rejected as `ADAPTER_REQUIRED` with a conflict reason, not silently
-   resolved in the declaration's favour.
+1. Regular timestamps **in seconds** already in the file — `profiler.sampling_info`,
+   the same rule `/analyze/features` and folder profiling use. Only a single
+   timestamp column named `time_s` or `seconds`, or ISO date-times, count:
+   numeric `time`, `t` or `timestamp` columns have ambiguous units (seconds?
+   milliseconds? sample indices?), so their step is never read as seconds — the
+   response says the column was not used. At least three timestamps; every
+   interval finite, positive and within 1% of the median (absolute tolerance
+   zero), checked over every row of the upload. **This always wins when
+   present** — a declaration cannot override it. If a `declared_sampling_rate_hz`
+   is also given and disagrees by more than 1%, the result is `ADAPTER_REQUIRED`
+   (`required_action.kind: SAMPLING_RATE_CONFLICT`), not silently resolved in
+   the declaration's favour. Irregular or invalid timestamps are
+   `ADAPTER_REQUIRED` (`TIMESTAMPS_IRREGULAR`) even with a declaration: the
+   file's own timing evidence contradicts regular sampling.
 2. The caller's own `declared_sampling_rate_hz` form field, used only when (1)
-   doesn't apply (no timestamp column, or its values aren't numeric/varying).
-   Validated to be a finite positive number (422 otherwise) — never validated
-   for *correctness* beyond that, since there is no way to check a
-   declaration against the file's own bytes when no timestamp exists.
+   doesn't apply. Validated to be finite, `> 0` and `<= 1,000,000` Hz (an input
+   ceiling, not a hardware claim; 422 `VALIDATION_ERROR` otherwise) — never
+   validated for *correctness* beyond that, since there is no way to check a
+   declaration against the file's own bytes when no usable timestamp exists.
+
+Every response carries `sampling: {rate_hz, source, regular, required, message}`
+(`source` is `timestamps`, `user` or `unknown`) for every readable file, whatever
+the compatibility verdict, plus `required_action: {kind, message, missing}`
+naming exactly what is missing:
+
+| State | `required_action.kind` |
+|---|---|
+| `INVALID_INPUT` | `FIX_INPUT_FILE` |
+| `UNSUPPORTED` | `NO_VIBRATION_CHANNEL` |
+| `ADAPTER_REQUIRED` (no header / low-confidence names) | `ADAPTER_REQUIRED` |
+| `ADAPTER_REQUIRED` (rate and/or units unknown) | `METADATA_REQUIRED` |
+| `ADAPTER_REQUIRED` (declared rate contradicts timestamps) | `SAMPLING_RATE_CONFLICT` |
+| `ADAPTER_REQUIRED` (irregular timestamps) | `TIMESTAMPS_IRREGULAR` |
+| `RETRAIN_REQUIRED` (rate or applicability) | `RETRAIN_REQUIRED` |
+| `FULLY_SUPPORTED` | `NONE` (its message says whether applicability was actually assessed) |
+
+The structural part of this classifier (`_classify_detailed`) is shared with
+`POST /analyze/features`, where it is reported as structural only
+(`STRUCTURAL_CHECK_ONLY`); the metadata and applicability steps above are
+`/dataset/inspect`'s.
+
+Files that are not delimited text are refused before profiling with a coded
+error instead of a classification — binary content is 415 `UNSUPPORTED_FILE_TYPE`,
+empty is 422 `EMPTY_UPLOAD`, non-UTF-8 is 422 `UNDECODABLE_FILE`, a giant first
+line or parser crash is 422 `MALFORMED_FILE`, and size limits are 413 — on the
+direct upload and the `/blob` download alike. See `docs/api-errors.md`.
 
 Units have no equivalent derivation path (no column carries a reliably
 parseable physical unit), so `declared_units` is a pure declaration: required
@@ -129,7 +163,10 @@ because column meaning can't be read from names that don't exist — that is cor
 behaviour for the generic inspector, not a gap. This route instead takes the caller's explicit
 assertion "this is a FEMTO acquisition" (the route itself, not a `dataset_id` field, carries
 that contract) and validates the *structural* claim before extracting features: exact column
-count, a row-count floor, and finite raw vibration samples. It then runs `features.py`'s real
+count, exactly one complete acquisition (2560 rows — the window the model's features were
+computed on; a truncated or concatenated file is 422 `INCOMPLETE_ACQUISITION`, never trimmed
+or padded, the same `femto-acquisition-v1` contract `POST /analyze/rul` enforces), no missing
+vibration samples (`INCOMPLETE_ACQUISITION`), and finite raw vibration samples. It then runs `features.py`'s real
 extraction functions and the same `/predict/rul` inference path, which treats any resulting
 non-finite *derived* feature (e.g. a degenerate/zero-variance window makes
 `frequency_domain_features` return NaN by design) as missing rather than feeding it to the
@@ -171,3 +208,74 @@ endpoint) or "Unknown / other dataset" (routes to `inspectDataset`, with optiona
 sampling-rate/units fields shown only for this path). This mirrors the backend split exactly:
 the frontend never infers which route to use from the file's own bytes, because the backend
 itself refuses to.
+
+# Model compatibility gate (`POST /models/compatibility`)
+
+Answers a different question from `/dataset/inspect`: not "is this file
+parseable" but "may the selected cached RUL model be used for this dataset".
+It takes metadata only and never produces a prediction
+(`prediction_produced` is always `false`).
+
+Request (JSON; no raw data, no feature values):
+
+```json
+{"dataset_id": "femto", "feature_names": ["vibration_x_rms", "..."], "sampling_rate_hz": 25600}
+```
+
+`sampling_rate_hz` is optional, must be finite, `> 0` and `<= 1,000,000`
+(same bounds as `/dataset/inspect`). A body that fails schema validation is
+422 `VALIDATION_ERROR`.
+
+## What it compares against
+
+| Check | Source (reused, not duplicated) |
+|---|---|
+| Selected model | `artifacts/models/rul_selected_model.json` (`selected`), loaded with `_load_joblib`. Only `extra_trees` has a feature schema; any other selection fails closed. |
+| Feature schema | The selected model's `feature_columns`, reported with the same `feature_schema_version` fingerprint as `/health` and prediction history. |
+| Trained domain | `femto` (`TRAINED_DATASET_ID` in `api.py`). The model artifact carries no domain field; every cached model is fit on FEMTO learning bearings only (`docs/decisions.md` D11). |
+| Registered adapters, sampling | `adapters.ADAPTERS` and each adapter's documented `sampling_rate_hz` (published dataset metadata, never inferred). |
+| Required signals | Canonical channels (`adapters.VIBRATION_CHANNELS`) that the model's feature names are computed from: `vibration_x`, `vibration_y`. |
+
+## Decision order and justification (model.md section 8)
+
+Rules are applied in this order; the first match wins.
+
+| # | Condition | State | `required_action.kind` | Why this state |
+|---|---|---|---|---|
+| 1 | Empty `dataset_id`, empty `feature_names`, an empty name, or duplicate names | `INVALID_INPUT` | `FIX_REQUEST` | The request does not describe a dataset; nothing can be compared. |
+| 2 | Selected-model metadata missing or unusable | 503 `MODEL_UNAVAILABLE` (retryable) | - | Fail closed: without the trained schema no state can be justified, so none is returned. |
+| 3 | `dataset_id` has no registered adapter | `UNSUPPORTED` | `UNSUPPORTED_DATASET` | Section 8 UNSUPPORTED: without an adapter the signals, units and sampling cannot be determined. Matching feature *names* do not change this: names say nothing about the machine, units or rate. |
+| 4 | Registered adapter, but not `femto` (`college`, `ims`, `xjtu`) | `RETRAIN_REQUIRED` | `RETRAIN_REQUIRED` | Section 8 RETRAIN_REQUIRED: a materially different machine/operating domain, and D11 forbids applying FEMTO-fit models elsewhere. Returned even when the feature schema matches exactly, so it is never `FULLY_SUPPORTED`. |
+| 5 | `femto`, `sampling_rate_hz` supplied and not equal (relative tolerance 1e-6) to the adapter's documented 25,600 Hz | `RETRAIN_REQUIRED` | `RETRAIN_REQUIRED` | 16 of the current model's 44 features are frequency-domain (spectral frequencies in Hz, band-energy fractions, spectral entropy/energy), computed from a spectrum whose axis depends on the rate; a different rate is a different signal regime the model has no validation for. |
+| 6 | `femto`, one or more model features not provided | `ADAPTER_REQUIRED` | `ADAPTER_REQUIRED` | Section 8 ADAPTER_REQUIRED: same physical problem and trained domain, but the schema/layout differs. The registered FEMTO adapter plus the project feature pipeline (`pipeline.canonical_feature_row`) deterministically produce exactly the trained schema from the raw recordings without changing model semantics. `missing` lists every absent feature and the required signals. The gate never median-fills; that `/predict/rul` tolerates up to 50% median-filled features is a separate, weaker prediction-time rule this gate does not endorse. |
+| 7 | `femto`, every model feature provided | `FULLY_SUPPORTED` | `NONE` | Section 8 FULLY_SUPPORTED: required channels present, units known for the FEMTO adapter (g), sampling compatible (supplied and equal, or the adapter's documented rate with `sampling.source: "adapter_metadata"`), trained schema reproduced, trained domain. Extra features are listed in `feature_schema.extra` and ignored: the model selects its columns by name, so they change nothing. |
+
+`RETRAIN_REQUIRED` is never softened to `ADAPTER_REQUIRED` for another dataset:
+an adapter already exists for college, IMS and XJTU-SY; what is missing is a
+model validated on their domain.
+
+## Response
+
+`compatibility`, `dataset_id` (trimmed, lower-cased), `reasons`,
+`required_action {kind, message, missing}`, `model {name, version,
+feature_schema_version, trained_dataset_id}`, `adapter {dataset_id,
+display_name, sampling_rate_hz}` (null if unregistered), `feature_schema
+{expected_count, provided_count, missing, extra}`, `required_signals`,
+`sampling {rate_hz, source, compatible}` and `prediction_produced: false`.
+The access log records the state as `compatibility` (stage
+`model_compatibility`); feature names are never logged.
+
+## Limitations
+
+- It trusts the caller's `dataset_id`; it does not verify that the data really
+  comes from that dataset. `/dataset/inspect` and the batch pipeline's quality
+  gate and applicability model (`routing.py`, `applicability.py`) check actual
+  data; this gate only checks metadata.
+- `FULLY_SUPPORTED` does not mean a given bearing is in-distribution; that
+  needs feature values and `applicability.assess`. `POST /analyze/rul` runs this
+  gate first and then the same applicability check `/predict/rul` runs on the
+  latest acquisition's feature values: LOW suppresses the RUL (422
+  `APPLICABILITY_LOW`, `failed_stage: prediction`) and MEDIUM returns it with
+  `compatibility: RETRAIN_REQUIRED` and the experimental caveat in `warnings`.
+- Units are not a request field: they are known only through a registered
+  adapter, which is why an unregistered dataset is `UNSUPPORTED`.
