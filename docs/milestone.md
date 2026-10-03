@@ -181,9 +181,50 @@ Explicitly NOT done, stated here rather than implied by silence:
   security policy, so a real Vercel deploy currently has no model to load - needs external
   storage (Vercel Blob/S3/a GitHub Release asset), not implemented. See
   `docs/vercel-deployment.md`.
-- No database-backed prediction history, no auth, no chunked large-file upload beyond the
-  64MB `/dataset/inspect` cap, no Codex/watchdog failover system - all need real
-  infrastructure or tooling not present in this environment.
+- No database-backed prediction history, no auth, no Codex/watchdog failover system - all
+  need real infrastructure or tooling not present in this environment.
+
+## M12 - Production-readiness closeout (DONE in this environment; remainder BLOCKED_EXTERNAL)
+
+Final pass over the M11 branch: nothing left to implement without credentials this
+environment doesn't have.
+
+- `>=4MB` uploads now go direct-to-Vercel-Blob (`a5b0391`: `/blob-upload` token route,
+  `frontend/src/lib/blobUpload.ts`, `/predict/rul/femto-acquisition/blob`,
+  `/dataset/inspect/blob`) - the earlier 64MB in-request cap is no longer the ceiling for a
+  real deployment; the direct-multipart endpoints keep that cap for small files. The two
+  upload paths share extraction/validation helpers so they can't drift, and a chunk-parity
+  test proves it on real fixture bytes (`tests/test_api_blob.py`).
+- Frontend automated test harness added (Vitest + React Testing Library, not present at the
+  M11 handoff): `ApplicabilityNote.test.tsx`, `predict/page.test.tsx`, `upload/page.test.tsx`
+  - 16 tests covering FEMTO/generic upload, HIGH/MEDIUM/LOW applicability states, RUL
+    rendering, and loading/error/retry states. No `frontend/src/lib/api.test.ts` exists in
+    this tree; nothing to preserve there.
+- Model-artifact delivery for a real deploy (`3613469`): `src/bearing_pdm/artifacts.py` +
+  committed `artifacts/models/manifest.json` (checksums only, never binaries) so
+  `_load_joblib` can fetch-and-verify from `source_url` at cold start instead of requiring
+  the gitignored `.joblib` files to be in the Git checkout. Still fails closed (`None` / 503)
+  with no `source_url`, exactly like before - this closes the structural gap, it does not
+  fabricate a model.
+- Final whole-project regression, run in this session: `pytest -q` **284 passed**,
+  `ruff check .` clean; frontend `npm run lint` clean, `npm test -- --run` **16 passed**,
+  `npm run build` clean (Next.js 16, Turbopack, 7 routes).
+
+Remaining items are genuine `BLOCKED_EXTERNAL`, not deferred work:
+1. An actual `vercel deploy`/`vercel dev` run against a live URL - needs Vercel
+   credentials (none in this environment).
+2. Filling in `source_url` for each entry in `artifacts/models/manifest.json` - needs the
+   ~330MB of `.joblib` binaries uploaded somewhere real (Vercel Blob/S3/GitHub Release
+   asset) with credentials this environment doesn't have.
+3. Connecting a real Vercel Blob store (`BLOB_READ_WRITE_TOKEN`, `BLOB_STORE_HOSTNAME`) -
+   the blob-upload code path is implemented and tested against a mocked response
+   (`tests/test_api_blob.py`) but never exercised against a real store.
+4. Setting `ALLOWED_ORIGINS`/CORS to the real deployed frontend origin once one exists.
+5. Codex/watchdog overnight-orchestration tooling from `goals.md` - no such CLI/tooling
+   present in this environment.
+6. Merging this branch to `main`, and reconciling with the pre-existing
+   `data/rlguard`/`cross-dataset` lineage - a decision for the repository owner, not taken
+   here (never merge/push without explicit approval).
 
 ## Stop conditions (any milestone)
 Archive corruption, schema materially differs from `Description.txt`, units unknown affecting targets, Full_Test_Set RUL derivation mismatch, leakage detected, unsupported fault claim required, third failed implementation attempt, unsafe disk/memory.
