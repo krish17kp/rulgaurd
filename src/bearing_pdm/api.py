@@ -15,6 +15,7 @@ with 422 rather than silently returning a wrong number.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import tempfile
@@ -35,6 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from bearing_pdm import artifacts
 from bearing_pdm.applicability import MEDIUM_SHIFT_RATIO
 from bearing_pdm.applicability import assess as applicability_assess
 from bearing_pdm.features import frequency_domain_features, time_domain_features
@@ -507,11 +509,30 @@ def _record_history(kind: str, request_summary: dict[str, Any], result_summary: 
 
 def _load_joblib(name: str) -> Any | None:
     """Same missing-artifact contract as dashboard._load_joblib: None, never
-    a traceback, cached in-process rather than per-request."""
+    a traceback, cached in-process rather than per-request.
+
+    artifacts.ensure_artifact resolves `name` to a local path - either
+    already present in the repo (local dev), or fetched and checksum-
+    verified against artifacts/models/manifest.json (a real Vercel
+    deployment, where these gitignored binaries are never in the Git
+    checkout - see docs/vercel-deployment.md). A manifest entry without a
+    usable source_url, or a checksum mismatch, resolves to None here same
+    as a file that was simply never present - never a guess, never a
+    silently-wrong model."""
     if name in _MODEL_CACHE:
         return _MODEL_CACHE[name]
-    path = MODELS_DIR / name
-    if not path.exists():
+    try:
+        path = artifacts.ensure_artifact(name)
+    except OSError:
+        # Defense in depth: ensure_artifact already fails closed internally
+        # (e.g. a download-time OSError), but a filesystem failure in
+        # _cache_dir()'s own mkdir (a read-only /tmp, disk full before any
+        # download starts) happens before that try block and would
+        # otherwise surface as an unhandled 500 instead of the same 503
+        # every other missing-artifact case produces.
+        logger.warning("Artifact lookup for %s failed with a filesystem error", name)
+        return None
+    if path is None:
         return None
     model = joblib.load(path)
     _MODEL_CACHE[name] = model
@@ -704,19 +725,17 @@ def models_evaluation() -> dict[str, Any]:
             status_code=503,
             detail="reports/metrics/rul_evaluation.json missing. Run scripts/evaluate_models.py first.",
         )
-    import json
-
     return json.loads(path.read_text())
 
 
 @app.get("/models/info")
 def models_info() -> dict[str, Any]:
-    selected_path = MODELS_DIR / "rul_selected_model.json"
-    selected = None
-    if selected_path.exists():
-        import json
-
-        selected = json.loads(selected_path.read_text())
+    # Routed through artifacts.ensure_artifact, not a direct MODELS_DIR
+    # read - review found this was the one place still bypassing it, which
+    # would have left selected_model permanently null on a deployment that
+    # only has the manifest's fetch path (no local checkout of the file).
+    selected_path = artifacts.ensure_artifact("rul_selected_model.json")
+    selected = json.loads(selected_path.read_text()) if selected_path is not None else None
     tree_model = _load_joblib("rul_extra_trees.joblib")
     hi_model = _load_joblib("reference_hi_model.joblib")
     return {

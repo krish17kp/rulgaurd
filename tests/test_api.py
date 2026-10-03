@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from bearing_pdm import api
+from bearing_pdm import api, artifacts
 
 MODEL_PRESENT = (api.MODELS_DIR / "rul_extra_trees.joblib").exists()
 BUNDLE_PRESENT = (api.MODELS_DIR / api.CROSS_DOMAIN_BUNDLE_NAME).exists()
@@ -571,7 +571,10 @@ def test_predict_hi_returns_declining_health_indicator():
 
 
 def test_predict_rul_returns_503_when_model_artifact_missing(monkeypatch):
-    monkeypatch.setattr(api, "MODELS_DIR", api.MODELS_DIR.parent / "does-not-exist")
+    # _load_joblib resolves artifacts via artifacts.ensure_artifact, which
+    # reads artifacts.MODELS_DIR (and api.MODELS_DIR itself is otherwise
+    # unused by the loading path now) - see src/bearing_pdm/artifacts.py.
+    monkeypatch.setattr(artifacts, "MODELS_DIR", api.MODELS_DIR.parent / "does-not-exist")
     api._MODEL_CACHE.clear()
     response = client.post("/predict/rul", json={"dataset_id": "femto", "features": {}})
     assert response.status_code == 503

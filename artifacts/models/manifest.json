@@ -1,0 +1,44 @@
+{
+  "artifacts": {
+    "cross_domain_bundle.joblib": {
+      "sha256": "6729d5d5bdc4e3b1569b7be093f057fe712974a006b601681a34914437e084c9",
+      "size_bytes": 219386562,
+      "source_url": null
+    },
+    "pca_hi_model.joblib": {
+      "sha256": "2b24b6185f003c63330b424db585d6819bde1e7116ec5aa27d264a20627466d5",
+      "size_bytes": 2444,
+      "source_url": null
+    },
+    "reference_hi_model.joblib": {
+      "sha256": "0f49d5a85098a1bde4dfca3b4a5fb060150dd426279ae8c31bf18239c1f0bb8b",
+      "size_bytes": 491,
+      "source_url": null
+    },
+    "rul_extra_trees.joblib": {
+      "sha256": "d62103b5993ff18d7129f792ca9f775cb4e620c659d818573ce5e66e90189623",
+      "size_bytes": 108313909,
+      "source_url": null
+    },
+    "rul_naive.joblib": {
+      "sha256": "ad5b53ea03eefb81c5f4ac86566bfbf4c52e3a732ca63db88c27d5c305166657",
+      "size_bytes": 417,
+      "source_url": null
+    },
+    "rul_selected_model.json": {
+      "sha256": "9fd5c62d7123a6e2e7b7086c40906d6ce656108d39f4c2e442123fbef1a36979",
+      "size_bytes": 121,
+      "source_url": null
+    },
+    "stage_thresholds.joblib": {
+      "sha256": "74e0db265dd11483c694c04abb8b15aec47f44034a529598643b04a4a93b9c14",
+      "size_bytes": 140,
+      "source_url": null
+    },
+    "transparent_hi_baseline.joblib": {
+      "sha256": "05695029031c7ee171791bda707da4d2e6dc0c5c9ae8acb8c22ed6573c0e2ff5",
+      "size_bytes": 290,
+      "source_url": null
+    }
+  }
+}

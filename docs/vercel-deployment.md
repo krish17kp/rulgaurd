@@ -30,28 +30,48 @@
   any `*.blob.vercel-storage.com` object (every Vercel customer's store matches that suffix) —
   set these once a real store/domain exists.
 
-## Known, unresolved blocker before this can actually deploy
+## Artifact delivery (structural gap closed; one manual step remains)
 
 **`artifacts/models/*.joblib` is gitignored** (`security.md`/`git.md`: never commit
-`artifacts/models/*`), and Vercel builds from the Git repository. That means a real
-Vercel deployment today would have no model to load — `/health` would report
-`models_loaded: false` and `/predict/rul` would return 503, honestly, but the service
-would be useless.
+`artifacts/models/*`), and Vercel builds from the Git repository, so a real deployment's
+checkout never contains these binaries on its own.
 
-This needs one of, before Goal 3's Vercel deployment can be verified as actually working:
+`src/bearing_pdm/artifacts.py` is the fix: a committed `artifacts/models/manifest.json`
+(sha256 + size + `source_url` per artifact — metadata only, never the binary; carved out of
+the `artifacts/models/*` gitignore rule) plus `ensure_artifact(name)`, which `_load_joblib`
+now calls instead of reading `MODELS_DIR` directly. At cold start it:
 
-1. Fetch the joblib artifacts from external storage (Vercel Blob, S3, a GitHub Release
-   asset) at build time or cold start, keeping them out of Git — the correct fix, since
-   it doesn't touch the "never commit trained artifacts" rule.
-2. Use Git LFS the same way `datasets/` already does, if the project owner decides a
-   trained artifact is an acceptable LFS object (this would require updating
-   `security.md`/`git.md`, which currently forbid it — not something to change
-   unilaterally).
+1. Uses the local file if present (local dev — unchanged).
+2. Else uses a previously-fetched, still-checksum-matching cached copy.
+3. Else downloads the manifest's `source_url` in bounded 1MB chunks, verifies its sha256,
+   and only then makes it available — a checksum mismatch, a missing `source_url`, a 404, or
+   an interrupted download all resolve to `None`, the same fail-closed contract `_load_joblib`
+   already had for "no local file" (ml-data.md: never load an unverified/wrong artifact).
 
-Neither is implemented here. **I have no Vercel account/API token in this environment**,
-so I cannot run an actual `vercel deploy` to verify any of this end-to-end even once the
-artifact-loading gap is closed — that step needs your credentials and your explicit
-go-ahead, per this project's "never push/deploy without asking" policy.
+Regenerate the manifest after any retraining with `PYTHONPATH=src python
+scripts/build_artifact_manifest.py` (preserves each artifact's existing `source_url`). Tested
+in `tests/test_artifacts.py` (17 tests: checksum match/mismatch, stale-cache refetch,
+oversized/interrupted/404/redirect downloads, concurrent-request de-duplication, path-
+traversal rejection, an unverified-cache-file refusal, local-file short-circuit with no
+network call).
+
+**`source_url` must point directly at the artifact's bytes, not a redirect** — the loader
+does not follow redirects (deliberately, so a redirect can never silently substitute
+different content after the URL was validated). A GitHub Release asset URL normally 302s to
+a signed S3 URL, so it will NOT work as `source_url` directly; use the resolved target URL,
+or a host that serves the bytes with a single 200 (Vercel Blob, S3, a plain static host).
+
+**What's still missing, and genuinely needs your action:** every `source_url` in the
+generated manifest is `null` — this environment has no credentials to actually upload the
+~330MB of `.joblib` binaries anywhere (Vercel Blob, S3, a GitHub Release asset, …). Until you
+pick a host, upload the files, and fill in `source_url` for each entry, a real Vercel
+deployment's `/health` will honestly report `models_loaded: false` and `/predict/rul` will
+return 503 rather than fabricate a prediction — the same honest failure mode as before, just
+now with a real fetch path ready to use once the files have somewhere to be fetched from.
+
+I have no Vercel account/API token in this environment, so I also cannot run an actual
+`vercel deploy` to verify any of this end-to-end — that step needs your credentials and your
+explicit go-ahead, per this project's "never push/deploy without asking" policy.
 
 ## What "done" looks like for this goal
 
@@ -60,7 +80,9 @@ go-ahead, per this project's "never push/deploy without asking" policy.
 - [x] `vercel.json` routing configured (`vercel_app` in `src/bearing_pdm/api.py` mounts the
       real app under `/api`, matching how Vercel's Python runtime forwards the unstripped
       request path - flagged by review as a real bug in the first version of this scaffold).
-- [ ] Model artifacts reachable at runtime without committing them to Git.
+- [x] Model artifacts reachable at runtime without committing them to Git (`artifacts.py`'s
+      fetch-and-verify loader) — [ ] but needs real `source_url`s filled into the manifest
+      and the binaries actually hosted somewhere, which needs your credentials.
 - [ ] An actual `vercel deploy` (or `vercel dev`) run, verified against a live URL.
 - [ ] CORS `ALLOWED_ORIGINS` set to the real deployed frontend origin, not `localhost:3000`.
 - [ ] **Blocked, needs your credentials:** connecting a real Vercel Blob store to the project
