@@ -98,7 +98,7 @@ bit-identically through the adapter path; bearing-level leakage guards tested; e
 generated (`docs/cross-dataset-results.md` from `reports/metrics/cross_dataset.json`); full
 suite green. Design: `docs/cross-dataset.md`; decisions D23-D26.
 
-## M11 - FastAPI/Next.js production web app (IN PROGRESS, branch `overnight/capstone/goal-02-nextjs-frontend`, not merged to main)
+## M11 - FastAPI/Next.js production web app (code-complete, branch `overnight/capstone/m12-final-integration`, not merged to main)
 Not part of the original capstone scope (M0-M10) - added per a later product decision
 (`goals.md`, `prompts.md`, `model.md`, `START_CAPSTONE_OVERNIGHT.md`) to replace the Streamlit
 dashboard with a Next.js frontend and a separate FastAPI inference service, deployed to
