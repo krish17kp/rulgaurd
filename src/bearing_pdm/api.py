@@ -1018,6 +1018,27 @@ def _load_joblib(name: str) -> Any | None:
         _MODEL_VERSIONS[name] = "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest()
     model = joblib.load(path)
     _MODEL_CACHE[name] = model
+    if path.parent != artifacts.MODELS_DIR:
+        # path is a downloaded cache copy (artifacts._cache_dir()), not the
+        # repo-checked-out local dev copy under MODELS_DIR - never delete that
+        # one. Once loaded, the deserialized model lives in _MODEL_CACHE for
+        # this process's whole life (the `if name in _MODEL_CACHE` fast path
+        # above means this function never reads `path` again for this name),
+        # so the on-disk copy is pure dead weight afterward. Freeing it here
+        # is the direct fix for the Hobby-tier /tmp ENOSPC documented in
+        # docs/PRODUCTION_RELEASE.md: rul_extra_trees.joblib (108MB) and
+        # cross_domain_bundle.joblib (219MB) together exceed the tier's /tmp
+        # budget only if BOTH their downloaded copies are kept on disk at
+        # once after both are already safely in memory - deleting each one
+        # right after its own load means at most one artifact's download is
+        # ever resident on disk at a time (plus brief overlap with a
+        # concurrent request's own in-flight download of a different name).
+        # A deletion failure (e.g. already gone) is never fatal - the model
+        # is already safely in memory regardless.
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove the cached download for %s after loading it", name)
     return model
 
 

@@ -790,3 +790,75 @@ def test_load_bundle_drops_the_unused_sn_fraction_multi_entry_to_save_memory():
     # Idempotent on a second call (cache already trimmed).
     assert api._load_bundle() is bundle
     api._MODEL_CACHE.clear()
+
+
+def _sha256_hex(data: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(data).hexdigest()
+
+
+def _mock_client(content: bytes):
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=content)
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_load_joblib_deletes_the_downloaded_cache_copy_after_loading(tmp_path, monkeypatch):
+    """Root-cause fix for the Hobby-tier /tmp ENOSPC (docs/PRODUCTION_RELEASE.md):
+    once a downloaded artifact is safely in _MODEL_CACHE, its on-disk cache
+    copy is dead weight for the rest of this process's life (_load_joblib's
+    own `if name in _MODEL_CACHE` fast path never reads the file again) -
+    it must be removed so a second large artifact's download has room."""
+    import joblib
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(artifacts, "MODELS_DIR", models_dir)
+    monkeypatch.setattr(artifacts, "MANIFEST_PATH", models_dir / "manifest.json")
+    monkeypatch.setenv("ARTIFACT_CACHE_DIR", str(cache_dir))
+
+    content_path = tmp_path / "payload.joblib"
+    joblib.dump({"hello": "world"}, content_path)
+    content = content_path.read_bytes()
+    artifacts.MANIFEST_PATH.write_text(json.dumps({
+        "artifacts": {"fake_model.joblib": {
+            "sha256": _sha256_hex(content), "source_url": "https://example.com/fake_model.joblib",
+        }}
+    }))
+    monkeypatch.setattr(artifacts, "_get_http_client", lambda: _mock_client(content))
+
+    api._MODEL_CACHE.clear()
+    model = api._load_joblib("fake_model.joblib")
+    assert model == {"hello": "world"}
+    assert api._MODEL_CACHE["fake_model.joblib"] == {"hello": "world"}
+    cached_path = cache_dir / "fake_model.joblib"
+    assert not cached_path.exists(), "downloaded cache copy must be removed after loading"
+
+    # Still works from the in-process cache with the file gone.
+    assert api._load_joblib("fake_model.joblib") == {"hello": "world"}
+    api._MODEL_CACHE.clear()
+
+
+def test_load_joblib_never_deletes_a_local_dev_checkout_copy(tmp_path, monkeypatch):
+    """The same deletion must never touch artifacts/models/ itself (local dev,
+    or a deployment that mounted the real files there) - only a downloaded
+    cache copy under ARTIFACT_CACHE_DIR is disposable."""
+    import joblib
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    monkeypatch.setattr(artifacts, "MODELS_DIR", models_dir)
+    monkeypatch.setattr(artifacts, "MANIFEST_PATH", models_dir / "manifest.json")
+
+    local_path = models_dir / "fake_local.joblib"
+    joblib.dump({"local": True}, local_path)
+
+    api._MODEL_CACHE.clear()
+    model = api._load_joblib("fake_local.joblib")
+    assert model == {"local": True}
+    assert local_path.exists(), "a repo-local artifact must never be deleted"
+    api._MODEL_CACHE.clear()
