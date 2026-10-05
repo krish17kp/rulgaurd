@@ -38,6 +38,29 @@ def test_health_reports_model_status():
     assert body["models_loaded"]["rul_extra_trees"] == MODEL_PRESENT
 
 
+def test_metrics_dir_prefers_a_vendored_copy_next_to_the_api_module(tmp_path, monkeypatch):
+    """Packaging regression test: a real Vercel deployment only bundles files
+    physically inside its rootDirectory-scoped tree (frontend/api/**), not a
+    sibling frontend/reports/ copy, even though both resolve fine locally.
+    frontend/package.json's "prebuild" vendors reports/metrics/ to
+    api/reports/metrics/ for exactly this reason - this test locks in that
+    the module picks the vendored-copy candidate first, so the fix cannot
+    silently regress back to depending on RUL_EVALUATION_JSON alone."""
+    vendored = tmp_path / "vendored" / "reports" / "metrics"
+    vendored.mkdir(parents=True)
+    (vendored / "rul_evaluation.json").write_text("{}")
+    fallback = tmp_path / "fallback" / "reports" / "metrics"
+    monkeypatch.setattr(api, "_METRICS_DIR_CANDIDATES", (vendored, fallback))
+    assert api._resolve_metrics_dir() == vendored
+
+
+def test_metrics_dir_falls_back_when_no_candidate_is_vendored(tmp_path, monkeypatch):
+    missing_vendored = tmp_path / "vendored" / "reports" / "metrics"
+    fallback = tmp_path / "fallback" / "reports" / "metrics"
+    monkeypatch.setattr(api, "_METRICS_DIR_CANDIDATES", (missing_vendored, fallback))
+    assert api._resolve_metrics_dir() == fallback
+
+
 EVALUATION_PRESENT = (api.METRICS_DIR / "rul_evaluation.json").exists()
 
 

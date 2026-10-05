@@ -88,7 +88,30 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # artifacts.MODELS_DIR, then the checksum-verified manifest fetch path); this
 # alias only documents the default location for local checks.
 MODELS_DIR = artifacts.MODELS_DIR
-METRICS_DIR = REPO_ROOT / "reports" / "metrics"
+# Vercel's Python function only bundles files physically inside its own
+# rootDirectory-scoped tree (frontend/api/**), not a sibling frontend/reports/
+# copy, even though both build and resolve fine locally (confirmed live: a
+# committed frontend/reports/metrics/rul_evaluation.json 404s at runtime on
+# Vercel). frontend/package.json's "prebuild" vendors a copy to
+# api/reports/metrics/ the same proven way it already vendors api/bearing_pdm/
+# from ../src/bearing_pdm - so the first existing candidate here is that
+# vendored copy in a real deployment, and the plain repo-root path in local
+# dev/tests. RUL_EVALUATION_JSON (models_evaluation(), below) remains an
+# optional override for a deployment that skips the vendoring step entirely,
+# but a clean checkout no longer depends on it being set.
+_METRICS_DIR_CANDIDATES = (
+    Path(__file__).resolve().parents[1] / "reports" / "metrics",
+    REPO_ROOT / "reports" / "metrics",
+)
+
+
+def _resolve_metrics_dir() -> Path:
+    return next(
+        (p for p in _METRICS_DIR_CANDIDATES if p.exists()), _METRICS_DIR_CANDIDATES[-1]
+    )
+
+
+METRICS_DIR = _resolve_metrics_dir()
 
 # Hard cap on an uploaded file this service will read, independent of profile_file's
 # own sample_rows bound - python.md: "all raw reads are chunked", never a whole-file

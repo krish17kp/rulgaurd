@@ -23,6 +23,14 @@
 # or commit this; the canonical source is ../src/bearing_pdm.
 /api/bearing_pdm/
 
+# same reason as /api/bearing_pdm/ above: a fresh copy of
+# reports/metrics/rul_evaluation.json, vendored by "prebuild" so the
+# Reliability endpoint works in a real Vercel deployment (a sibling
+# frontend/reports/ copy is not bundled into the function). Never
+# hand-edit or commit this; the canonical source is reports/metrics/
+# (tracked, committed directly under frontend/).
+/api/reports/
+
 # production
 /build
 
