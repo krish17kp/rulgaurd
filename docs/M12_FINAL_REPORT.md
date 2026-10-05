@@ -1,5 +1,11 @@
 # M12 final integration report — 2026-10-05
 
+**Update (same day, later session):** this integration branch was subsequently deployed to a
+real live Vercel production URL, **https://rulguard.vercel.app**, with real model artifact
+hosting and a real Blob store - see `docs/PRODUCTION_RELEASE.md` for the full record. This
+report's own BLOCKED_HUMAN items 1-4 below were resolved in that later session; items 5-6
+remain BLOCKED (no Codex tooling; merge-to-main is the repository owner's decision).
+
 ## 1. Final local integration branch
 `overnight/capstone/m12-final-integration` (local only, branched from commit `f2cc625`,
 then given two doc commits in this session). **Not merged to `main`. Not pushed.**
