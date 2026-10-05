@@ -59,6 +59,29 @@ def test_models_info_lists_femto_only():
     assert response.json()["supported_datasets"] == ["femto"]
 
 
+def test_models_evaluation_prefers_the_inline_env_var_over_the_file(monkeypatch, tmp_path):
+    """RUL_EVALUATION_JSON (deployment escape hatch for when the file isn't
+    bundled - see models_evaluation's docstring) must win over a stale or
+    absent file, the same precedence as ARTIFACT_MANIFEST_JSON."""
+    monkeypatch.setattr(api, "METRICS_DIR", tmp_path / "does-not-exist")
+    monkeypatch.setenv(
+        "RUL_EVALUATION_JSON",
+        json.dumps({"femto_lobo_mean_mae_by_model": {"extra_trees": 1.0},
+                   "college_naive_caveat": "oracle, not a fair comparison"}),
+    )
+    response = client.get("/models/evaluation")
+    assert response.status_code == 200
+    assert response.json()["femto_lobo_mean_mae_by_model"]["extra_trees"] == 1.0
+
+
+def test_models_evaluation_falls_back_to_the_file_on_malformed_env_var(monkeypatch):
+    monkeypatch.setenv("RUL_EVALUATION_JSON", "{not valid json")
+    response = client.get("/models/evaluation")
+    # Whatever the file-based path would have returned (200 if present locally,
+    # 503 METRICS_UNAVAILABLE otherwise) - never a 500 from the bad env var.
+    assert response.status_code in (200, 503)
+
+
 def test_predict_rul_rejects_non_femto_dataset():
     response = client.post(
         "/predict/rul", json={"dataset_id": "college", "features": {}}

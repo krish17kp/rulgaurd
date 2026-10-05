@@ -1331,7 +1331,21 @@ def models_evaluation() -> dict[str, Any]:
     not because it predicts well. college_naive_caveat is returned alongside
     the college numbers specifically so a client cannot show the college
     naive/extra_trees comparison without also carrying that caveat - it must
-    never be presented as a fair comparison."""
+    never be presented as a fair comparison.
+
+    RUL_EVALUATION_JSON (the file's own JSON text, not a path) is the same
+    deployment escape hatch as artifacts.load_manifest's ARTIFACT_MANIFEST_JSON:
+    Vercel's Python function only bundles files physically inside frontend/api/,
+    not a sibling frontend/reports/ copy (found live: a committed copy there
+    404s at runtime even though it builds fine locally) - this env var, set to
+    the verbatim committed file's contents, sidesteps that packaging gap without
+    touching the generated numbers themselves."""
+    inline = os.environ.get("RUL_EVALUATION_JSON")
+    if inline:
+        try:
+            return json.loads(inline)
+        except json.JSONDecodeError:
+            logger.warning("RUL_EVALUATION_JSON is set but could not be parsed - ignoring it")
     path = METRICS_DIR / "rul_evaluation.json"
     if not path.exists():
         raise ApiError(
