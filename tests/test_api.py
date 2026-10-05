@@ -617,6 +617,36 @@ def test_predict_hi_rejects_non_finite_feature_values():
     assert "non-finite" in response.json()["detail"].lower()
 
 
+def test_predict_hi_rejects_a_row_missing_sequence_index():
+    """Regression for a review finding: the missing-columns check only covered the HI
+    feature columns, so a row missing sequence_index reached df.sort_values("sequence_index")
+    and raised a KeyError that surfaced as an unhelpful 500 instead of a 422."""
+    hi_model = api._load_joblib("reference_hi_model.joblib")
+    min_rows = hi_model.reference_skip + hi_model.reference_n
+    rows = [{"sequence_index": i, **{f: 1.0 for f in hi_model.features}} for i in range(min_rows)]
+    del rows[-1]["sequence_index"]
+    response = client.post("/predict/hi", json={"dataset_id": "femto", "rows": rows})
+    assert response.status_code == 422
+    assert "sequence_index" in response.json()["detail"]
+
+
+def test_predict_hi_rejects_non_finite_sequence_index():
+    """A sequence_index present but NaN would otherwise reach int(seq) deep in the response
+    assembly and raise ValueError instead of failing the request cleanly."""
+    hi_model = api._load_joblib("reference_hi_model.joblib")
+    min_rows = hi_model.reference_skip + hi_model.reference_n
+    rows = [{"sequence_index": i, **{f: 1.0 for f in hi_model.features}} for i in range(min_rows)]
+    rows[-1]["sequence_index"] = float("nan")
+    import json as json_module
+
+    body = json_module.dumps({"dataset_id": "femto", "rows": rows})
+    response = client.post(
+        "/predict/hi", content=body, headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 422
+    assert "non-finite" in response.json()["detail"].lower()
+
+
 @pytest.mark.skipif(not HI_MODEL_PRESENT, reason="artifacts/models/reference_hi_model.joblib not present")
 def test_predict_hi_returns_declining_health_indicator():
     hi_model = api._load_joblib("reference_hi_model.joblib")

@@ -61,6 +61,33 @@ export default function UploadPage() {
       declaredSamplingRateHz: declaredSamplingRateHz ? Number(declaredSamplingRateHz) : undefined,
       declaredUnits: declaredUnits || undefined,
     };
+    // Mirror the backend's declared-field bounds (MAX_SAMPLING_RATE_HZ, 40-char units) here,
+    // before any upload starts - otherwise a >=4MB file reaches Vercel Blob storage and only
+    // then gets rejected by the backend, leaving the blob behind until the finally cleanup
+    // runs (review finding: a value failing *request validation* on /dataset/inspect/blob
+    // used to skip that finally entirely; the backend now validates inside it, but it's still
+    // wasted upload bandwidth to let an obviously-bad value get that far).
+    if (
+      options.declaredSamplingRateHz !== undefined &&
+      (!Number.isFinite(options.declaredSamplingRateHz) ||
+        options.declaredSamplingRateHz <= 0 ||
+        options.declaredSamplingRateHz > 1_000_000)
+    ) {
+      setInspectState({
+        status: "error",
+        error: "Declared sampling rate must be a positive number up to 1,000,000 Hz.",
+        retry,
+      });
+      return;
+    }
+    if (options.declaredUnits !== undefined && options.declaredUnits.length > 40) {
+      setInspectState({
+        status: "error",
+        error: "Declared units must be at most 40 characters.",
+        retry,
+      });
+      return;
+    }
     try {
       let data: DatasetProfileResponse;
       if (file.size >= DIRECT_UPLOAD_THRESHOLD_BYTES) {

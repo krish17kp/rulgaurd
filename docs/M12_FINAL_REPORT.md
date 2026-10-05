@@ -165,6 +165,60 @@ fabrication shortcuts), and the full test suite (740 tests, several written spec
 regression tests for the defects above) passing is itself strong evidence against a silent
 regression from the merge.
 
+## 12b. Independent review pass (2026-10-05, `/nightshift review`)
+A second independent reviewer subagent (`ecc:mle-reviewer`, model `opus`, read-only) was
+dispatched against this exact HEAD with explicit instructions not to trust docs or commit
+messages and to trace every candidate finding through the real code. It traced the full
+`3613469`->`71db395` diff of `api.py` line by line and confirmed the merge itself introduced
+no silent regression (every removed line was replaced by an equal-or-stricter version).
+
+**Verdict: APPROVE WITH WARNINGS - no HIGH defects. Two MEDIUM, six LOW.** Findings and
+disposition:
+
+- **M1 (MEDIUM, fixed):** `declared_sampling_rate_hz`/`declared_units` on
+  `/dataset/inspect/blob` were pydantic `Field`-constrained, so an out-of-bounds value failed
+  FastAPI's request validation *before* the handler's `try/finally` ran, skipping
+  `_delete_blob` and orphaning the already-uploaded Blob object on a >=4MB generic upload.
+  **Fix:** `BlobInspectRequest`'s two fields are now unconstrained at the pydantic level; a
+  new `_validate_declared_dataset_fields()` enforces the same bounds manually, called inside
+  the existing try block so the finally still deletes the blob on a bad value
+  (`src/bearing_pdm/api.py`). Added a frontend pre-flight check in `handleGenericFile`
+  (`frontend/src/app/upload/page.tsx`) so an obviously-bad value never reaches a Blob upload
+  in the first place. Corrected `docs/upload-lifecycle.md`'s "every outcome" overclaim to
+  state the one gap that's structural, not a bug: a client that uploads to Blob and then
+  never calls the backend at all (abandoned mode switch, closed tab, dropped network) leaves
+  an orphaned object this service has no way to learn about. Regression test:
+  `tests/test_api_blob.py::test_blob_inspect_deletes_blob_even_when_declared_fields_fail_validation`.
+  `tests/fixtures/api_openapi.json` regenerated via the documented
+  `--write-snapshot` process (`docs/api-errors.md`); diff reviewed and is exactly the two
+  dropped constraints, nothing else.
+- **M2 (MEDIUM, not fixed - pre-existing, already flagged as an open human decision):** if
+  `cross_domain_bundle.joblib` (the applicability model) is unavailable, `/predict/rul` and
+  related routes return a numeric RUL labelled `FULLY_SUPPORTED` rather than withholding it or
+  downgrading the state - the OOD gate is skipped, not bypassed maliciously, but the response
+  doesn't say so beyond a reason string. `docs/scientific-parity.md` already documents this
+  as a recommendation to withhold/downgrade when the gate can't run; not changed in this pass
+  because it is a scientific-policy decision (what should a request do when a required
+  dependency is simply absent), not an implementation bug, and the reviewer explicitly
+  flagged it as needing a human call, not a silent code change.
+- **L1 (LOW, fixed):** `/predict/hi` 500'd (KeyError) on a row missing `sequence_index`, or
+  raised ValueError on a non-finite one, instead of a clean 422. **Fix:** both are now checked
+  alongside the existing HI-feature-column checks in `src/bearing_pdm/api.py`. Regression
+  tests: `tests/test_api.py::test_predict_hi_rejects_a_row_missing_sequence_index`,
+  `::test_predict_hi_rejects_non_finite_sequence_index`.
+- **L2-L6 (LOW, not fixed - each independently low-impact or environment-specific):** a
+  `/tmp`-cache TOCTOU in the artifact loader that isn't exploitable on Vercel's per-instance
+  filesystem; an mtime/size-based cache-hash shortcut requiring local write access to defeat;
+  an applicability-level boundary artifact at exactly 5120 rows that only changes `reasons`
+  text (no number is produced either way); a pre-existing (not new) whole-file read bound by
+  `MAX_UPLOAD_BYTES`; and two minor 500-instead-of-4xx gaps (`/models/info`'s manifest-read
+  path, `blob-upload/route.ts`'s malformed-body path). None reach a HIGH/MEDIUM bar under this
+  task's own criteria; left for a future pass rather than expanding this review's scope.
+
+Full regression after the M1/L1 fixes: `pytest -q` **743 passed, 0 failed, 0 skipped**
+(740 + 3 new regression tests), `ruff check .` clean, frontend `npm run lint` clean,
+`npm test -- --run` **16 passed**, `npm run build` clean.
+
 ## 13. Known limitations
 Same as stated throughout `docs/milestone.md`'s M11 section: in-memory history is not
 durable across serverless instances unless the optional SQLite persistence is configured; no

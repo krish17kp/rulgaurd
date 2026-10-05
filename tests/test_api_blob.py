@@ -111,6 +111,31 @@ def test_blob_inspect_path_matches_direct_multipart_reference(blob_url, monkeypa
     assert via_blob.json()["reasons"] == reference.json()["reasons"]
 
 
+def test_blob_inspect_deletes_blob_even_when_declared_fields_fail_validation(blob_url, monkeypatch):
+    """Regression for a review finding: declared_sampling_rate_hz/declared_units used to be
+    pydantic Field-constrained, so a bad value raised during FastAPI request validation -
+    before the handler's try/finally ran - and left the already-uploaded blob undeleted."""
+    content = FEMTO_ACQ.read_bytes()
+    deleted_urls: list[str] = []
+    monkeypatch.setattr(api, "_get_http_client", lambda: _mock_client_serving(content))
+    monkeypatch.setattr(api, "_delete_blob", lambda url: deleted_urls.append(url))
+
+    response = client.post(
+        "/dataset/inspect/blob",
+        json={"blob_url": blob_url, "declared_sampling_rate_hz": -5.0},
+    )
+    assert response.status_code == 422
+    assert deleted_urls == [blob_url]
+
+    deleted_urls.clear()
+    response = client.post(
+        "/dataset/inspect/blob",
+        json={"blob_url": blob_url, "declared_units": "x" * 41},
+    )
+    assert response.status_code == 422
+    assert deleted_urls == [blob_url]
+
+
 def test_missing_blob_object_returns_404(blob_url, monkeypatch):
     monkeypatch.setattr(api, "_get_http_client", lambda: _mock_client_serving(b"", status_code=404))
     response = client.post("/predict/rul/femto-acquisition/blob", json={"blob_url": blob_url})

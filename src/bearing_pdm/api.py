@@ -1622,11 +1622,13 @@ def predict_hi(request: HiRequest) -> HiResponse:
         )
     _note_model("predict_hi", "reference_hi_model.joblib", "reference_hi")
 
-    missing = [c for c in reference_model.features if any(c not in row for row in request.rows)]
+    required_cols = [*reference_model.features, "sequence_index"]
+    missing = [c for c in required_cols if any(c not in row for row in request.rows)]
     if missing:
         raise ApiError(
             422, "FEATURES_MISSING",
-            f"Every row must include all HI feature columns. Missing from at least one row: {missing}",
+            f"Every row must include all HI feature columns plus sequence_index. "
+            f"Missing from at least one row: {missing}",
         )
 
     # apply_reference_hi normalises each row against THIS run's own leading
@@ -1649,7 +1651,7 @@ def predict_hi(request: HiRequest) -> HiResponse:
 
     feature_cols = list(reference_model.features)
     non_finite = [
-        c for c in feature_cols
+        c for c in [*feature_cols, "sequence_index"]
         if any(not np.isfinite(row[c]) for row in request.rows)
     ]
     if non_finite:
@@ -2064,10 +2066,30 @@ async def inspect_dataset(
 
 class BlobInspectRequest(BaseModel):
     blob_url: str = Field(..., description="A client-uploaded Vercel Blob object URL.")
-    declared_sampling_rate_hz: float | None = Field(
-        default=None, gt=0, le=MAX_SAMPLING_RATE_HZ, allow_inf_nan=False,
-    )
-    declared_units: str | None = Field(default=None, max_length=40)
+    # Deliberately unconstrained here (unlike the equivalent Form()/Query() fields on the
+    # direct-upload routes): a pydantic Field constraint violation is raised by FastAPI
+    # during request validation, before this handler's body - and therefore before its
+    # try/finally - ever runs, which would leave the already-uploaded blob undeleted.
+    # Validated manually below, inside the try, so a bad value still cleans up the blob.
+    declared_sampling_rate_hz: float | None = Field(default=None)
+    declared_units: str | None = Field(default=None)
+
+
+def _validate_declared_dataset_fields(
+    declared_sampling_rate_hz: float | None, declared_units: str | None
+) -> None:
+    """Same bounds as the direct-upload routes' Form()/Query() constraints, raised as an
+    ApiError instead so callers can validate inside a try/finally that must still run its
+    cleanup (see BlobInspectRequest)."""
+    if declared_sampling_rate_hz is not None and (
+        not math.isfinite(declared_sampling_rate_hz)
+        or not (0 < declared_sampling_rate_hz <= MAX_SAMPLING_RATE_HZ)
+    ):
+        raise ApiError(422, "VALIDATION_ERROR",
+                       f"declared_sampling_rate_hz must be a finite number in (0, "
+                       f"{MAX_SAMPLING_RATE_HZ}].")
+    if declared_units is not None and len(declared_units) > 40:
+        raise ApiError(422, "VALIDATION_ERROR", "declared_units must be at most 40 characters.")
 
 
 @app.post("/dataset/inspect/blob", response_model=DatasetProfileResponse)
@@ -2079,6 +2101,9 @@ def inspect_dataset_blob(request: BlobInspectRequest) -> DatasetProfileResponse:
     _validate_blob_url(request.blob_url)
     with _temporary_upload() as tmp:
         try:
+            _validate_declared_dataset_fields(
+                request.declared_sampling_rate_hz, request.declared_units
+            )
             _stream_blob_to_tempfile(request.blob_url, tmp, MAX_UPLOAD_BYTES)
             return _process_dataset_inspect_file(
                 tmp.name,

@@ -291,8 +291,6 @@
           "declared_sampling_rate_hz": {
             "anyOf": [
               {
-                "exclusiveMinimum": 0.0,
-                "maximum": 1000000.0,
                 "type": "number"
               },
               {
@@ -304,7 +302,6 @@
           "declared_units": {
             "anyOf": [
               {
-                "maxLength": 40,
                 "type": "string"
               },
               {

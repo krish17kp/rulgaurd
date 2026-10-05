@@ -6,8 +6,19 @@ request. There is no retention option or background analysis job in this
 synchronous service. A retry is a new upload with a new identifier. The `/blob`
 routes download the client's Vercel Blob object into the same request-owned
 temporary file and then attempt to delete the blob itself on every outcome
-(best effort, recorded as `blob_cleanup` in the access record; a failed delete
-never turns a result into an error).
+*once their handler body runs* - download failure, validation failure, and
+processing failure are all covered, including declared-field validation
+(`declared_sampling_rate_hz`/`declared_units` are checked inside the
+try/finally on `/dataset/inspect/blob`, not as pydantic `Field` constraints,
+precisely so a bad value can't skip cleanup by failing before the handler
+starts) - (best effort, recorded as `blob_cleanup` in the access record; a
+failed delete never turns a result into an error). This does **not** cover a
+client that uploads to Blob and then never calls the backend at all - the
+user switches upload mode mid-flight, closes the tab, or the network drops
+between the Blob upload finishing and the backend request being sent. In
+that case the object is orphaned until Vercel Blob's own storage lifecycle/
+expiry (if configured) reclaims it; this service has no way to notice an
+upload it was never told about.
 Prediction summaries remain governed by [prediction history](prediction-history.md);
 cleanup does not delete history or returned results.
 
