@@ -2,7 +2,7 @@
   "functions": {
     "api/index.py": {
       "maxDuration": 60,
-      "includeFiles": ["../src/**", "../artifacts/models/manifest.json"]
+      "includeFiles": "../{src/**,artifacts/models/manifest.json}"
     }
   },
   "rewrites": [
