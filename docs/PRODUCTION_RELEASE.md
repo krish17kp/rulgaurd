@@ -64,6 +64,21 @@ confirming this isn't a free config fix. **The system fails closed correctly in 
 fabricated applicability result. This is documented as an accepted limitation of the free tier,
 not silently hidden.
 
+**Partial mitigation, NOT_VERIFIED live (2026-10-05):** `_load_bundle` (`api.py`) now trims
+`cross_domain_bundle.joblib`'s cached in-process object to only the `raw_seconds` entry
+immediately after load — the bundle also carries a second full fitted `sn_fraction_multi`
+model plus `hi_model`/`stage_thresholds`/`hi_name`, none of which the API ever reads. Measured
+locally against the real 219MB artifact: steady-state process RSS after load drops from
+639.9MB to 431.8MB (~33%). **This does not touch the documented root cause above** — the
+`ENOSPC` is `/tmp` *disk* space from the downloaded joblib files themselves (108MB +
+219MB on disk, unchanged by this fix, since `ensure_artifact` writes the whole file to
+`/tmp` before `joblib.load` ever runs), not Python object memory. The fix is a genuine,
+tested reduction in what stays resident in RAM afterward, which may still help if memory
+(not disk) is the actual binding constraint on a given Hobby-tier instance, but it was not
+re-verified against the live deployment in this session — no access to the production
+Vercel account/logs was available here. Re-run the same `vercel logs` live check documented
+above after deploying this change before upgrading this line to PRODUCTION_VERIFIED.
+
 ## Live verification performed (PRODUCTION, not just preview)
 All of the following were run against **https://rulguard.vercel.app** directly in this session:
 
