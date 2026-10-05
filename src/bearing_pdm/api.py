@@ -1078,6 +1078,7 @@ def _validate_blob_url(url: str) -> None:
                 422, "INVALID_BLOB_URL",
                 "blob_url is not an object in this deployment's own Blob store.",
             )
+        _reject_model_artifact_path(parsed.path)
         return
     if not (parsed.hostname and any(parsed.hostname.endswith(suf) for suf in _BLOB_HOST_SUFFIXES)):
         raise ApiError(

@@ -299,6 +299,24 @@ def test_pinned_blob_store_hostname_rejects_other_vercel_customers_stores(monkey
     assert response.status_code == 422
 
 
+def test_pinned_blob_store_hostname_still_rejects_model_artifact_path(monkeypatch):
+    """Regression for a bug in the H1 fix itself: _reject_model_artifact_path was only
+    reached on the unpinned-hostname branch, so a real deployment (which always sets
+    BLOB_STORE_HOSTNAME) returned early via the pinned-host branch and never rejected a
+    models/ path - confirmed live against the real preview deployment, which still deleted
+    the model artifact after this exact request."""
+    monkeypatch.setenv("BLOB_STORE_HOSTNAME", "myproject123.public.blob.vercel-storage.com")
+    deleted = []
+    monkeypatch.setattr(api, "_delete_blob", lambda url: deleted.append(url))
+    response = client.post(
+        "/predict/rul/femto-acquisition/blob",
+        json={"blob_url": "https://myproject123.public.blob.vercel-storage.com/models/x.joblib"},
+    )
+    assert response.status_code == 422
+    assert "model artifacts" in response.json()["detail"].lower()
+    assert deleted == []
+
+
 def test_pinned_blob_store_hostname_accepts_its_own_store(monkeypatch):
     monkeypatch.setenv("BLOB_STORE_HOSTNAME", "myproject123.public.blob.vercel-storage.com")
     monkeypatch.setattr(api, "_get_http_client", lambda: _mock_client_serving(b"not empty"))
