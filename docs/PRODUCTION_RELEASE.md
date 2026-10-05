@@ -1,15 +1,26 @@
 # Production release — 2026-10-05
 
+## FINAL STATUS: PRODUCTION_VERIFIED_WITH_LIMITATIONS
+
+The `/tmp` ENOSPC fix (commits `0f783b9`..`1adf967`) was verified on a preview deployment,
+then promoted to production and re-verified there directly (this section). See
+"Production re-verification (post `/tmp` fix promotion)" below for the full checklist and
+evidence. Remaining limitations, none upgraded to PASS: rendered-browser E2E not completed,
+exhaustive concurrency stress test not completed, external security scanner not run.
+
 ## Final branch and head
 `overnight/capstone/m12-final-integration`, local only. Not merged to `main`, not pushed.
-Final commit at the time of this release: `485ec84` plus any doc-only commits immediately
-after it in the same session.
+Final commit at the time of this release: `1cb9aa8` (this doc commit) plus the six fix
+commits before it in the same session (`0f783b9`..`1adf967`).
 
 ## Deployment
 - **Vercel project**: `rulguard` (org `krishparekh261-9292s-projects`).
-- **Production URL**: **https://rulguard.vercel.app** — PRODUCTION_VERIFIED (see section 6).
+- **Production URL**: **https://rulguard.vercel.app** — PRODUCTION_VERIFIED, re-deployed and
+  re-verified 2026-10-05 with the `/tmp` fix live (deployment `dpl_5xEs3e4s2KFHHq2MNYcxzZb2j4jo`).
 - **Preview URLs**: ephemeral, one per `vercel deploy` (e.g.
-  `https://rulguard-loowhlrvw-krishparekh261-9292s-projects.vercel.app`) — PREVIEW_VERIFIED.
+  `https://rulguard-loowhlrvw-krishparekh261-9292s-projects.vercel.app`,
+  `https://rulguard-q9czcmhnq-krishparekh261-9292s-projects.vercel.app` — the `/tmp`-fix
+  preview, superseded by the production promotion above) — PREVIEW_VERIFIED.
 - **Vercel Project Settings** (set via the Vercel REST API, not in git — record this so the
   project can be recreated or audited):
   - `rootDirectory = "frontend"`
@@ -130,7 +141,34 @@ All of the following were run against **https://rulguard.vercel.app** directly i
 | H1 attack (a `models/...` URL as `blob_url`) | rejected with `INVALID_BLOB_URL`; model confirmed still loaded afterward via `/api/health` — PRODUCTION_VERIFIED |
 | Invalid `declared_sampling_rate_hz=-5` on `/api/dataset/inspect` | 422 — PRODUCTION_VERIFIED |
 | Unsupported `dataset_id=college` on `/api/predict/rul` | 422, `UNSUPPORTED_DATASET` — PRODUCTION_VERIFIED |
-| LOW-applicability suppression | NOT_VERIFIED on unfixed **production** - `cross_domain_bundle.joblib` can't be loaded there due to the `/tmp` limit above, so applicability is always `None`, not `LOW`. **PREVIEW_VERIFIED (2026-10-05)** on the `/tmp`-fix branch's preview deployment instead - see the live-verification section above for the full before/after evidence (production still unfixed; the fix has not been promoted). |
+| LOW-applicability suppression | Historically NOT_VERIFIED on production before the `/tmp` fix. **Now PRODUCTION_VERIFIED** — see the section immediately below; the fix was promoted and re-checked directly against `rulguard.vercel.app`. |
+
+## Production re-verification (post `/tmp` fix promotion, 2026-10-05)
+
+The `/tmp` ENOSPC fix was verified on a preview first (see the OOD section above), then
+promoted to production with explicit approval and re-verified directly against
+**https://rulguard.vercel.app** (deployment `dpl_5xEs3e4s2KFHHq2MNYcxzZb2j4jo`, `target:
+production`). Every item below is a real request/response against the live production API or
+real `vercel logs` output, not a local test:
+
+| # | Check | Result |
+|---|---|---|
+| 1 | `/api/health` + model artifact loading | `rul_extra_trees`/`reference_hi` loaded, same sha256 versions as before this deploy — PRODUCTION_VERIFIED |
+| 2 | Trusted FEMTO RUL prediction | Raw CSV fixture (`data/fixtures/femto/Bearing1_1/acc_00001.csv`) -> `/api/predict/rul/femto-acquisition` -> `rul_seconds=28020.0`, exact match to the known trusted value — PRODUCTION_VERIFIED |
+| 3 | In-domain applicability | Training-median feature row -> `compatibility=FULLY_SUPPORTED`, `applicability_level=HIGH`, `shift_ratio=0.30` — PRODUCTION_VERIFIED |
+| 4 | Shifted-input applicability | Deliberately shifted feature row -> `compatibility=RETRAIN_REQUIRED`, `code=APPLICABILITY_LOW`, shift ratio 15.56x — PRODUCTION_VERIFIED |
+| 5 | Cold start / warm start | `vercel logs`: cold `/api/health` call installs the runtime venv and downloads all artifacts (`duration_ms=4144.2`); first `/predict/rul/femto-acquisition` call downloads `cross_domain_bundle.joblib` fresh (`duration_ms=10630.4`, `HTTP/1.1 200 OK`, no ENOSPC); every subsequent `/predict/rul` call in the same window reuses the warm cache (`duration_ms` 48-51) — PRODUCTION_VERIFIED |
+| 6 | Valid / invalid / repeated requests | 3x identical in-domain request -> bit-identical `rul_seconds=18466.3` each time; invalid `dataset_id=college` -> clean `422 UNSUPPORTED_DATASET` — PRODUCTION_VERIFIED |
+| 7 | `/tmp`/artifact cleanup | `vercel logs` on the raw-upload path shows `cleanup_state=deleted` on the same request that downloaded `cross_domain_bundle.joblib`; no accumulation across the session's calls — PRODUCTION_VERIFIED |
+| 8 | Model-artifact security regression (H1) | POST a `models/rul_extra_trees.joblib` blob URL to `/api/predict/rul/femto-acquisition/blob` -> `422 INVALID_BLOB_URL`; `/api/health` immediately after confirms `rul_extra_trees` still loaded — PRODUCTION_VERIFIED |
+| 9 | Frontend smoke test | `/`, `/upload`, `/predict`, `/degradation`, `/evaluation` all `200` — PRODUCTION_VERIFIED |
+| 10 | Logs: exceptions/tracebacks/ENOSPC/checksum failures/unexpected 5xx | None found in the full session's `vercel logs` output - every status code is `200` or an expected `422`; the only warnings present are the pre-existing, harmless sklearn `InconsistentVersionWarning` and joblib serial-mode notices (unrelated, present before this session too) — PRODUCTION_VERIFIED |
+
+**Not upgraded to PASS by this re-verification** (same limitations as the preview pass):
+rendered-browser E2E (Vercel SSO deployment-protection wall was not bypassed for a real
+browser session), exhaustive concurrency stress test (only the one targeted race-reproduction
+test from this session was re-run, not a broad stress suite), external security scanner (none
+run). These remain explicitly NOT_VERIFIED / PARTIALLY VERIFIED, not PASS.
 
 ## Independent pre-production review
 A second opus-model reviewer, given the actual deployed configuration and the live verification
@@ -166,10 +204,12 @@ results above, found **1 HIGH, 4 MEDIUM, several LOW**:
   vendored-copy mechanism is not vulnerable to staleness (fresh `rm -rf` + `cp` every build).
 
 ## Backend / frontend final counts
-- `pytest -q`: **748 passed, 0 skipped, 0 failed**.
+- `pytest -q`: **754 passed, 0 skipped, 0 failed** (748 at the start of this session + 6 new
+  regression tests: bundle-trimming, cache-deletion, concurrency race fix, non-finite-output
+  guard, determinism, local-dev-file-never-deleted).
 - `ruff check .`: clean.
 - Frontend `npm test -- --run`: **16 passed**.
-- Frontend `npm run lint`: clean.
+- Frontend `npm run lint` / `tsc --noEmit`: clean.
 - Frontend `npm run build`: clean (Next.js 16.3.6, Turbopack, 7 routes).
 
 ## Security / privacy
@@ -181,8 +221,10 @@ results above, found **1 HIGH, 4 MEDIUM, several LOW**:
 - CORS has no wildcard; `ALLOWED_ORIGINS` is set to the real production origin.
 
 ## Known remaining limitations
-1. Applicability/OOD gate (`cross_domain_bundle.joblib`) cannot be exercised on the Hobby tier
-   due to `/tmp` capacity when a smaller model is already warm-cached - documented, not hidden.
+1. ~~Applicability/OOD gate (`cross_domain_bundle.joblib`) cannot be exercised on the Hobby tier
+   due to `/tmp` capacity~~ **RESOLVED 2026-10-05** - see "Production re-verification" above.
+   Fixed by deleting an artifact's downloaded cache copy immediately after loading it into
+   memory (commit `a87cad7`), verified live on both preview and production.
 2. `/api/models/evaluation` and `reliability.held_out_error` are unavailable in production
    (M2 above) - `reports/metrics/` isn't vendored into the function.
 3. Scientific dependencies in `frontend/api/requirements.txt` are unpinned (M4 above).
