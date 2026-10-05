@@ -862,3 +862,63 @@ def test_load_joblib_never_deletes_a_local_dev_checkout_copy(tmp_path, monkeypat
     assert model == {"local": True}
     assert local_path.exists(), "a repo-local artifact must never be deleted"
     api._MODEL_CACHE.clear()
+
+
+def test_load_joblib_is_safe_under_concurrent_cold_requests_for_the_same_name(tmp_path, monkeypatch):
+    """FastAPI's sync `def` endpoints run in a thread pool - two requests for
+    an uncached artifact genuinely race. Without the per-name lock in
+    _load_joblib, one thread's post-load deletion of the downloaded cache
+    file can run before another thread's own path.open(), raising
+    FileNotFoundError instead of loading cleanly (the bug this test would
+    have caught right after the /tmp-cleanup fix was first added)."""
+    import threading
+    import time
+
+    import joblib
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(artifacts, "MODELS_DIR", models_dir)
+    monkeypatch.setattr(artifacts, "MANIFEST_PATH", models_dir / "manifest.json")
+    monkeypatch.setenv("ARTIFACT_CACHE_DIR", str(cache_dir))
+
+    content_path = tmp_path / "payload.joblib"
+    joblib.dump({"concurrent": True}, content_path)
+    content = content_path.read_bytes()
+    artifacts.MANIFEST_PATH.write_text(json.dumps({
+        "artifacts": {"racy_model.joblib": {
+            "sha256": _sha256_hex(content), "source_url": "https://example.com/racy_model.joblib",
+        }}
+    }))
+
+    def slow_mock_client():
+        import httpx
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            time.sleep(0.05)  # widen the race window
+            return httpx.Response(200, content=content)
+
+        return httpx.Client(transport=httpx.MockTransport(handler))
+
+    monkeypatch.setattr(artifacts, "_get_http_client", slow_mock_client)
+
+    api._MODEL_CACHE.clear()
+    results: list[object] = [None] * 8
+    errors: list[BaseException] = []
+
+    def worker(i: int) -> None:
+        try:
+            results[i] = api._load_joblib("racy_model.joblib")
+        except BaseException as exc:  # noqa: BLE001 - must observe every failure, not just common ones
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], f"concurrent _load_joblib calls raised: {errors!r}"
+    assert all(r == {"concurrent": True} for r in results)
+    api._MODEL_CACHE.clear()

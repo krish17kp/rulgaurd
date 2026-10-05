@@ -23,6 +23,7 @@ import logging
 import math
 import os
 import tempfile
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -986,6 +987,15 @@ def _track_prediction(kind: str, artifact: str):
     return decorate
 
 
+_load_locks: dict[str, threading.Lock] = {}
+_load_locks_guard = threading.Lock()
+
+
+def _lock_for_load(name: str) -> threading.Lock:
+    with _load_locks_guard:
+        return _load_locks.setdefault(name, threading.Lock())
+
+
 def _load_joblib(name: str) -> Any | None:
     """Same missing-artifact contract as dashboard._load_joblib: None, never
     a traceback, cached in-process rather than per-request.
@@ -998,9 +1008,27 @@ def _load_joblib(name: str) -> Any | None:
     usable source_url, or a checksum mismatch, resolves to None here same
     as a file that was simply never present - never a guess, never a
     silently-wrong model. The loaded file's sha256 is recorded as its
-    model version (history, access log, /health)."""
+    model version (history, access log, /health).
+
+    Serialized per name (FastAPI's sync `def` endpoints run in a thread
+    pool, so two cold requests for the same uncached name genuinely race):
+    without this lock, two threads can both receive the same path from
+    artifacts.ensure_artifact, and one thread's post-load file deletion
+    (below) can remove the file before the other thread's own path.open()
+    runs, raising FileNotFoundError instead of loading cleanly. The
+    double-checked _MODEL_CACHE read (outside, then again inside the lock)
+    means only the first caller for a given name ever does the actual
+    download/load/delete work; every other concurrent or later caller just
+    returns the cached model."""
     if name in _MODEL_CACHE:
         return _MODEL_CACHE[name]
+    with _lock_for_load(name):
+        if name in _MODEL_CACHE:
+            return _MODEL_CACHE[name]
+        return _load_joblib_locked(name)
+
+
+def _load_joblib_locked(name: str) -> Any | None:
     try:
         path = artifacts.ensure_artifact(name)
     except OSError:
