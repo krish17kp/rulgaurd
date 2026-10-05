@@ -922,3 +922,28 @@ def test_load_joblib_is_safe_under_concurrent_cold_requests_for_the_same_name(tm
     assert errors == [], f"concurrent _load_joblib calls raised: {errors!r}"
     assert all(r == {"concurrent": True} for r in results)
     api._MODEL_CACHE.clear()
+
+
+@pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
+def test_predict_rul_never_serves_a_non_finite_prediction(monkeypatch):
+    """RUL sanity (never NaN/Inf): api.py:1441 guards the model's raw output,
+    but nothing previously exercised that guard - a regression there would
+    silently serve a NaN/Inf rul_seconds instead of failing closed."""
+    model = api._load_joblib("rul_extra_trees.joblib")
+    monkeypatch.setattr(model.model, "predict", lambda X: __import__("numpy").array([float("nan")]))
+    response = client.post(
+        "/predict/rul", json={"dataset_id": "femto", "features": dict(model.median_fill)}
+    )
+    assert response.status_code == 503
+    assert response.json()["code"] == "INVALID_MODEL_OUTPUT"
+
+
+@pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
+def test_predict_rul_is_deterministic_for_identical_input():
+    """python.md: 'Same input + same seed must produce the same metric to
+    full float precision.' Three independent requests for the exact same
+    feature row must return bit-identical rul_seconds, not just close."""
+    model = api._load_joblib("rul_extra_trees.joblib")
+    payload = {"dataset_id": "femto", "features": dict(model.median_fill)}
+    results = [client.post("/predict/rul", json=payload).json()["rul_seconds"] for _ in range(3)]
+    assert results[0] == results[1] == results[2]
