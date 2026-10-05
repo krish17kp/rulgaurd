@@ -1361,19 +1361,26 @@ def _predict_rul_from_features(features: dict[str, float]) -> PredictRulResponse
         raise ApiError(503, "INVALID_MODEL_OUTPUT",
                        "The cached model did not produce a finite RUL.")
 
-    compatibility = FULLY_SUPPORTED
     applicability_level = applicability["level"] if applicability else None
     applicability_shift_ratio = applicability["shift_ratio"] if applicability else None
     if applicability is None:
         # Same honest-degrade pattern as _classify_for_model: never claim a
-        # domain-fit check happened when it didn't (found in review: this
-        # previously returned FULLY_SUPPORTED with an empty reasons list,
-        # indistinguishable from a real HIGH result).
+        # domain-fit check happened when it didn't. An earlier version left
+        # `compatibility` at its FULLY_SUPPORTED default here - indistinguishable
+        # from a real HIGH-applicability result even though domain-fit was never
+        # checked at all. Reuse the existing RETRAIN_REQUIRED/"experimental"
+        # contract (the same one MEDIUM applicability already uses) rather than
+        # inventing a new state: whether the input is in-domain is unknown, not
+        # confirmed, so the prediction must not be represented as fully validated.
+        compatibility = RETRAIN_REQUIRED
         applicability_reasons = [
             "model applicability could not be assessed (cross_domain_bundle.joblib missing or "
-            "unreadable) - this result reflects the prediction only, not a domain-fit check"
+            "unreadable) - treat this prediction as experimental, the same as MEDIUM "
+            "applicability: whether the input is in-domain for this model is unknown, not "
+            "confirmed"
         ]
     else:
+        compatibility = FULLY_SUPPORTED
         applicability_reasons = applicability["reasons"]
     if applicability_level == "MEDIUM":
         compatibility = RETRAIN_REQUIRED

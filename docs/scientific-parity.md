@@ -171,14 +171,20 @@ model, so this cannot leak into RUL.
 
 ## Limitations and open decisions
 
-- **Open decision (needs a human): applicability unavailable → still FULLY_SUPPORTED.** If
-  `cross_domain_bundle.joblib` cannot be loaded but the RUL model can, `/predict/rul` returns an
-  RUL labelled FULLY_SUPPORTED with the reason "model applicability could not be assessed". History
-  records `APPLICABILITY_NOT_ASSESSED`. This is an earlier, deliberately reviewed design pinned by
-  existing tests (`tests/test_history.py`, `tests/test_reliability.py`). It conflicts with
-  model.md's FULLY_SUPPORTED definition ("operating context within validated bounds"). It was not
-  changed in this audit. The recommendation is to withhold the RUL or downgrade the state when the
-  OOD gate cannot run.
+- **Resolved (2026-10-05, production release policy fix, M2): applicability unavailable →
+  RETRAIN_REQUIRED, not FULLY_SUPPORTED.** If `cross_domain_bundle.joblib` cannot be loaded but
+  the RUL model can, `/predict/rul` (and everything built on it: `/predict/rul/femto-acquisition`,
+  its blob variant, `/analyze/rul`) now returns the RUL with `compatibility=RETRAIN_REQUIRED` -
+  the same "prediction returned, but treat it as experimental" contract already used for MEDIUM
+  applicability - and `applicability_reasons` states plainly that domain-fit was never checked,
+  not confirmed to be fine. History records `APPLICABILITY_NOT_ASSESSED` as before, but
+  `compatibility_state` now reflects `RETRAIN_REQUIRED`. No new API state was introduced. This
+  was flagged as an open design question by an earlier audit pass (previously pinned by
+  `tests/test_history.py`/`tests/test_reliability.py` as FULLY_SUPPORTED); both are updated to
+  pin the corrected behavior. The withhold-entirely alternative (mirroring LOW's 422 suppression)
+  was considered and rejected: "the gate could not run" is a missing-dependency state, not a
+  confirmed-bad-input state, so experimental-but-returned is the smaller, more defensible
+  departure from existing architecture.
 - **Applicability calibration is conservative on near-failure data.** The threshold is calibrated
   on per-bearing *median* distances but applied to *single* recordings. Even training bearings
   therefore get LOW on 0.8–1.1 % of recordings, and MEDIUM or LOW on 1.2–5.4 %. These are

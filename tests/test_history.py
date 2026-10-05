@@ -98,7 +98,10 @@ def test_api_success_failure_and_no_input_persistence(monkeypatch, tmp_path):
     assert success["model_version"] == "sha256:test"
     assert success["feature_schema_version"].startswith("sha256:")
     assert success["warnings"] == ["MISSING_FEATURES_MEDIAN_FILLED", "APPLICABILITY_NOT_ASSESSED"]
-    assert success["compatibility_state"] == "FULLY_SUPPORTED"
+    # Production-policy fix (M2, release review): compatibility must not be FULLY_SUPPORTED
+    # when applicability was never assessed - downgraded to the same RETRAIN_REQUIRED
+    # "experimental" state MEDIUM applicability uses, not left at the FULLY_SUPPORTED default.
+    assert success["compatibility_state"] == "RETRAIN_REQUIRED"
     assert success["id"] != failed["id"]
     assert datetime.fromisoformat(success["timestamp"]).tzinfo is not None
     assert SQLiteHistoryStore(str(path)).recent() == records

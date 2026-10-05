@@ -68,6 +68,30 @@ def test_predict_rul_rejects_non_femto_dataset():
 
 
 @pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
+def test_predict_rul_downgrades_compatibility_when_applicability_cannot_be_assessed(
+    monkeypatch,
+):
+    """Production-policy regression (M2 from the independent release review):
+    if cross_domain_bundle.joblib is missing/unreadable, domain-fit was never
+    checked, so the response must not claim FULLY_SUPPORTED - that would be
+    indistinguishable from a real HIGH-applicability result. It must downgrade
+    to the same RETRAIN_REQUIRED/"experimental" contract MEDIUM applicability
+    already uses, not invent a new state and not silently assume in-domain."""
+    monkeypatch.setattr(api, "_assess_applicability", lambda *a, **k: None)
+    model = api._load_joblib("rul_extra_trees.joblib")
+    features = dict(model.median_fill)
+    response = client.post(
+        "/predict/rul", json={"dataset_id": "femto", "features": features}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["compatibility"] == "RETRAIN_REQUIRED"
+    assert body["applicability_level"] is None
+    assert "could not be assessed" in " ".join(body["applicability_reasons"]).lower()
+    assert "experimental" in " ".join(body["applicability_reasons"]).lower()
+
+
+@pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
 def test_predict_rul_accepts_full_feature_row():
     model = api._load_joblib("rul_extra_trees.joblib")
     features = dict(model.median_fill)
