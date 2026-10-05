@@ -86,17 +86,36 @@ serving the actual files, real sha256 verification, real `joblib.load`) now leav
 cache directory at 0MB after each load, instead of accumulating to 327MB — see commit
 `a87cad7`. Both new regression tests pass; full suite (751 tests) and ruff pass.
 
-**Why this is NOT_VERIFIED rather than PRODUCTION_VERIFIED:** no access to the production
-Vercel account, `vercel logs`, or a deploy trigger was available in this session. The local
-proof demonstrates the fix removes the disk-accumulation mechanism entirely (peak cache-dir
-usage per sequential load, not summed), which directly matches the documented failure's own
-description (two files' sizes summing over the tier's `/tmp` limit) — but re-running the exact
-`vercel logs` check from the table below after deploying this branch is required before this
-line can be upgraded to PRODUCTION_VERIFIED. If `/tmp` still fails after deploying this fix,
-the remaining candidate explanations (not yet locally testable without a real Fluid Compute
-instance) are: the Python runtime's own unpacked dependencies (numpy/scipy/sklearn/duckdb)
-consuming `/tmp` headroom before any model download starts, or a `/tmp` quota materially
-smaller than 327MB even for one artifact at a time.
+**LIVE-VERIFIED ON PREVIEW (2026-10-05, not yet production):** deployed this branch to a Vercel
+Hobby-tier preview (`rulguard-q9czcmhnq-krishparekh261-9292s-projects.vercel.app`, `target: null`,
+never promoted). Reproduced the documented failure first against **unfixed production**
+(`rulguard.vercel.app`) with the exact same request: `applicability_level: null`,
+`"cross_domain_bundle.joblib missing or unreadable"`. The identical request against the fixed
+preview:
+- Cold start, first `/predict/rul` call: `vercel logs` shows
+  `GET .../models/cross_domain_bundle.joblib "HTTP/1.1 200 OK"` followed by
+  `status=200 ... compatibility=FULLY_SUPPORTED` (`duration_ms=8505.6` — the one-time
+  download+verify+load cost). **No `ENOSPC` anywhere in the logs.**
+- Response: `compatibility=FULLY_SUPPORTED`, `applicability_level=HIGH`, full `reliability`
+  block populated (conformal interval, tree disagreement, applicability detail) — all
+  previously `None`/unavailable on production for this same input.
+- LOW-applicability suppression (the other half of this limitation, also previously
+  NOT_VERIFIED): a deliberately shifted feature row correctly returned `compatibility=
+  RETRAIN_REQUIRED`, `code=APPLICABILITY_LOW`, shift ratio 15.56x — confirming the suppression
+  path itself (not just the loading) now runs for real.
+- 3 repeat identical requests: `rul_seconds` bit-identical each time, `duration_ms` ~48-50
+  (warm `_MODEL_CACHE` reuse, no re-download) — confirms both cold and warm paths work.
+- Invalid input (`dataset_id="college"`): clean `422 UNSUPPORTED_DATASET`, no traceback.
+- All 5 frontend routes (`/`, `/upload`, `/predict`, `/degradation`, `/evaluation`): `200`.
+
+**Remaining gap:** this is PREVIEW_VERIFIED, not PRODUCTION_VERIFIED — the preview was not
+promoted to production per standing instruction ("do not deploy to production"). The one
+still-unexplained live finding: production's `/tmp` pressure also includes the Python runtime
+installing its own dependency venv at `/tmp/_vc_deps` (~70MB: scipy/numpy/sklearn/pandas) on
+every cold start, visible in both the before and after logs — this fix's gain was apparently
+enough to clear the combined budget regardless, since the preview succeeded on its own cold
+start with that same overhead present, but it remains a secondary factor worth knowing about
+if `/tmp` pressure ever returns after other changes.
 
 ## Live verification performed (PRODUCTION, not just preview)
 All of the following were run against **https://rulguard.vercel.app** directly in this session:
@@ -111,7 +130,7 @@ All of the following were run against **https://rulguard.vercel.app** directly i
 | H1 attack (a `models/...` URL as `blob_url`) | rejected with `INVALID_BLOB_URL`; model confirmed still loaded afterward via `/api/health` — PRODUCTION_VERIFIED |
 | Invalid `declared_sampling_rate_hz=-5` on `/api/dataset/inspect` | 422 — PRODUCTION_VERIFIED |
 | Unsupported `dataset_id=college` on `/api/predict/rul` | 422, `UNSUPPORTED_DATASET` — PRODUCTION_VERIFIED |
-| LOW-applicability suppression | NOT_VERIFIED on this deployment - `cross_domain_bundle.joblib` can't be loaded on the Hobby tier due to the `/tmp` limit above, so applicability is always `None` here, not `LOW`. The suppression code path itself was independently reviewed and traced in source (`api.py:1326-1335`), but not exercised live. |
+| LOW-applicability suppression | NOT_VERIFIED on unfixed **production** - `cross_domain_bundle.joblib` can't be loaded there due to the `/tmp` limit above, so applicability is always `None`, not `LOW`. **PREVIEW_VERIFIED (2026-10-05)** on the `/tmp`-fix branch's preview deployment instead - see the live-verification section above for the full before/after evidence (production still unfixed; the fix has not been promoted). |
 
 ## Independent pre-production review
 A second opus-model reviewer, given the actual deployed configuration and the live verification
