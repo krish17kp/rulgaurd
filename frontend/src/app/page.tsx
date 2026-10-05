@@ -26,15 +26,18 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-10 px-6 py-16">
-      <header className="flex flex-col gap-4">
-        <h1 className="text-3xl font-semibold tracking-tight">RULGuard</h1>
-        <p className="max-w-xl text-base text-zinc-600 dark:text-zinc-400">
+    <main className="mx-auto flex max-w-3xl flex-col gap-12 px-6 py-16 sm:py-20">
+      <header className="flex flex-col gap-5">
+        <span className="w-fit rounded-full bg-accent/10 px-3 py-1 text-xs font-medium text-accent">
+          Industrial predictive maintenance
+        </span>
+        <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">RULGuard</h1>
+        <p className="max-w-xl text-lg text-zinc-600 dark:text-zinc-400">
           Predict bearing degradation and Remaining Useful Life from vibration data.
         </p>
         <Link
           href="/upload"
-          className="inline-flex w-fit items-center rounded-lg bg-zinc-900 px-5 py-3 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="inline-flex w-fit items-center rounded-lg bg-accent px-5 py-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-accent/90"
         >
           Analyze Bearing Data
         </Link>
@@ -42,9 +45,12 @@ export default function Home() {
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {CAPABILITIES.map((c) => (
-          <div key={c.title} className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+          <div
+            key={c.title}
+            className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900"
+          >
             <h2 className="text-sm font-medium">{c.title}</h2>
-            <p className="mt-1 text-sm text-zinc-500">{c.body}</p>
+            <p className="mt-1.5 text-sm leading-relaxed text-zinc-500">{c.body}</p>
           </div>
         ))}
       </section>

@@ -196,16 +196,18 @@ export default function UploadPage() {
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Analyze Bearing Data</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <h1 className="text-3xl font-semibold tracking-tight">Analyze Bearing Data</h1>
+        <p className="mt-2 text-sm leading-relaxed text-zinc-500">
           Upload a raw vibration acquisition from a supported bearing (FEMTO, headerless
-          <code className="mx-1">acc_*.csv</code>, 6 columns, 25.6kHz) to get a Remaining Useful
-          Life estimate.
+          <code className="mx-1 rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-zinc-800">acc_*.csv</code>,
+          6 columns, 25.6kHz) to get a Remaining Useful Life estimate.
         </p>
       </header>
 
       {!selectedFile && (
-        <div className="flex flex-col gap-3 rounded-lg border-2 border-dashed border-zinc-300 p-8 text-center dark:border-zinc-700">
+        <div
+          className="flex flex-col gap-3 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50/50 p-10 text-center transition-colors hover:border-accent/50 dark:border-zinc-700 dark:bg-zinc-900/40"
+        >
           <label
             htmlFor="file-input"
             className="cursor-pointer text-sm text-zinc-600 dark:text-zinc-400"
@@ -217,7 +219,7 @@ export default function UploadPage() {
             }}
           >
             Drag and drop a <span className="font-medium">.csv</span> file here, or{" "}
-            <span className="underline">choose a file</span>.
+            <span className="font-medium text-accent underline">choose a file</span>.
           </label>
           <input
             id="file-input"
@@ -234,7 +236,7 @@ export default function UploadPage() {
           <button
             type="button"
             onClick={() => void trySampleData()}
-            className="self-center text-xs underline text-zinc-500"
+            className="self-center text-xs text-zinc-500 underline hover:text-accent"
           >
             Try sample data
           </button>
@@ -242,7 +244,7 @@ export default function UploadPage() {
       )}
 
       {selectedFile && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
           <div className="text-sm">
             <p className="font-medium">{selectedFile.name}</p>
             <p className="text-zinc-500">{formatBytes(selectedFile.size)}</p>
@@ -252,7 +254,7 @@ export default function UploadPage() {
               type="button"
               onClick={resetForNewFile}
               disabled={isBusy}
-              className="rounded border border-zinc-300 px-3 py-2 text-xs font-medium disabled:opacity-50 dark:border-zinc-700"
+              className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
             >
               Remove
             </button>
@@ -261,7 +263,7 @@ export default function UploadPage() {
                 type="button"
                 onClick={analyze}
                 disabled={isBusy}
-                className="rounded-lg bg-zinc-900 px-4 py-2 text-xs font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+                className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-accent/90 disabled:opacity-50"
               >
                 {isBusy ? "Analyzing…" : datasetType === "femto" ? "Analyze Bearing" : "Inspect Dataset"}
               </button>
@@ -299,7 +301,7 @@ export default function UploadPage() {
 
           {predictState.status === "ready" && (
             <div
-              className={`flex flex-col gap-3 rounded-lg border p-4 ${
+              className={`flex flex-col gap-4 rounded-xl border p-6 shadow-sm ${
                 predictState.data.compatibility === "FULLY_SUPPORTED" &&
                 predictState.data.applicability_level === "HIGH"
                   ? "border-green-300 bg-green-50 dark:border-green-900 dark:bg-green-950"
@@ -308,21 +310,21 @@ export default function UploadPage() {
             >
               <div>
                 <p className="text-sm text-zinc-500">Predicted Remaining Useful Life</p>
-                <p className="text-3xl font-semibold tracking-tight">
+                <p className="text-4xl font-semibold tracking-tight">
                   {predictState.data.rul_hours.toFixed(2)} hours
                 </p>
-                <p className="text-xs text-zinc-500">
+                <p className="mt-1 text-xs text-zinc-500">
                   ({predictState.data.rul_seconds.toFixed(0)} s) — model: {predictState.data.model_name}
                 </p>
               </div>
               <ApplicabilityNote result={predictState.data} />
-              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+              <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
                 {applicabilityInterpretation(predictState.data.applicability_level)}
               </p>
               <button
                 type="button"
                 onClick={resetForNewFile}
-                className="self-start rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium dark:border-zinc-700"
+                className="self-start rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
               >
                 Analyze another file
               </button>

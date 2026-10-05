@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 const PRIMARY_LINKS = [
   { href: "/", label: "Overview" },
@@ -12,23 +15,49 @@ const ADVANCED_LINKS = [
 ];
 
 export function SiteNav() {
+  const pathname = usePathname();
+
   return (
-    <nav className="mx-auto flex max-w-3xl flex-wrap items-baseline gap-x-4 gap-y-1 px-6 pt-6 text-sm">
-      {PRIMARY_LINKS.map((link) => (
-        <Link key={link.href} className="underline" href={link.href}>
-          {link.label}
+    <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80">
+      <nav className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-5 gap-y-2 px-6 py-3 text-sm">
+        <Link href="/" className="mr-1 flex items-center gap-1.5 font-semibold tracking-tight">
+          <span className="inline-block size-2 rounded-full bg-accent" aria-hidden />
+          RULGuard
         </Link>
-      ))}
-      <span className="text-zinc-400 dark:text-zinc-600">Advanced:</span>
-      {ADVANCED_LINKS.map((link) => (
-        <Link
-          key={link.href}
-          className="text-xs text-zinc-500 underline dark:text-zinc-500"
-          href={link.href}
-        >
-          {link.label}
-        </Link>
-      ))}
-    </nav>
+        {PRIMARY_LINKS.map((link) => {
+          const active = pathname === link.href;
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              aria-current={active ? "page" : undefined}
+              className={
+                active
+                  ? "font-medium text-accent"
+                  : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+              }
+            >
+              {link.label}
+            </Link>
+          );
+        })}
+        <span className="ml-auto hidden text-xs text-zinc-400 dark:text-zinc-600 sm:inline">
+          Advanced:
+        </span>
+        {ADVANCED_LINKS.map((link) => (
+          <Link
+            key={link.href}
+            className={
+              pathname === link.href
+                ? "text-xs font-medium text-accent"
+                : "text-xs text-zinc-500 hover:text-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-300"
+            }
+            href={link.href}
+          >
+            {link.label}
+          </Link>
+        ))}
+      </nav>
+    </header>
   );
 }
