@@ -14,7 +14,7 @@ import {
 import { ApplicabilityNote } from "@/components/ApplicabilityNote";
 import { BlobUploadError, DIRECT_UPLOAD_THRESHOLD_BYTES, uploadFileToBlob } from "@/lib/blobUpload";
 
-type DatasetType = "generic" | "femto";
+type DatasetType = "femto" | "generic";
 
 // "uploading" is the direct-to-storage leg (browser -> Blob, has real
 // progress); "loading" is the backend processing leg once the upload is
@@ -42,13 +42,34 @@ const BADGE: Record<Compatibility, string> = {
   INVALID_INPUT: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
 };
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function applicabilityInterpretation(level: "HIGH" | "MEDIUM" | "LOW" | null): string {
+  if (level === "HIGH") {
+    return "This signal looks like the data the model was trained on — the RUL estimate above can be trusted at face value.";
+  }
+  if (level === "MEDIUM") {
+    return "This signal differs somewhat from the model's training data. The RUL estimate is reported as experimental, not suppressed.";
+  }
+  if (level === "LOW") {
+    return "This signal differs substantially from the data used to train the current model. RUL is intentionally suppressed rather than guessed.";
+  }
+  return "Applicability could not be checked for this result (reference data unavailable) — treat the number with extra caution.";
+}
+
 export default function UploadPage() {
-  const [datasetType, setDatasetType] = useState<DatasetType>("generic");
+  const [datasetType, setDatasetType] = useState<DatasetType>("femto");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [inspectState, setInspectState] = useState<InspectState>({ status: "idle" });
   const [predictState, setPredictState] = useState<PredictState>({ status: "idle" });
   const [declaredSamplingRateHz, setDeclaredSamplingRateHz] = useState("");
   const [declaredUnits, setDeclaredUnits] = useState("");
-  // Bumped on every mode switch/new upload so an in-flight request whose
+  // Bumped on every mode switch/new analysis so an in-flight request whose
   // caller has since moved on can't overwrite the current state with a
   // stale result (found in review: switching modes mid-request, then
   // switching back, could resurrect an old response).
@@ -135,121 +156,115 @@ export default function UploadPage() {
     }
   }
 
-  function handleFile(file: File) {
+  function analyze() {
+    if (!selectedFile) return;
     if (datasetType === "femto") {
-      void handleFemtoFile(file);
+      void handleFemtoFile(selectedFile);
     } else {
-      void handleGenericFile(file);
+      void handleGenericFile(selectedFile);
     }
   }
 
-  function switchDatasetType(next: DatasetType) {
-    requestSeq.current++; // invalidate any in-flight request from the mode being left
-    setDatasetType(next);
-    // Each mode's result belongs to a specific uploaded file under a specific
-    // mode - leaving it visible after switching modes (or re-uploading) could
-    // show a stale RUL/compatibility result next to a file it wasn't computed
-    // from. Found in review.
+  function resetForNewFile() {
+    requestSeq.current++; // invalidate any in-flight request
+    setSelectedFile(null);
     setInspectState({ status: "idle" });
     setPredictState({ status: "idle" });
   }
 
+  function switchDatasetType(next: DatasetType) {
+    setDatasetType(next);
+    resetForNewFile();
+  }
+
+  async function trySampleData() {
+    switchDatasetType("femto");
+    const response = await fetch("/sample-data/femto-acc-sample.csv");
+    const blob = await response.blob();
+    const file = new File([blob], "femto-acc-sample.csv", { type: "text/csv" });
+    setSelectedFile(file);
+    void handleFemtoFile(file);
+  }
+
+  const activeState = datasetType === "femto" ? predictState : inspectState;
+  const isBusy = activeState.status === "uploading" || activeState.status === "loading";
+
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Upload a dataset</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Analyze Bearing Data</h1>
         <p className="mt-1 text-sm text-zinc-500">
-          Choose what kind of file you&apos;re uploading. The system never guesses this from a
-          headerless file&apos;s contents — you tell it, and it validates your claim before
-          doing anything with it.
+          Upload a raw vibration acquisition from a supported bearing (FEMTO, headerless
+          <code className="mx-1">acc_*.csv</code>, 6 columns, 25.6kHz) to get a Remaining Useful
+          Life estimate.
         </p>
       </header>
 
-      <fieldset className="flex flex-col gap-2">
-        <legend className="text-sm font-medium">Dataset type</legend>
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="radio"
-            name="dataset-type"
-            checked={datasetType === "femto"}
-            onChange={() => switchDatasetType("femto")}
-            className="mt-1"
-          />
-          <span>
-            <span className="font-medium">FEMTO / supported bearing acquisition</span>
-            <br />
-            <span className="text-zinc-500">
-              A raw <code>acc_*.csv</code> file in FEMTO&apos;s known fixed format (headerless,
-              6 columns, 25.6kHz). Runs feature extraction and RUL prediction directly — no
-              separate inspection step.
-            </span>
-          </span>
-        </label>
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="radio"
-            name="dataset-type"
-            checked={datasetType === "generic"}
-            onChange={() => switchDatasetType("generic")}
-            className="mt-1"
-          />
-          <span>
-            <span className="font-medium">Unknown / other dataset (inspect only)</span>
-            <br />
-            <span className="text-zinc-500">
-              Inspects the file&apos;s structure (delimiter, header, column meanings) and
-              reports compatibility — it does not run a prediction. Optionally declare the
-              sampling rate and units below if the file has no timestamp column in seconds; they
-              are never guessed.
-            </span>
-          </span>
-        </label>
-      </fieldset>
-
-      {datasetType === "generic" && (
-        <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-          <label className="flex flex-col gap-1 text-sm">
-            Declared sampling rate (Hz) — optional. Used only if the file has no regular
-            timestamps in seconds (a time_s/seconds column or ISO datetimes); if it has them and
-            they disagree with this value, the upload is rejected rather than silently preferring
-            either source.
-            <input
-              type="number"
-              min="0"
-              step="any"
-              value={declaredSamplingRateHz}
-              onChange={(e) => setDeclaredSamplingRateHz(e.target.value)}
-              placeholder="e.g. 25600"
-              className="rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            />
+      {!selectedFile && (
+        <div className="flex flex-col gap-3 rounded-lg border-2 border-dashed border-zinc-300 p-8 text-center dark:border-zinc-700">
+          <label
+            htmlFor="file-input"
+            className="cursor-pointer text-sm text-zinc-600 dark:text-zinc-400"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const file = e.dataTransfer.files?.[0];
+              if (file) setSelectedFile(file);
+            }}
+          >
+            Drag and drop a <span className="font-medium">.csv</span> file here, or{" "}
+            <span className="underline">choose a file</span>.
           </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Declared units — optional
-            <input
-              type="text"
-              value={declaredUnits}
-              onChange={(e) => setDeclaredUnits(e.target.value)}
-              placeholder="e.g. g, m/s^2"
-              className="rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            />
-          </label>
+          <input
+            id="file-input"
+            data-testid="file-input"
+            type="file"
+            accept=".csv"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) setSelectedFile(file);
+              e.target.value = "";
+            }}
+            className="sr-only"
+          />
+          <button
+            type="button"
+            onClick={() => void trySampleData()}
+            className="self-center text-xs underline text-zinc-500"
+          >
+            Try sample data
+          </button>
         </div>
       )}
 
-      <input
-        key={datasetType}
-        data-testid="file-input"
-        type="file"
-        accept={datasetType === "femto" ? ".csv" : ".csv,.txt,.tsv,.dat"}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleFile(file);
-          // Reset so picking the same file again (e.g. after switching modes
-          // and back) still fires onChange instead of being a no-op.
-          e.target.value = "";
-        }}
-        className="text-sm"
-      />
+      {selectedFile && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+          <div className="text-sm">
+            <p className="font-medium">{selectedFile.name}</p>
+            <p className="text-zinc-500">{formatBytes(selectedFile.size)}</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={resetForNewFile}
+              disabled={isBusy}
+              className="rounded border border-zinc-300 px-3 py-2 text-xs font-medium disabled:opacity-50 dark:border-zinc-700"
+            >
+              Remove
+            </button>
+            {activeState.status !== "ready" && (
+              <button
+                type="button"
+                onClick={analyze}
+                disabled={isBusy}
+                className="rounded-lg bg-zinc-900 px-4 py-2 text-xs font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+              >
+                {isBusy ? "Analyzing…" : datasetType === "femto" ? "Analyze Bearing" : "Inspect Dataset"}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {datasetType === "femto" && (
         <>
@@ -273,21 +288,33 @@ export default function UploadPage() {
 
           {predictState.status === "ready" && (
             <div
-              className={`flex flex-col gap-2 rounded-lg border p-4 ${
+              className={`flex flex-col gap-3 rounded-lg border p-4 ${
                 predictState.data.compatibility === "FULLY_SUPPORTED" &&
                 predictState.data.applicability_level === "HIGH"
                   ? "border-green-300 bg-green-50 dark:border-green-900 dark:bg-green-950"
                   : "border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950"
               }`}
             >
-              <p className="text-sm text-zinc-500">Predicted Remaining Useful Life</p>
-              <p className="text-3xl font-semibold tracking-tight">
-                {predictState.data.rul_hours.toFixed(2)} hours
-              </p>
-              <p className="text-xs text-zinc-500">
-                ({predictState.data.rul_seconds.toFixed(0)} s) — model: {predictState.data.model_name}
-              </p>
+              <div>
+                <p className="text-sm text-zinc-500">Predicted Remaining Useful Life</p>
+                <p className="text-3xl font-semibold tracking-tight">
+                  {predictState.data.rul_hours.toFixed(2)} hours
+                </p>
+                <p className="text-xs text-zinc-500">
+                  ({predictState.data.rul_seconds.toFixed(0)} s) — model: {predictState.data.model_name}
+                </p>
+              </div>
               <ApplicabilityNote result={predictState.data} />
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                {applicabilityInterpretation(predictState.data.applicability_level)}
+              </p>
+              <button
+                type="button"
+                onClick={resetForNewFile}
+                className="self-start rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium dark:border-zinc-700"
+              >
+                Analyze another file
+              </button>
             </div>
           )}
         </>
@@ -331,26 +358,28 @@ export default function UploadPage() {
               )}
 
               {inspectState.data.profile.columns && (
-                <table className="w-full text-left text-xs">
-                  <thead className="text-zinc-500">
-                    <tr>
-                      <th className="py-1 pr-3">Column</th>
-                      <th className="py-1 pr-3">Mapped to</th>
-                      <th className="py-1 pr-3">Confidence</th>
-                      <th className="py-1 pr-3">Missing %</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {inspectState.data.profile.columns.map((c) => (
-                      <tr key={c.name} className="border-t border-zinc-200 dark:border-zinc-800">
-                        <td className="py-1 pr-3 font-mono">{c.name}</td>
-                        <td className="py-1 pr-3">{c.canonical ?? "—"}</td>
-                        <td className="py-1 pr-3">{c.confidence}</td>
-                        <td className="py-1 pr-3">{(c.nan_fraction * 100).toFixed(1)}%</td>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="text-zinc-500">
+                      <tr>
+                        <th className="py-1 pr-3">Column</th>
+                        <th className="py-1 pr-3">Mapped to</th>
+                        <th className="py-1 pr-3">Confidence</th>
+                        <th className="py-1 pr-3">Missing %</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {inspectState.data.profile.columns.map((c) => (
+                        <tr key={c.name} className="border-t border-zinc-200 dark:border-zinc-800">
+                          <td className="py-1 pr-3 font-mono">{c.name}</td>
+                          <td className="py-1 pr-3">{c.canonical ?? "—"}</td>
+                          <td className="py-1 pr-3">{c.confidence}</td>
+                          <td className="py-1 pr-3">{(c.nan_fraction * 100).toFixed(1)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
 
               {inspectState.data.profile.warnings.length > 0 && (
@@ -360,10 +389,78 @@ export default function UploadPage() {
                   ))}
                 </div>
               )}
+
+              <button
+                type="button"
+                onClick={resetForNewFile}
+                className="self-start rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium dark:border-zinc-700"
+              >
+                Inspect another file
+              </button>
             </div>
           )}
         </>
       )}
+
+      <details
+        className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
+        open={advancedOpen}
+        onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
+      >
+        <summary className="cursor-pointer text-sm font-medium text-zinc-500">
+          Advanced: inspect another (non-FEMTO) dataset
+        </summary>
+        <div className="mt-3 flex flex-col gap-3 text-sm text-zinc-500">
+          <p>
+            Inspects a file&apos;s structure (delimiter, header, column meanings) and reports
+            compatibility — it does not run a prediction. Switching here clears any in-progress
+            FEMTO analysis.
+          </p>
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="dataset-type"
+              checked={datasetType === "generic"}
+              onChange={() => switchDatasetType("generic")}
+            />
+            Use the dataset-inspection workflow for my next file
+          </label>
+          {datasetType === "generic" && (
+            <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+              <label className="flex flex-col gap-1 text-xs">
+                Declared sampling rate (Hz) — optional, only used if the file has no regular
+                timestamps in seconds.
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={declaredSamplingRateHz}
+                  onChange={(e) => setDeclaredSamplingRateHz(e.target.value)}
+                  placeholder="e.g. 25600"
+                  className="rounded border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs">
+                Declared units — optional
+                <input
+                  type="text"
+                  value={declaredUnits}
+                  onChange={(e) => setDeclaredUnits(e.target.value)}
+                  placeholder="e.g. g, m/s^2"
+                  className="rounded border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => switchDatasetType("femto")}
+                className="self-start text-xs underline"
+              >
+                Back to FEMTO analysis
+              </button>
+            </div>
+          )}
+        </div>
+      </details>
     </main>
   );
 }

@@ -25,6 +25,10 @@ reports/pdf/*
 !reports/figures/.gitkeep
 !reports/metrics/.gitkeep
 !reports/pdf/.gitkeep
+# Small aggregate metrics (no raw data, no paths) - needed by the deployed
+# frontend's /api/models/evaluation route, which has no Blob-fetch fallback
+# the way model artifacts do. See frontend/package.json's prebuild step.
+!reports/metrics/rul_evaluation.json
 
 # local config with private paths
 config/data_paths.toml

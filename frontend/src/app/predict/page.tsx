@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { ApiError, PredictRulResponse, predictRul } from "@/lib/api";
 import { ApplicabilityNote } from "@/components/ApplicabilityNote";
@@ -34,14 +35,19 @@ export default function PredictPage() {
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
+      <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+        Advanced / developer tool. Normal users should use{" "}
+        <Link href="/upload" className="underline">
+          Analyze
+        </Link>{" "}
+        to upload a raw file instead.
+      </div>
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Predict RUL</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Advanced: manual feature-row prediction</h1>
         <p className="mt-1 text-sm text-zinc-500">
           Paste an already-extracted FEMTO feature row (column name → value). This does not
-          accept raw sensor CSVs yet — dataset upload, adapter detection, and feature
-          extraction over HTTP are a separate, not-yet-implemented goal (see the
-          repository&apos;s <code>goals.md</code>). Missing columns fall back to the
-          model&apos;s training median and are disclosed below, not hidden.
+          accept raw sensor CSVs — for that, use the normal Analyze workflow. Missing columns
+          fall back to the model&apos;s training median and are disclosed below, not hidden.
         </p>
       </header>
 

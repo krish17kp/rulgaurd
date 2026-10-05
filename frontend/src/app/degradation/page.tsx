@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { ApiError, HiResponse, HiRow, predictHi } from "@/lib/api";
 
@@ -41,8 +42,17 @@ export default function DegradationPage() {
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
+      <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+        Advanced / developer tool — there is currently no raw-file upload path for a
+        multi-acquisition health trend, only this manual feature-row interface. For a single
+        file&apos;s RUL estimate, use{" "}
+        <Link href="/upload" className="underline">
+          Analyze
+        </Link>
+        .
+      </div>
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Degradation / Health Indicator</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Advanced: degradation / health indicator trend</h1>
         <p className="mt-1 text-sm text-zinc-500">
           Paste an ordered list of feature rows for one bearing run (each needs{" "}
           <code>sequence_index</code> plus the HI model&apos;s feature columns — see{" "}

@@ -23,6 +23,16 @@
 # or commit this; the canonical source is ../src/bearing_pdm.
 /api/bearing_pdm/
 
+# same prebuild step, same reason: a copy of ../reports/metrics/rul_evaluation.json
+# vendored so METRICS_DIR (REPO_ROOT/reports/metrics, REPO_ROOT resolving to
+# this frontend/ directory inside the deployed function) can find it.
+/reports/
+
+# same prebuild step: a copy of the already-committed, already-public FEMTO
+# test fixture (data/fixtures/femto/Bearing1_1/acc_00001.csv, 78KB) for the
+# upload page's "Try sample data" button. Never a full/private dataset.
+/public/sample-data/
+
 # production
 /build
 

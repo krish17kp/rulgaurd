@@ -43,6 +43,18 @@ const genericProfile = (compatibility: Compatibility, reasons: string[] = []): D
   profile: { file: "x.csv", readable: true, warnings: [] },
 });
 
+const femtoResult = {
+  model_name: "extra_trees",
+  rul_seconds: 3600,
+  rul_hours: 1,
+  features_used: [],
+  features_missing: [],
+  compatibility: "FULLY_SUPPORTED" as const,
+  applicability_level: "HIGH" as const,
+  applicability_shift_ratio: 1.0,
+  applicability_reasons: [],
+};
+
 describe("UploadPage", () => {
   beforeEach(() => {
     vi.mocked(inspectDataset).mockReset();
@@ -52,83 +64,73 @@ describe("UploadPage", () => {
     vi.mocked(uploadFileToBlob).mockReset();
   });
 
-  it("defaults to generic mode and switches to femto mode on radio selection", async () => {
+  it("defaults to FEMTO analysis (not generic inspection)", async () => {
     render(<UploadPage />);
-    expect(screen.getByLabelText(/Unknown \/ other dataset/)).toBeChecked();
-
-    await userEvent.click(screen.getByLabelText(/FEMTO \/ supported bearing/));
-    expect(screen.getByLabelText(/FEMTO \/ supported bearing/)).toBeChecked();
-    expect(screen.getByLabelText(/Unknown \/ other dataset/)).not.toBeChecked();
+    expect(screen.getByText(/Analyze Bearing Data/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/dataset-inspection workflow/)).not.toBeChecked();
   });
 
-  it("inspects a small generic file directly, without uploading to blob storage", async () => {
-    vi.mocked(inspectDataset).mockResolvedValue(genericProfile("FULLY_SUPPORTED"));
+  it("selecting a file shows its name and size without launching analysis yet", async () => {
     render(<UploadPage />);
-
     const input = screen.getByTestId("file-input") as HTMLInputElement;
-    await userEvent.upload(input, smallFile());
+    await userEvent.upload(input, smallFile("acc_00001.csv"));
 
-    await waitFor(() => expect(screen.getByText("FULLY SUPPORTED")).toBeInTheDocument());
-    expect(inspectDataset).toHaveBeenCalledTimes(1);
-    expect(uploadFileToBlob).not.toHaveBeenCalled();
+    expect(screen.getByText("acc_00001.csv")).toBeInTheDocument();
+    expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /analyze bearing/i })).toBeEnabled();
   });
 
-  it("shows RETRAIN_REQUIRED as a distinct badge from FULLY_SUPPORTED", async () => {
-    vi.mocked(inspectDataset).mockResolvedValue(
-      genericProfile("RETRAIN_REQUIRED", ["sampling rate matches, but model applicability is LOW"])
-    );
+  it("clicking Analyze Bearing launches the FEMTO prediction and shows the result", async () => {
+    vi.mocked(predictRulFromFemtoAcquisition).mockResolvedValue(femtoResult);
     render(<UploadPage />);
-    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, smallFile());
 
-    await waitFor(() => expect(screen.getByText("RETRAIN REQUIRED")).toBeInTheDocument());
-    expect(screen.getByText(/model applicability is LOW/)).toBeInTheDocument();
+    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, smallFile("acc_00001.csv"));
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+
+    await waitFor(() => expect(screen.getByText(/1\.00 hours/)).toBeInTheDocument());
+    expect(predictRulFromFemtoAcquisition).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/can be trusted at face value/)).toBeInTheDocument();
   });
 
-  it("shows an UNSUPPORTED badge and reasons for an unrecognised dataset", async () => {
-    vi.mocked(inspectDataset).mockResolvedValue(
-      genericProfile("UNSUPPORTED", ["no vibration channel recognised in the header"])
-    );
-    render(<UploadPage />);
-    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, smallFile());
-
-    await waitFor(() => expect(screen.getByText("UNSUPPORTED")).toBeInTheDocument());
-    expect(screen.getByText(/no vibration channel recognised/)).toBeInTheDocument();
-  });
-
-  it("shows an error with a working retry button when inspection fails", async () => {
-    vi.mocked(inspectDataset)
+  it("shows an error with a working retry button when prediction fails, then succeeds", async () => {
+    vi.mocked(predictRulFromFemtoAcquisition)
       .mockRejectedValueOnce(new ApiError(500, "backend exploded"))
-      .mockResolvedValueOnce(genericProfile("FULLY_SUPPORTED"));
+      .mockResolvedValueOnce(femtoResult);
 
     render(<UploadPage />);
     await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, smallFile());
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
 
     await waitFor(() => expect(screen.getByText("backend exploded")).toBeInTheDocument());
     await userEvent.click(screen.getByRole("button", { name: /retry/i }));
 
-    await waitFor(() => expect(screen.getByText("FULLY SUPPORTED")).toBeInTheDocument());
-    expect(inspectDataset).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.getByText(/1\.00 hours/)).toBeInTheDocument());
+    expect(predictRulFromFemtoAcquisition).toHaveBeenCalledTimes(2);
   });
 
-  it("predicts RUL directly for a small FEMTO upload", async () => {
-    vi.mocked(predictRulFromFemtoAcquisition).mockResolvedValue({
-      model_name: "extra_trees",
-      rul_seconds: 3600,
-      rul_hours: 1,
-      features_used: [],
-      features_missing: [],
-      compatibility: "FULLY_SUPPORTED",
-      applicability_level: "HIGH",
-      applicability_shift_ratio: 1.0,
-      applicability_reasons: [],
-    });
-
+  it("'Analyze another file' clears the result and returns to file selection", async () => {
+    vi.mocked(predictRulFromFemtoAcquisition).mockResolvedValue(femtoResult);
     render(<UploadPage />);
-    await userEvent.click(screen.getByLabelText(/FEMTO \/ supported bearing/));
-    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, smallFile("acc_00001.csv"));
 
+    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, smallFile());
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
     await waitFor(() => expect(screen.getByText(/1\.00 hours/)).toBeInTheDocument());
-    expect(predictRulFromFemtoAcquisition).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(screen.getByRole("button", { name: /analyze another file/i }));
+
+    expect(screen.queryByText(/1\.00 hours/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Try sample data/)).toBeInTheDocument();
+  });
+
+  it("'Remove' clears a selected file before analyzing", async () => {
+    render(<UploadPage />);
+    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, smallFile("acc_00001.csv"));
+    expect(screen.getByText("acc_00001.csv")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /remove/i }));
+
+    expect(screen.queryByText("acc_00001.csv")).not.toBeInTheDocument();
+    expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
   });
 
   it("routes a large FEMTO upload through direct-to-storage, showing upload progress then processing", async () => {
@@ -139,20 +141,17 @@ describe("UploadPage", () => {
       return "https://example.public.blob.vercel-storage.com/acc-123.csv";
     });
     vi.mocked(predictRulFromFemtoAcquisitionBlob).mockResolvedValue({
-      model_name: "extra_trees",
+      ...femtoResult,
       rul_seconds: 1800,
       rul_hours: 0.5,
-      features_used: [],
-      features_missing: [],
-      compatibility: "FULLY_SUPPORTED",
       applicability_level: "MEDIUM",
       applicability_shift_ratio: 2.1,
       applicability_reasons: ["feature distribution shift (2.10x the in-domain reference)"],
     });
 
     render(<UploadPage />);
-    await userEvent.click(screen.getByLabelText(/FEMTO \/ supported bearing/));
     await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, bigFile("acc_big.csv"));
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
 
     await waitFor(() => expect(screen.getByText(/0\.50 hours/)).toBeInTheDocument());
     expect(uploadFileToBlob).toHaveBeenCalledTimes(1);
@@ -160,21 +159,20 @@ describe("UploadPage", () => {
       "https://example.public.blob.vercel-storage.com/acc-123.csv"
     );
     expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
-    // The MEDIUM applicability warning must still be surfaced for a large upload.
     expect(screen.getByText(/Model applicability: MEDIUM/)).toBeInTheDocument();
   });
 
-  it("switching modes mid-request discards the stale in-flight result", async () => {
-    let resolveInspect!: (v: unknown) => void;
-    vi.mocked(inspectDataset).mockReturnValue(new Promise((r) => (resolveInspect = r)) as never);
-
+  it("the Advanced section provides generic dataset inspection, off by default", async () => {
+    vi.mocked(inspectDataset).mockResolvedValue(genericProfile("UNSUPPORTED", ["no vibration channel recognised in the header"]));
     render(<UploadPage />);
+
+    await userEvent.click(screen.getByText(/Advanced: inspect another/));
+    await userEvent.click(screen.getByLabelText(/dataset-inspection workflow/));
     await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, smallFile());
-    await userEvent.click(screen.getByLabelText(/FEMTO \/ supported bearing/));
+    await userEvent.click(screen.getByRole("button", { name: /inspect dataset/i }));
 
-    resolveInspect(genericProfile("FULLY_SUPPORTED"));
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(screen.queryByText("FULLY SUPPORTED")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("UNSUPPORTED")).toBeInTheDocument());
+    expect(screen.getByText(/no vibration channel recognised/)).toBeInTheDocument();
+    expect(inspectDataset).toHaveBeenCalledTimes(1);
   });
 });
