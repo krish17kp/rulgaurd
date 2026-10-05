@@ -772,3 +772,21 @@ def test_predict_rul_rejects_too_many_nan_features_instead_of_predicting_on_them
     )
     assert response.status_code == 422
     assert "missing" in response.json()["detail"].lower()
+
+
+@pytest.mark.skipif(not BUNDLE_PRESENT, reason="artifacts/models/cross_domain_bundle.joblib not present")
+def test_load_bundle_drops_the_unused_sn_fraction_multi_entry_to_save_memory():
+    """_load_bundle only ever serves bundle["raw_seconds"] to callers
+    (routing.candidates_from_bundle / reliability.BUNDLE_ENTRY); the other
+    entry's full fitted model+calibrators must not stay resident in
+    _MODEL_CACHE for the rest of the process's life (Hobby-tier /tmp+memory
+    budget - see docs/PRODUCTION_RELEASE.md)."""
+    api._MODEL_CACHE.clear()
+    bundle = api._load_bundle()
+    assert bundle is not None
+    assert set(bundle) == {"raw_seconds"}
+    # Cached value is the same trimmed dict, not the original.
+    assert set(api._MODEL_CACHE[api.CROSS_DOMAIN_BUNDLE_NAME]) == {"raw_seconds"}
+    # Idempotent on a second call (cache already trimmed).
+    assert api._load_bundle() is bundle
+    api._MODEL_CACHE.clear()

@@ -1024,8 +1024,22 @@ def _load_joblib(name: str) -> Any | None:
 def _load_bundle() -> Any | None:
     """The cross-domain bundle (~200MB): supplies only the cached applicability
     model and conformal calibrator; its models are never used for the served
-    prediction. Loaded once per process through the same verified loader."""
-    return _load_joblib(CROSS_DOMAIN_BUNDLE_NAME)
+    prediction. Loaded once per process through the same verified loader.
+
+    Only bundle["raw_seconds"] is ever read anywhere this is called from
+    (routing.candidates_from_bundle filters to "raw_seconds"; reliability.py's
+    BUNDLE_ENTRY is "raw_seconds") - the bundle's other entry,
+    "sn_fraction_multi", carries its own full fitted RUL model + calibrators
+    and is dead weight here. Dropping it immediately after load (rather than
+    holding the whole dict in _MODEL_CACHE for a warm instance's lifetime)
+    roughly halves this artifact's resident memory - the suspected cause of
+    the applicability/OOD gate failing to load on the Hobby tier's /tmp+memory
+    budget alongside rul_extra_trees.joblib (docs/PRODUCTION_RELEASE.md)."""
+    bundle = _load_joblib(CROSS_DOMAIN_BUNDLE_NAME)
+    if isinstance(bundle, dict) and set(bundle) - {"raw_seconds"}:
+        bundle = {"raw_seconds": bundle["raw_seconds"]}
+        _MODEL_CACHE[CROSS_DOMAIN_BUNDLE_NAME] = bundle
+    return bundle
 
 
 # Direct-to-storage uploads (frontend -> Vercel Blob -> this API) only ever
