@@ -53,3 +53,6 @@ logs/
 
 # local-only session handoff notes - never pushed
 AGENT_HANDOFF.md
+
+.vercel
+.env*
