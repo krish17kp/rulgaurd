@@ -64,20 +64,39 @@ confirming this isn't a free config fix. **The system fails closed correctly in 
 fabricated applicability result. This is documented as an accepted limitation of the free tier,
 not silently hidden.
 
-**Partial mitigation, NOT_VERIFIED live (2026-10-05):** `_load_bundle` (`api.py`) now trims
+**Memory mitigation, NOT_VERIFIED live (2026-10-05):** `_load_bundle` (`api.py`) now trims
 `cross_domain_bundle.joblib`'s cached in-process object to only the `raw_seconds` entry
 immediately after load — the bundle also carries a second full fitted `sn_fraction_multi`
 model plus `hi_model`/`stage_thresholds`/`hi_name`, none of which the API ever reads. Measured
 locally against the real 219MB artifact: steady-state process RSS after load drops from
-639.9MB to 431.8MB (~33%). **This does not touch the documented root cause above** — the
-`ENOSPC` is `/tmp` *disk* space from the downloaded joblib files themselves (108MB +
-219MB on disk, unchanged by this fix, since `ensure_artifact` writes the whole file to
-`/tmp` before `joblib.load` ever runs), not Python object memory. The fix is a genuine,
-tested reduction in what stays resident in RAM afterward, which may still help if memory
-(not disk) is the actual binding constraint on a given Hobby-tier instance, but it was not
-re-verified against the live deployment in this session — no access to the production
-Vercel account/logs was available here. Re-run the same `vercel logs` live check documented
-above after deploying this change before upgrading this line to PRODUCTION_VERIFIED.
+639.9MB to 431.8MB (~33%). This alone does not touch the `/tmp` *disk* ENOSPC below (the
+downloaded joblib files, not Python object memory) — see the disk fix that follows.
+
+**Disk root-cause fix, NOT_VERIFIED live (2026-10-05):** `_load_joblib` (`api.py`) now deletes
+an artifact's *downloaded cache copy* (under `ARTIFACT_CACHE_DIR`/`/tmp`, never the repo-local
+`artifacts/models/` dev checkout) immediately after `joblib.load()` succeeds. The deserialized
+model already lives in `_MODEL_CACHE` for the rest of the process's life — `_load_joblib`'s own
+cache-hit fast path means the file is never read again — so the on-disk copy was pure dead
+weight, and is the actual mechanism behind the `[Errno 28] No space left on device` above:
+`rul_extra_trees.joblib` (108MB) + `cross_domain_bundle.joblib` (219MB) both being downloaded
+and left on disk sums to 327MB, which the confirmed-live failure shows exceeded the Hobby
+tier's `/tmp` budget. **Proved locally against the real artifact bytes**, not a synthetic
+fixture: loading both real models sequentially through `_load_joblib` (mocked HTTP transport
+serving the actual files, real sha256 verification, real `joblib.load`) now leaves the download
+cache directory at 0MB after each load, instead of accumulating to 327MB — see commit
+`a87cad7`. Both new regression tests pass; full suite (751 tests) and ruff pass.
+
+**Why this is NOT_VERIFIED rather than PRODUCTION_VERIFIED:** no access to the production
+Vercel account, `vercel logs`, or a deploy trigger was available in this session. The local
+proof demonstrates the fix removes the disk-accumulation mechanism entirely (peak cache-dir
+usage per sequential load, not summed), which directly matches the documented failure's own
+description (two files' sizes summing over the tier's `/tmp` limit) — but re-running the exact
+`vercel logs` check from the table below after deploying this branch is required before this
+line can be upgraded to PRODUCTION_VERIFIED. If `/tmp` still fails after deploying this fix,
+the remaining candidate explanations (not yet locally testable without a real Fluid Compute
+instance) are: the Python runtime's own unpacked dependencies (numpy/scipy/sklearn/duckdb)
+consuming `/tmp` headroom before any model download starts, or a `/tmp` quota materially
+smaller than 327MB even for one artifact at a time.
 
 ## Live verification performed (PRODUCTION, not just preview)
 All of the following were run against **https://rulguard.vercel.app** directly in this session:
