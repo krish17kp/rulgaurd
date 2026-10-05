@@ -3,6 +3,23 @@ name = "rulguard"
 version = "0.1.0"
 description = "RULGuard: Bearing Health Monitoring and Remaining Useful Life Prediction (research prototype, not production)."
 requires-python = ">=3.11"
+# Vercel's Python function build (`uv`, "Using Python 3.12 from pyproject.toml") installs
+# from THIS list, not api/requirements.txt or the root requirements.txt - an empty/missing
+# list here silently produced a venv with nothing installed, surfacing as
+# "ModuleNotFoundError: No module named 'httpx'" in production. Mirrors api/requirements.txt
+# exactly (the deployed FastAPI function's actual import set). Local dev installs this
+# package editable with `pip install -e . --no-deps` (see rulgaurd-public/CLAUDE.md), which
+# ignores this list entirely, so it has no effect on the full local requirements.txt install.
+dependencies = [
+    "fastapi",
+    "pydantic",
+    "python-multipart",
+    "httpx",
+    "joblib",
+    "scikit-learn",
+    "numpy",
+    "pandas",
+]
 
 [tool.ruff]
 line-length = 100

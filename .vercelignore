@@ -1,0 +1,33 @@
+# Not needed to build/run the Next.js frontend or the FastAPI function.
+# Several of these are tens of GB (datasets/ is LFS-tracked, not gitignored)
+# and traversing them during `vercel deploy`'s upload step is what OOM-killed
+# the CLI on this machine - excluding them is a memory-safety fix, not a
+# deployment-architecture change.
+datasets/
+data/
+context/
+deploy_data/
+reports/
+deliverables/
+md/
+docs/
+*.pdf
+*.docx
+
+# Model binaries are fetched remotely at cold start via src/bearing_pdm/
+# artifacts.py's checksum-verified loader (see artifacts/models/manifest.json,
+# which IS needed and is small - do not exclude it).
+artifacts/models/*.joblib
+artifacts/*.duckdb
+artifacts/*.duckdb.wal
+artifacts/indices/
+
+# Python test/venv noise, not part of the deployed function.
+tests/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Local-only personal tooling (see capstone-root CLAUDE.md) and nightshift
+# worktree/state directories outside the repo anyway, listed for clarity.
+.claude/
