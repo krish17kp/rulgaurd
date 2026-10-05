@@ -47,6 +47,26 @@ def test_load_manifest_malformed_json_returns_empty_not_raises(isolated_dirs):
     assert artifacts.load_manifest() == {}
 
 
+def test_load_manifest_prefers_env_var_over_file(isolated_dirs, monkeypatch):
+    """ARTIFACT_MANIFEST_JSON is the deployment escape hatch for when
+    manifest.json isn't bundled onto disk (pip-installed package, outside
+    src/) - it must win over a stale/absent local file, not merely
+    supplement it."""
+    artifacts.MANIFEST_PATH.write_text(json.dumps({"artifacts": {"from_file.joblib": {}}}))
+    monkeypatch.setenv(
+        "ARTIFACT_MANIFEST_JSON",
+        json.dumps({"artifacts": {"from_env.joblib": {"sha256": "x", "size_bytes": 1,
+                                                       "source_url": None}}}),
+    )
+    assert "from_env.joblib" in artifacts.load_manifest()
+    assert "from_file.joblib" not in artifacts.load_manifest()
+
+
+def test_load_manifest_malformed_env_var_returns_empty_not_raises(isolated_dirs, monkeypatch):
+    monkeypatch.setenv("ARTIFACT_MANIFEST_JSON", "{not valid json")
+    assert artifacts.load_manifest() == {}
+
+
 def test_ensure_artifact_uses_local_file_without_touching_network(isolated_dirs, monkeypatch):
     local = isolated_dirs / "model.joblib"
     local.write_bytes(b"real local artifact")

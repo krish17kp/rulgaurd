@@ -74,9 +74,25 @@ def _cache_dir() -> Path:
 
 
 def load_manifest() -> dict[str, dict[str, Any]]:
-    """{name: {sha256, size_bytes, source_url}} from the committed
-    manifest - never guessed, never generated at request time. Missing or
-    unreadable manifest degrades to {} (no entries), not an exception."""
+    """{name: sha256, size_bytes, source_url} from the committed manifest -
+    never guessed, never generated at request time. Missing or unreadable
+    manifest degrades to {} (no entries), not an exception.
+
+    ARTIFACT_MANIFEST_JSON (the manifest's own JSON text, not a path) is an
+    escape hatch for a deployment where the package is pip-installed rather
+    than run from this source tree: manifest.json lives outside src/, so it
+    is not included in a normal package install, and bundling it via
+    vercel.json's includeFiles hit an unresolved platform error. The
+    manifest holds only checksums/sizes/URLs - never a binary or a secret -
+    so passing its small JSON text through an env var is a reasonable
+    deployment mechanism, not a security concern."""
+    inline = os.environ.get("ARTIFACT_MANIFEST_JSON")
+    if inline:
+        try:
+            return json.loads(inline).get("artifacts", {})
+        except json.JSONDecodeError:
+            logger.warning("ARTIFACT_MANIFEST_JSON is set but could not be parsed - ignoring it")
+            return {}
     if not MANIFEST_PATH.exists():
         return {}
     try:

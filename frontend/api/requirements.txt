@@ -6,3 +6,12 @@ joblib
 scikit-learn
 numpy
 pandas
+# Local path install of this repo's src-layout package (pyproject.toml ->
+# [tool.setuptools.packages.find] where=["src"]) so bearing_pdm lands in the
+# function venv's site-packages the same way fastapi/httpx/etc. do above -
+# includeFiles with a "../" traversal outside the function's rootDirectory
+# hit an undiagnoseable "internal Vercel error" at the deploy-outputs step
+# (confirmed on 3 consecutive deploys, with and without brace-expansion
+# globs); this sidesteps that entirely by using the install step that's
+# already proven to work.
+../..
