@@ -3,7 +3,9 @@
   "outputDirectory": "frontend/.next",
   "installCommand": "cd frontend && npm install",
   "functions": {
-    "api/index.py": {}
+    "api/index.py": {
+      "maxDuration": 60
+    }
   },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index.py" }
