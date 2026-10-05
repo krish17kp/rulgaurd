@@ -68,6 +68,26 @@ def test_rejects_non_blob_host_url():
     assert "blob_url" in response.json()["detail"]
 
 
+def test_rejects_model_artifact_url_and_never_calls_delete(monkeypatch):
+    """Independent-review finding (HIGH): without a path check, anyone could pass a real
+    manifest-published model artifact's URL as blob_url and have it deleted by the existing
+    finally: _delete_blob(...) - an unauthenticated way to destroy production model artifacts.
+    _validate_blob_url must reject the URL before the handler's try/finally ever runs."""
+    deleted = []
+    monkeypatch.setattr(api, "_delete_blob", lambda url: deleted.append(url))
+    url = "https://example.public.blob.vercel-storage.com/models/rul_extra_trees.joblib"
+
+    response = client.post("/predict/rul/femto-acquisition/blob", json={"blob_url": url})
+    assert response.status_code == 422
+    assert "model artifacts" in response.json()["detail"].lower()
+    assert deleted == []
+
+    response = client.post("/dataset/inspect/blob", json={"blob_url": url})
+    assert response.status_code == 422
+    assert "model artifacts" in response.json()["detail"].lower()
+    assert deleted == []
+
+
 @pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
 def test_blob_femto_path_matches_direct_multipart_reference(blob_url, monkeypatch):
     content = FEMTO_ACQ.read_bytes()

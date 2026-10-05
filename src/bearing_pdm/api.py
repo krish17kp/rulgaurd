@@ -1084,6 +1084,23 @@ def _validate_blob_url(url: str) -> None:
             422, "INVALID_BLOB_URL",
             "blob_url must be an https *.blob.vercel-storage.com object, not an arbitrary URL.",
         )
+    _reject_model_artifact_path(parsed.path)
+
+
+def _reject_model_artifact_path(path: str) -> None:
+    """The deployment's trained model artifacts live in the same public Blob
+    store (under models/) as user uploads, at URLs published in
+    artifacts/models/manifest.json. Without this check, anyone could pass
+    one of those URLs as blob_url to a predict/inspect route and have it
+    deleted by the existing finally: _delete_blob(...) - an unauthenticated
+    way to destroy production model artifacts, with no credentials needed
+    (independent review finding, HIGH). These routes only ever legitimately
+    receive a user-uploaded dataset file, never anything under models/."""
+    if path.lstrip("/").startswith("models/"):
+        raise ApiError(
+            422, "INVALID_BLOB_URL",
+            "blob_url may not reference this deployment's model artifacts.",
+        )
 
 
 class BlobUploadRequest(BaseModel):
