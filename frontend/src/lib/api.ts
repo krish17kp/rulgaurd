@@ -10,11 +10,19 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 export class ApiError extends Error {
   status: number;
   detail: string;
+  // The backend's own retryable bool (src/bearing_pdm/api.py's ApiError/
+  // _error_content): true only when the same request could succeed later
+  // unchanged (a transient 503, a network error). Defaults to true so a
+  // caller that doesn't pass it (or a body without the field, e.g. a non-API
+  // 500) keeps today's "always offer Retry" behaviour rather than silently
+  // hiding it.
+  retryable: boolean;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, retryable = true) {
     super(detail);
     this.status = status;
     this.detail = detail;
+    this.retryable = retryable;
   }
 }
 
@@ -113,7 +121,11 @@ async function parseErrorResponse(response: Response): Promise<ApiError> {
     body && typeof body === "object" && "detail" in body
       ? formatDetail((body as { detail: unknown }).detail)
       : `Request failed with status ${response.status}`;
-  return new ApiError(response.status, detail);
+  const retryable =
+    body && typeof body === "object" && "retryable" in body
+      ? Boolean((body as { retryable: unknown }).retryable)
+      : true;
+  return new ApiError(response.status, detail, retryable);
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

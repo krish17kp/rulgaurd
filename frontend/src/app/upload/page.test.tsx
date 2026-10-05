@@ -108,6 +108,20 @@ describe("UploadPage", () => {
     expect(predictRulFromFemtoAcquisition).toHaveBeenCalledTimes(2);
   });
 
+  it("a non-retryable error (e.g. a malformed file) hides Retry and tells the user to pick a different file", async () => {
+    vi.mocked(predictRulFromFemtoAcquisition).mockRejectedValueOnce(
+      new ApiError(422, "Not a numeric, headerless FEMTO acc_*.csv file.", false)
+    );
+    render(<UploadPage />);
+
+    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, smallFile());
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+
+    await waitFor(() => expect(screen.getByText(/Not a numeric, headerless/)).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /^retry$/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/won't succeed on retry as-is/)).toBeInTheDocument();
+  });
+
   it("'Analyze another file' clears the result and returns to file selection", async () => {
     vi.mocked(predictRulFromFemtoAcquisition).mockResolvedValue(femtoResult);
     render(<UploadPage />);

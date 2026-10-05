@@ -24,14 +24,14 @@ type InspectState =
   | { status: "idle" }
   | { status: "uploading"; progress: number }
   | { status: "loading" }
-  | { status: "error"; error: string; retry: () => void }
+  | { status: "error"; error: string; retryable: boolean; retry: () => void }
   | { status: "ready"; data: DatasetProfileResponse };
 
 type PredictState =
   | { status: "idle" }
   | { status: "uploading"; progress: number }
   | { status: "loading" }
-  | { status: "error"; error: string; retry: () => void }
+  | { status: "error"; error: string; retryable: boolean; retry: () => void }
   | { status: "ready"; data: PredictRulResponse };
 
 const BADGE: Record<Compatibility, string> = {
@@ -97,6 +97,7 @@ export default function UploadPage() {
       setInspectState({
         status: "error",
         error: "Declared sampling rate must be a positive number up to 1,000,000 Hz.",
+        retryable: false,
         retry,
       });
       return;
@@ -105,6 +106,7 @@ export default function UploadPage() {
       setInspectState({
         status: "error",
         error: "Declared units must be at most 40 characters.",
+        retryable: false,
         retry,
       });
       return;
@@ -127,7 +129,8 @@ export default function UploadPage() {
     } catch (err) {
       if (seq !== requestSeq.current) return;
       const message = err instanceof BlobUploadError ? err.message : (err as ApiError).detail;
-      setInspectState({ status: "error", error: message, retry });
+      const retryable = err instanceof BlobUploadError ? true : (err as ApiError).retryable;
+      setInspectState({ status: "error", error: message, retryable, retry });
     }
   }
 
@@ -152,7 +155,8 @@ export default function UploadPage() {
     } catch (err) {
       if (seq !== requestSeq.current) return;
       const message = err instanceof BlobUploadError ? err.message : (err as ApiError).detail;
-      setPredictState({ status: "error", error: message, retry });
+      const retryable = err instanceof BlobUploadError ? true : (err as ApiError).retryable;
+      setPredictState({ status: "error", error: message, retryable, retry });
     }
   }
 
@@ -276,13 +280,20 @@ export default function UploadPage() {
           {predictState.status === "error" && (
             <div className="flex flex-col gap-2 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
               <p>{predictState.error}</p>
-              <button
-                type="button"
-                onClick={predictState.retry}
-                className="self-start rounded border border-red-400 px-2 py-1 text-xs font-medium"
-              >
-                Retry
-              </button>
+              {predictState.retryable ? (
+                <button
+                  type="button"
+                  onClick={predictState.retry}
+                  className="self-start rounded border border-red-400 px-2 py-1 text-xs font-medium"
+                >
+                  Retry
+                </button>
+              ) : (
+                <p className="text-xs text-red-600 dark:text-red-400">
+                  This file won&apos;t succeed on retry as-is — use &quot;Remove&quot; above and choose a
+                  different file.
+                </p>
+              )}
             </div>
           )}
 
@@ -330,13 +341,20 @@ export default function UploadPage() {
           {inspectState.status === "error" && (
             <div className="flex flex-col gap-2 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
               <p>{inspectState.error}</p>
-              <button
-                type="button"
-                onClick={inspectState.retry}
-                className="self-start rounded border border-red-400 px-2 py-1 text-xs font-medium"
-              >
-                Retry
-              </button>
+              {inspectState.retryable ? (
+                <button
+                  type="button"
+                  onClick={inspectState.retry}
+                  className="self-start rounded border border-red-400 px-2 py-1 text-xs font-medium"
+                >
+                  Retry
+                </button>
+              ) : (
+                <p className="text-xs text-red-600 dark:text-red-400">
+                  This file won&apos;t succeed on retry as-is — use &quot;Remove&quot; above and choose a
+                  different file.
+                </p>
+              )}
             </div>
           )}
 
