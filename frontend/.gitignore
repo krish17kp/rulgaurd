@@ -17,6 +17,12 @@
 /.next/
 /out/
 
+# auto-generated at build time by the "prebuild" script (package.json) -
+# a fresh copy of ../src/bearing_pdm, vendored here so the Vercel Python
+# function has it within its rootDirectory-scoped bundle. Never hand-edit
+# or commit this; the canonical source is ../src/bearing_pdm.
+/api/bearing_pdm/
+
 # production
 /build
 
