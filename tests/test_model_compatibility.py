@@ -29,6 +29,7 @@ def fake_model(tmp_path, monkeypatch):
     """Selected-model metadata with a known schema, independent of the mounted artifacts."""
     (tmp_path / "rul_selected_model.json").write_text(json.dumps({"selected": "extra_trees"}))
     monkeypatch.setattr(artifacts, "MODELS_DIR", tmp_path)
+    monkeypatch.setattr(artifacts, "MANIFEST_PATH", tmp_path / "manifest.json")  # no real source_url to fall back to - genuinely unavailable, not just locally missing
     monkeypatch.setattr(api, "_MODEL_CACHE", {
         "rul_extra_trees.joblib": SimpleNamespace(feature_columns=tuple(FEATURES)),
     })
@@ -151,6 +152,7 @@ def assert_model_unavailable(response):
 
 def test_missing_model_fails_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(artifacts, "MODELS_DIR", tmp_path)
+    monkeypatch.setattr(artifacts, "MANIFEST_PATH", tmp_path / "manifest.json")  # no real source_url to fall back to - genuinely unavailable, not just locally missing
     monkeypatch.setattr(api, "_MODEL_CACHE", {})
     for dataset_id in ("femto", "college", "unknown"):
         assert_model_unavailable(client.post("/models/compatibility", json={
@@ -161,6 +163,7 @@ def test_missing_model_fails_closed(tmp_path, monkeypatch):
 def test_selected_model_json_present_but_artifact_missing_fails_closed(tmp_path, monkeypatch):
     (tmp_path / "rul_selected_model.json").write_text(json.dumps({"selected": "extra_trees"}))
     monkeypatch.setattr(artifacts, "MODELS_DIR", tmp_path)
+    monkeypatch.setattr(artifacts, "MANIFEST_PATH", tmp_path / "manifest.json")  # no real source_url to fall back to - genuinely unavailable, not just locally missing
     monkeypatch.setattr(api, "_MODEL_CACHE", {})
     assert_model_unavailable(client.post("/models/compatibility", json={
         "dataset_id": "femto", "feature_names": FEATURES,
@@ -171,6 +174,7 @@ def test_selected_model_json_present_but_artifact_missing_fails_closed(tmp_path,
 def test_unusable_selection_metadata_fails_closed(tmp_path, monkeypatch, selected):
     (tmp_path / "rul_selected_model.json").write_text(selected)
     monkeypatch.setattr(artifacts, "MODELS_DIR", tmp_path)
+    monkeypatch.setattr(artifacts, "MANIFEST_PATH", tmp_path / "manifest.json")  # no real source_url to fall back to - genuinely unavailable, not just locally missing
     monkeypatch.setattr(api, "_MODEL_CACHE", {
         "rul_extra_trees.joblib": SimpleNamespace(feature_columns=tuple(FEATURES)),
     })

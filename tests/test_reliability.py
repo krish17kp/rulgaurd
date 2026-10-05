@@ -76,6 +76,7 @@ def isolated(monkeypatch, tmp_path):
     """API pointed at an empty artifact/metrics dir with a synthetic served model."""
     model = _served()
     monkeypatch.setattr(artifacts, "MODELS_DIR", tmp_path)
+    monkeypatch.setattr(artifacts, "MANIFEST_PATH", tmp_path / "manifest.json")  # no real source_url to fall back to - genuinely unavailable, not just locally missing
     monkeypatch.setattr(api, "METRICS_DIR", tmp_path)
     monkeypatch.setattr(api, "_MODEL_CACHE", {"rul_extra_trees.joblib": model})
     return tmp_path, model

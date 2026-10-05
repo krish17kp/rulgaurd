@@ -309,6 +309,7 @@ def test_health_reports_model_versions_without_paths():
 
 def test_health_reports_missing_models_as_not_ready_not_as_an_error(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(artifacts, "MODELS_DIR", tmp_path)
+    monkeypatch.setattr(artifacts, "MANIFEST_PATH", tmp_path / "manifest.json")  # no real source_url to fall back to - genuinely unavailable, not just locally missing
     monkeypatch.setattr(api, "_MODEL_CACHE", {})
     monkeypatch.setattr(api, "_MODEL_VERSIONS", {})
     with caplog.at_level(logging.INFO, logger="bearing_pdm.api"):

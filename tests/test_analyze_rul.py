@@ -267,6 +267,7 @@ def test_low_applicability_suppresses_the_rul(raw, monkeypatch):
 
 def test_selected_metadata_missing(raw, monkeypatch, tmp_path):
     monkeypatch.setattr(artifacts, 'MODELS_DIR', tmp_path)
+    monkeypatch.setattr(artifacts, 'MANIFEST_PATH', tmp_path / 'manifest.json')  # no real source_url to fall back to - genuinely unavailable, not just locally missing
     response = post(raw)
     assert response.status_code == 503
     assert response.json()['code'] == 'MODEL_UNAVAILABLE'

@@ -703,6 +703,7 @@ def test_predict_rul_returns_503_when_model_artifact_missing(monkeypatch):
     # reads artifacts.MODELS_DIR (and api.MODELS_DIR itself is otherwise
     # unused by the loading path now) - see src/bearing_pdm/artifacts.py.
     monkeypatch.setattr(artifacts, "MODELS_DIR", api.MODELS_DIR.parent / "does-not-exist")
+    monkeypatch.setattr(artifacts, "MANIFEST_PATH", api.MODELS_DIR.parent / "does-not-exist" / "manifest.json")  # no real source_url to fall back to - genuinely unavailable, not just locally missing
     api._MODEL_CACHE.clear()
     response = client.post("/predict/rul", json={"dataset_id": "femto", "features": {}})
     assert response.status_code == 503
