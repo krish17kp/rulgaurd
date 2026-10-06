@@ -76,6 +76,44 @@ def test_models_evaluation_returns_real_metrics_with_college_caveat():
     assert "oracle" in body["college_naive_caveat"].lower()
 
 
+TRAJECTORY_DATA_PRESENT = (api.DEPLOY_DATA_DIR / "trajectory_data.json").exists()
+
+
+@pytest.mark.skipif(not TRAJECTORY_DATA_PRESENT, reason="deploy_data/trajectory_data.json not present")
+def test_trajectory_femto_bearings_lists_the_six_learning_bearings():
+    response = client.get("/trajectory/femto/bearings")
+    assert response.status_code == 200
+    bearings = response.json()["bearings"]
+    assert "femto:Bearing2_1" in bearings
+    assert len(bearings) == 6
+
+
+@pytest.mark.skipif(not TRAJECTORY_DATA_PRESENT, reason="deploy_data/trajectory_data.json not present")
+def test_trajectory_femto_bearing2_1_matches_committed_lobo_evaluation():
+    response = client.get("/trajectory/femto/femto:Bearing2_1")
+    assert response.status_code == 200
+    body = response.json()
+    # Same arrays, same length - no resampling/fabrication.
+    n = len(body["sequence_index"])
+    assert n == len(body["reference_hi"]) == len(body["stage"]) == len(body["actual_rul_seconds"])
+    assert set(body["stage"]) <= {"HEALTHY", "DEGRADING", "CRITICAL"}
+    # Cross-checked against deploy_data/rul_evaluation.json's femto_lobo entry
+    # for this bearing (scripts/build_trajectory_data.py reads the same file).
+    evaluation = json.loads((api.DEPLOY_DATA_DIR / "rul_evaluation.json").read_text())
+    expected = next(
+        r for r in evaluation["femto_lobo"]
+        if r["model"] == "extra_trees" and r["held_out_bearing"] == "femto:Bearing2_1"
+    )
+    assert body["held_out_metrics"]["mae_seconds"] == expected["mae_seconds"]
+    assert body["held_out_metrics"]["n"] == expected["n"] == n
+
+
+@pytest.mark.skipif(not TRAJECTORY_DATA_PRESENT, reason="deploy_data/trajectory_data.json not present")
+def test_trajectory_femto_unknown_bearing_is_404():
+    response = client.get("/trajectory/femto/femto:NotABearing")
+    assert response.status_code == 404
+
+
 def test_models_info_lists_femto_only():
     response = client.get("/models/info")
     assert response.status_code == 200

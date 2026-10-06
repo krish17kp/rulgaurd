@@ -7,6 +7,7 @@ const PRIMARY_LINKS = [
   { href: "/", label: "Overview" },
   { href: "/upload", label: "Analyze" },
   { href: "/evaluation", label: "Reliability" },
+  { href: "/trajectory", label: "Explore bearing trajectory" },
 ];
 
 const ADVANCED_LINKS = [
