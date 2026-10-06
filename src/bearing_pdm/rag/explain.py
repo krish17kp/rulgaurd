@@ -2,15 +2,16 @@
 fallback, both consuming the SAME immutable prediction context and the SAME
 retrieved citations.
 
-Online-first per goals.md #6: `OnlineLLM` is the real provider path, gated on
-an API key (checked as AI_GATEWAY_API_KEY, then VERCEL_AI_GATEWAY_API_KEY,
-then this project's existing `api_key` Vercel env var). A real credential is
-present and authenticates (GET /v1/models returns 200), but generation is
-currently blocked at the account level: every chat-completions call returns
-403 customer_verification_required ("AI Gateway requires a valid credit
-card on file") - see docs/rag.md. That is a billing gap, not a code or
-architecture gap; `build_explanation` below catches this and falls through
-to the deterministic path automatically.
+Provider chain (goals.md), tried in order by `build_explanation`: (1)
+`OnlineLLM` (Vercel AI Gateway - a real credential is present and
+authenticates, but generation is blocked at the account level by
+customer_verification_required; see docs/rag.md), (2) `OpenAIProvider`
+(direct OpenAI Chat Completions via OPENAI_API_KEY, tries a short list of
+candidate cheap models and classifies any billing/quota failure instead of
+retrying it), (3) `DeterministicFallbackLLM`. Each provider is a drop-in
+behind the same (question, context, citations, evidence_text) -> str
+interface; adding a fourth provider later means writing one more class, not
+touching build_explanation's control flow beyond the tuple it iterates.
 
 `DeterministicFallbackLLM` is not a stub - it is the always-available,
 goals.md #9-mandated explanation path: it assembles the SAME structured
@@ -171,6 +172,100 @@ class OnlineLLM:
         return body["choices"][0]["message"]["content"]
 
 
+class ProviderBillingBlocked(RuntimeError):
+    """Raised for a classified billing/quota/access failure (not a transient
+    network error) - build_explanation logs this and moves to the next
+    provider in the chain without retrying, per goals.md's "do not
+    repeatedly retry a billing/quota failure"."""
+
+    def __init__(self, category: str, message: str):
+        super().__init__(message)
+        self.category = category
+
+
+_OPENAI_CANDIDATE_MODELS = ("gpt-4o-mini", "gpt-4.1-mini", "gpt-3.5-turbo")
+
+
+def _classify_openai_error(status_code: int, body: dict[str, Any]) -> str | None:
+    """Returns a non-secret error category, or None if this looks like a
+    model-access problem worth trying the next candidate model for."""
+    error = body.get("error", {}) if isinstance(body, dict) else {}
+    code = error.get("code") or ""
+    error_type = error.get("type") or ""
+    if status_code == 429 or code == "insufficient_quota":
+        return "insufficient_quota"
+    if status_code == 403 or "billing" in error_type.lower():
+        return "billing_required"
+    if status_code == 404 or code in ("model_not_found",):
+        return None  # worth trying the next candidate model
+    return f"http_{status_code}"
+
+
+class OpenAIProvider:
+    """Direct OpenAI Chat Completions client - the second online provider in
+    the chain (goals.md: "1. Vercel AI Gateway, 2. OpenAI API via
+    OPENAI_API_KEY, 3. deterministic fallback"). Tries a short list of
+    candidate cheap models in order, stopping at the first that actually
+    generates; a billing/quota failure stops immediately (no model-list
+    retry) and is reported as a classified, non-secret category."""
+
+    name = "online:openai"
+
+    def __init__(self, timeout: float = 20.0):
+        self.timeout = timeout
+        self.api_key = os.environ.get("OPENAI_API_KEY")
+        configured = os.environ.get("OPENAI_MODEL")
+        self.candidate_models = (configured,) if configured else _OPENAI_CANDIDATE_MODELS
+        self.model_used: str | None = None
+        self.last_billing_category: str | None = None
+
+    def available(self) -> bool:
+        return bool(self.api_key)
+
+    def generate(self, question: str, context: PredictionContext,
+                 citations: list[Citation], evidence_text: str) -> str:
+        if not self.api_key:
+            raise ProviderUnavailable("No OPENAI_API_KEY configured.")
+        user_message = (
+            f"Prediction context:\n{context}\n\n"
+            f"Retrieved evidence:\n{_sanitize_retrieved_text(evidence_text)}\n\n"
+            f"Question: {question or '(no question supplied - summarise the result)'}"
+        )
+        last_category: str | None = None
+        for model in self.candidate_models:
+            response = httpx.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_message},
+                    ],
+                    "max_tokens": 500,
+                },
+                timeout=self.timeout,
+            )
+            if response.status_code == 200:
+                self.model_used = model
+                body = response.json()
+                return body["choices"][0]["message"]["content"]
+            body = response.json() if response.headers.get("content-type", "").startswith(
+                "application/json") else {}
+            category = _classify_openai_error(response.status_code, body)
+            if category is not None:
+                self.last_billing_category = category
+                raise ProviderBillingBlocked(
+                    category,
+                    f"OpenAI request failed ({category}); not retrying with another model.",
+                )
+            last_category = f"model_unavailable:{model}"
+        raise ProviderUnavailable(
+            f"No candidate OpenAI model was accessible to this account "
+            f"({last_category})."
+        )
+
+
 class DeterministicFallbackLLM:
     """Always available. Builds the explanation purely from structured
     fields + retrieved chunk text - no network call, no model, nothing that
@@ -275,18 +370,26 @@ def build_explanation(
     ]
     evidence_text = _format_evidence(retrieved)
 
-    online = OnlineLLM()
-    if online.available():
+    # Provider chain, in order (goals.md): Vercel AI Gateway -> OpenAI ->
+    # deterministic fallback. A billing/quota failure stops that provider
+    # immediately (no retry) and moves to the next; it is never silently
+    # swallowed - the reason is available via the raised exception for
+    # whoever calls build_explanation to log if they choose to.
+    for provider in (OnlineLLM(), OpenAIProvider()):
+        if not provider.available():
+            continue
         try:
-            text = online.generate(question, context, citations, evidence_text)
-            return ExplanationResult(
-                explanation=text, citations=citations,
-                status="complete" if retrieved or not question.strip() else "insufficient_evidence",
-                provider=online.name, fallback_used=False,
-                retrieved_chunk_ids=[c.chunk_id for c in retrieved],
-            )
-        except (ProviderUnavailable, httpx.HTTPError):
-            pass  # fall through to deterministic fallback below
+            text = provider.generate(question, context, citations, evidence_text)
+        except (ProviderUnavailable, ProviderBillingBlocked, httpx.HTTPError):
+            continue  # try the next provider in the chain
+        model_used = getattr(provider, "model_used", None) or getattr(provider, "model", None)
+        provider_label = f"{provider.name}:{model_used}" if model_used else provider.name
+        return ExplanationResult(
+            explanation=text, citations=citations,
+            status="complete" if retrieved or not question.strip() else "insufficient_evidence",
+            provider=provider_label, fallback_used=False,
+            retrieved_chunk_ids=[c.chunk_id for c in retrieved],
+        )
 
     fallback = DeterministicFallbackLLM()
     text = fallback.generate(question, context, citations, evidence_text)

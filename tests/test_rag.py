@@ -15,7 +15,9 @@ from bearing_pdm import api
 from bearing_pdm.rag.corpus import SOURCE_DOCUMENTS, chunk_document, clean_text, ingest_corpus
 from bearing_pdm.rag.explain import (
     DeterministicFallbackLLM,
+    OpenAIProvider,
     PredictionContext,
+    ProviderBillingBlocked,
     build_explanation,
 )
 from bearing_pdm.rag.retrieval import VectorIndex
@@ -155,6 +157,62 @@ def test_prompt_injection_in_question_does_not_change_deterministic_output(built
     )
     assert "999999" not in injected.explanation
     assert injected.provider == "deterministic-fallback"
+
+
+def test_openai_provider_classifies_quota_error_and_does_not_retry(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    calls = []
+
+    class FakeResponse:
+        status_code = 429
+        headers = {"content-type": "application/json"}
+
+        def json(self):
+            return {"error": {"code": "insufficient_quota", "type": "insufficient_quota"}}
+
+    def fake_post(*args, **kwargs):
+        calls.append(kwargs.get("json", {}).get("model"))
+        return FakeResponse()
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.post", fake_post)
+    provider = OpenAIProvider()
+    with pytest.raises(ProviderBillingBlocked) as exc_info:
+        provider.generate("q", PredictionContext(), [], "")
+    assert exc_info.value.category == "insufficient_quota"
+    assert len(calls) == 1  # no retry across candidate models on a billing failure
+
+
+def test_openai_provider_falls_through_candidate_models_on_model_not_found(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, body):
+            self.status_code = status_code
+            self._body = body
+            self.headers = {"content-type": "application/json"}
+
+        def json(self):
+            return self._body
+
+    def fake_post(*args, **kwargs):
+        model = kwargs.get("json", {}).get("model")
+        calls.append(model)
+        if model == "gpt-4o-mini":
+            return FakeResponse(404, {"error": {"code": "model_not_found"}})
+        return FakeResponse(200, {"choices": [{"message": {"content": "real answer"}}]})
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.post", fake_post)
+    provider = OpenAIProvider()
+    text = provider.generate("q", PredictionContext(), [], "")
+    assert text == "real answer"
+    assert provider.model_used != "gpt-4o-mini"
+    assert len(calls) >= 2
+
+
+def test_openai_provider_unavailable_without_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert OpenAIProvider().available() is False
 
 
 def test_explain_endpoint_real_e2e_high_applicability():
