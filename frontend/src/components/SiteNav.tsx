@@ -18,7 +18,7 @@ export function SiteNav() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80">
+    <header className="sticky top-0 z-10 border-b border-surface-border bg-background/90 backdrop-blur-sm">
       <nav className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-5 gap-y-2 px-6 py-3 text-sm">
         <Link href="/" className="mr-1 flex items-center gap-1.5 font-semibold tracking-tight">
           <span className="inline-block size-2 rounded-full bg-accent" aria-hidden />
@@ -34,14 +34,14 @@ export function SiteNav() {
               className={
                 active
                   ? "font-medium text-accent"
-                  : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                  : "text-foreground-muted hover:text-foreground"
               }
             >
               {link.label}
             </Link>
           );
         })}
-        <span className="ml-auto hidden text-xs text-zinc-400 dark:text-zinc-600 sm:inline">
+        <span className="ml-auto hidden text-xs text-foreground-muted/70 sm:inline">
           Advanced:
         </span>
         {ADVANCED_LINKS.map((link) => (
@@ -50,7 +50,7 @@ export function SiteNav() {
             className={
               pathname === link.href
                 ? "text-xs font-medium text-accent"
-                : "text-xs text-zinc-500 hover:text-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-300"
+                : "text-xs text-foreground-muted/80 hover:text-foreground-muted"
             }
             href={link.href}
           >

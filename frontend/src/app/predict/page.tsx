@@ -35,7 +35,7 @@ export default function PredictPage() {
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
-      <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+      <div className="rounded-lg border border-caution/30 bg-caution/10 p-3 text-xs text-caution">
         Advanced / developer tool. Normal users should use{" "}
         <Link href="/upload" className="underline">
           Analyze
@@ -44,7 +44,7 @@ export default function PredictPage() {
       </div>
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Advanced: manual feature-row prediction</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <p className="mt-1 text-sm text-foreground-muted">
           Paste an already-extracted FEMTO feature row (column name → value). This does not
           accept raw sensor CSVs — for that, use the normal Analyze workflow. Missing columns
           fall back to the model&apos;s training median and are disclosed below, not hidden.
@@ -53,14 +53,14 @@ export default function PredictPage() {
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <textarea
-          className="h-48 rounded-lg border border-zinc-300 p-3 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+          className="h-48 rounded-lg border border-surface-border bg-surface p-3 font-mono text-xs"
           value={featuresJson}
           onChange={(e) => setFeaturesJson(e.target.value)}
           spellCheck={false}
         />
         <button
           type="submit"
-          className="self-start rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+          className="self-start rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-background disabled:opacity-50"
           disabled={result.status === "loading"}
         >
           {result.status === "loading" ? "Predicting…" : "Predict"}
@@ -74,15 +74,15 @@ export default function PredictPage() {
       )}
 
       {result.status === "ready" && (
-        <div className="rounded-lg border border-zinc-200 p-5 dark:border-zinc-800">
+        <div className="rounded-lg border border-surface-border p-5  ">
           <p className="text-3xl font-semibold">
-            {result.data.rul_hours.toFixed(1)} <span className="text-base font-normal text-zinc-500">hours</span>
+            {result.data.rul_hours.toFixed(1)} <span className="text-base font-normal text-foreground-muted">hours</span>
           </p>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-foreground-muted">
             ({result.data.rul_seconds.toFixed(0)} seconds) — model: {result.data.model_name}
           </p>
           {result.data.features_missing.length > 0 && (
-            <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">
+            <p className="mt-3 text-sm text-caution">
               {result.data.features_missing.length} of {result.data.features_used.length} features
               were not provided and were filled with the training median:{" "}
               <span className="font-mono text-xs">{result.data.features_missing.join(", ")}</span>

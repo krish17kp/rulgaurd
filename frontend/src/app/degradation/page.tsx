@@ -12,7 +12,7 @@ type State =
 
 const STAGE_COLOR: Record<HiRow["stage"], string> = {
   HEALTHY: "bg-green-500",
-  DEGRADING: "bg-amber-500",
+  DEGRADING: "bg-caution",
   CRITICAL: "bg-red-500",
 };
 
@@ -42,7 +42,7 @@ export default function DegradationPage() {
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
-      <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+      <div className="rounded-lg border border-caution/30 bg-caution/10 p-3 text-xs text-caution">
         Advanced / developer tool — there is currently no raw-file upload path for a
         multi-acquisition health trend, only this manual feature-row interface. For a single
         file&apos;s RUL estimate, use{" "}
@@ -53,7 +53,7 @@ export default function DegradationPage() {
       </div>
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Advanced: degradation / health indicator trend</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <p className="mt-1 text-sm text-foreground-muted">
           Paste an ordered list of feature rows for one bearing run (each needs{" "}
           <code>sequence_index</code> plus the HI model&apos;s feature columns — see{" "}
           <code>GET /models/info</code>). The health indicator and stage are a severity
@@ -63,14 +63,14 @@ export default function DegradationPage() {
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <textarea
-          className="h-40 rounded-lg border border-zinc-300 p-3 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+          className="h-40 rounded-lg border border-surface-border bg-surface p-3 font-mono text-xs"
           value={rowsJson}
           onChange={(e) => setRowsJson(e.target.value)}
           spellCheck={false}
         />
         <button
           type="submit"
-          className="self-start rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+          className="self-start rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-background disabled:opacity-50"
           disabled={state.status === "loading"}
         >
           {state.status === "loading" ? "Computing…" : "Compute HI trend"}
@@ -85,11 +85,11 @@ export default function DegradationPage() {
 
       {state.status === "ready" && (
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-foreground-muted">
             {state.data.note} Warn threshold: {state.data.hi_warn_threshold.toFixed(3)}, critical:{" "}
             {state.data.hi_critical_threshold.toFixed(3)}.
           </p>
-          <div className="flex h-32 items-end gap-px overflow-x-auto rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
+          <div className="flex h-32 items-end gap-px overflow-x-auto rounded-lg border border-surface-border p-2  ">
             {state.data.rows.map((r) => (
               <div
                 key={r.sequence_index}
@@ -99,7 +99,7 @@ export default function DegradationPage() {
               />
             ))}
           </div>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-foreground-muted">
             Latest: sequence_index {state.data.rows.at(-1)?.sequence_index}, HI{" "}
             {state.data.rows.at(-1)?.health_indicator.toFixed(3)}, stage{" "}
             {state.data.rows.at(-1)?.stage}.

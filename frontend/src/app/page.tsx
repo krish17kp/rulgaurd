@@ -26,50 +26,87 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-12 px-6 py-16 sm:py-20">
+    <main className="mx-auto flex max-w-3xl flex-col gap-14 px-6 py-16 sm:py-20">
       <header className="flex flex-col gap-5">
-        <span className="w-fit rounded-full bg-accent/10 px-3 py-1 text-xs font-medium text-accent">
+        <span className="w-fit rounded-full bg-accent/10 px-3 py-1 text-xs font-medium tracking-wide text-accent">
           Industrial predictive maintenance
         </span>
         <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">RULGuard</h1>
-        <p className="max-w-xl text-lg text-zinc-600 dark:text-zinc-400">
-          Predict bearing degradation and Remaining Useful Life from vibration data.
+        <p className="max-w-xl text-lg leading-relaxed text-foreground-muted">
+          Predict bearing degradation before failure. RULGuard analyzes vibration data to
+          estimate Remaining Useful Life, and verifies whether the current model is even
+          applicable to your signal before it reports a number.
         </p>
-        <Link
-          href="/upload"
-          className="inline-flex w-fit items-center rounded-lg bg-accent px-5 py-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-accent/90"
-        >
-          Analyze Bearing Data
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/upload"
+            className="inline-flex w-fit items-center rounded-lg bg-accent px-5 py-3 text-sm font-semibold text-background shadow-sm transition-colors hover:bg-accent-strong"
+          >
+            Analyze Bearing Data
+          </Link>
+          <Link
+            href="/evaluation"
+            className="inline-flex w-fit items-center rounded-lg border border-surface-border px-5 py-3 text-sm font-medium text-foreground transition-colors hover:border-accent/50 hover:text-accent"
+          >
+            View Model Reliability
+          </Link>
+        </div>
       </header>
+
+      <section aria-label="Pipeline" className="flex flex-wrap items-center gap-2 text-xs text-foreground-muted">
+        {["Vibration Data", "Feature Extraction", "Applicability Check", "RUL Prediction", "Maintenance Insight"].map(
+          (step, i, arr) => (
+            <span key={step} className="flex items-center gap-2">
+              <span className="rounded-full border border-surface-border bg-surface px-3 py-1.5 font-medium text-foreground">
+                {step}
+              </span>
+              {i < arr.length - 1 && <span aria-hidden>→</span>}
+            </span>
+          ),
+        )}
+      </section>
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {CAPABILITIES.map((c) => (
           <div
             key={c.title}
-            className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900"
+            className="rounded-xl border border-surface-border bg-surface p-5 shadow-sm transition-colors hover:border-accent/40"
           >
-            <h2 className="text-sm font-medium">{c.title}</h2>
-            <p className="mt-1.5 text-sm leading-relaxed text-zinc-500">{c.body}</p>
+            <h2 className="text-sm font-semibold">{c.title}</h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-foreground-muted">{c.body}</p>
           </div>
         ))}
       </section>
 
-      <section className="rounded-lg border border-amber-300 bg-amber-50 p-5 text-sm dark:border-amber-900 dark:bg-amber-950">
-        <h2 className="font-medium text-amber-900 dark:text-amber-200">Scope and limitations</h2>
-        <ul className="mt-2 list-inside list-disc space-y-1 text-amber-900 dark:text-amber-200">
+      <section className="grid grid-cols-2 gap-4 rounded-xl border border-surface-border bg-surface p-5 text-sm sm:grid-cols-4">
+        {[
+          ["Supported dataset", "FEMTO"],
+          ["Primary model", "Extra Trees"],
+          ["Analysis", "Recorded acquisitions"],
+          ["Safeguard", "Applicability / OOD check"],
+        ].map(([label, value]) => (
+          <div key={label}>
+            <div className="text-xs uppercase tracking-wide text-foreground-muted">{label}</div>
+            <div className="mt-1 font-medium">{value}</div>
+          </div>
+        ))}
+      </section>
+
+      <section className="rounded-lg border border-caution/30 bg-caution/10 p-5 text-sm">
+        <h2 className="font-medium text-caution">Scope and limitations</h2>
+        <ul className="mt-2 list-inside list-disc space-y-1 text-foreground">
           <li>The current model is trained on one public bearing dataset (FEMTO). Other kinds of data are refused, not silently adapted.</li>
           <li>This is offline analysis of recorded data, not a live/real-time deployment.</li>
           <li>No physical fault-type (inner/outer-race, ball, cage) diagnosis is made — only a severity band on the health indicator.</li>
         </ul>
       </section>
 
-      <section className="rounded-lg border border-zinc-200 p-4 text-xs text-zinc-500 dark:border-zinc-800">
+      <section className="rounded-lg border border-surface-border p-4 text-xs text-foreground-muted">
         Prediction service status:{" "}
         {health.status === "loading" && "checking…"}
-        {health.status === "error" && <span className="text-red-600">unreachable</span>}
+        {health.status === "error" && <span className="text-danger">unreachable</span>}
         {health.status === "ready" && (
-          <span className={health.data.status === "ok" ? "text-green-600" : "text-amber-600"}>
+          <span className={health.data.status === "ok" ? "text-success" : "text-caution"}>
             {health.data.status}
           </span>
         )}

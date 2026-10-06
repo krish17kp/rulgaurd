@@ -1,32 +1,38 @@
 @import "tailwindcss";
 
+/* Industrial dark theme: deep graphite background, charcoal panels, teal accent. */
 :root {
-  --background: #fafafa;
-  --foreground: #18181b;
-  --accent: #2563eb;
+  --background: #0b0f12;
+  --surface: #141a1f;
+  --surface-border: #232b31;
+  --foreground: #e8edf0;
+  --foreground-muted: #8b9aa3;
+  --accent: #2dd4bf;
+  --accent-strong: #14b8a6;
+  --accent-blue: #38bdf8;
+  --success: #34d399;
+  --caution: #fbbf24;
+  --danger: #f87171;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-border: var(--surface-border);
   --color-foreground: var(--foreground);
+  --color-foreground-muted: var(--foreground-muted);
   --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-blue: var(--accent-blue);
+  --color-success: var(--success);
+  --color-caution: var(--caution);
+  --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --accent: #60a5fa;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  /* Was hardcoded to "Arial, Helvetica, sans-serif", which silently
-     overrode the Geist fonts loaded via --font-geist-sans in layout.tsx -
-     they were never actually rendered. */
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }

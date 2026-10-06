@@ -37,7 +37,7 @@ type PredictState =
 const BADGE: Record<Compatibility, string> = {
   FULLY_SUPPORTED: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
   RETRAIN_REQUIRED: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
-  ADAPTER_REQUIRED: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+  ADAPTER_REQUIRED: "bg-caution/15 text-caution",
   UNSUPPORTED: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
   INVALID_INPUT: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
 };
@@ -197,20 +197,20 @@ export default function UploadPage() {
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
       <header>
         <h1 className="text-3xl font-semibold tracking-tight">Analyze Bearing Data</h1>
-        <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+        <p className="mt-2 text-sm leading-relaxed text-foreground-muted">
           Upload a raw vibration acquisition from a supported bearing (FEMTO, headerless
-          <code className="mx-1 rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-zinc-800">acc_*.csv</code>,
+          <code className="mx-1 rounded bg-surface px-1 py-0.5 text-xs">acc_*.csv</code>,
           6 columns, 25.6kHz) to get a Remaining Useful Life estimate.
         </p>
       </header>
 
       {!selectedFile && (
         <div
-          className="flex flex-col gap-3 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50/50 p-10 text-center transition-colors hover:border-accent/50 dark:border-zinc-700 dark:bg-zinc-900/40"
+          className="flex flex-col gap-3 rounded-xl border-2 border-dashed border-surface-border bg-surface/50 p-10 text-center transition-colors hover:border-accent/50"
         >
           <label
             htmlFor="file-input"
-            className="cursor-pointer text-sm text-zinc-600 dark:text-zinc-400"
+            className="cursor-pointer text-sm text-foreground-muted"
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
@@ -236,7 +236,7 @@ export default function UploadPage() {
           <button
             type="button"
             onClick={() => void trySampleData()}
-            className="self-center text-xs text-zinc-500 underline hover:text-accent"
+            className="self-center text-xs text-foreground-muted underline hover:text-accent"
           >
             Try sample data
           </button>
@@ -244,17 +244,17 @@ export default function UploadPage() {
       )}
 
       {selectedFile && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-surface-border bg-surface p-4 shadow-sm ">
           <div className="text-sm">
             <p className="font-medium">{selectedFile.name}</p>
-            <p className="text-zinc-500">{formatBytes(selectedFile.size)}</p>
+            <p className="text-foreground-muted">{formatBytes(selectedFile.size)}</p>
           </div>
           <div className="flex gap-2">
             <button
               type="button"
               onClick={resetForNewFile}
               disabled={isBusy}
-              className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+              className="rounded-lg border border-surface-border px-3 py-2 text-xs font-medium transition-colors hover:bg-surface disabled:opacity-50"
             >
               Remove
             </button>
@@ -291,7 +291,7 @@ export default function UploadPage() {
                   Retry
                 </button>
               ) : (
-                <p className="text-xs text-red-600 dark:text-red-400">
+                <p className="text-xs text-danger">
                   This file won&apos;t succeed on retry as-is — use &quot;Remove&quot; above and choose a
                   different file.
                 </p>
@@ -305,26 +305,26 @@ export default function UploadPage() {
                 predictState.data.compatibility === "FULLY_SUPPORTED" &&
                 predictState.data.applicability_level === "HIGH"
                   ? "border-green-300 bg-green-50 dark:border-green-900 dark:bg-green-950"
-                  : "border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950"
+                  : "border-caution/30 bg-caution/10"
               }`}
             >
               <div>
-                <p className="text-sm text-zinc-500">Predicted Remaining Useful Life</p>
+                <p className="text-sm text-foreground-muted">Predicted Remaining Useful Life</p>
                 <p className="text-4xl font-semibold tracking-tight">
                   {predictState.data.rul_hours.toFixed(2)} hours
                 </p>
-                <p className="mt-1 text-xs text-zinc-500">
+                <p className="mt-1 text-xs text-foreground-muted">
                   ({predictState.data.rul_seconds.toFixed(0)} s) — model: {predictState.data.model_name}
                 </p>
               </div>
               <ApplicabilityNote result={predictState.data} />
-              <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
+              <p className="text-xs leading-relaxed text-foreground-muted">
                 {applicabilityInterpretation(predictState.data.applicability_level)}
               </p>
               <button
                 type="button"
                 onClick={resetForNewFile}
-                className="self-start rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                className="self-start rounded-lg border border-surface-border bg-surface px-3 py-2 text-xs font-medium transition-colors hover:bg-background"
               >
                 Analyze another file
               </button>
@@ -352,7 +352,7 @@ export default function UploadPage() {
                   Retry
                 </button>
               ) : (
-                <p className="text-xs text-red-600 dark:text-red-400">
+                <p className="text-xs text-danger">
                   This file won&apos;t succeed on retry as-is — use &quot;Remove&quot; above and choose a
                   different file.
                 </p>
@@ -366,11 +366,11 @@ export default function UploadPage() {
                 <span className={`rounded-full px-3 py-1 text-xs font-medium ${BADGE[inspectState.data.compatibility]}`}>
                   {inspectState.data.compatibility.replace(/_/g, " ")}
                 </span>
-                <span className="text-sm text-zinc-500">{inspectState.data.profile.file}</span>
+                <span className="text-sm text-foreground-muted">{inspectState.data.profile.file}</span>
               </div>
 
               {inspectState.data.reasons.length > 0 && (
-                <ul className="list-inside list-disc text-sm text-zinc-700 dark:text-zinc-300">
+                <ul className="list-inside list-disc text-sm text-foreground-muted">
                   {inspectState.data.reasons.map((r) => (
                     <li key={r}>{r}</li>
                   ))}
@@ -380,7 +380,7 @@ export default function UploadPage() {
               {inspectState.data.profile.columns && (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="text-zinc-500">
+                    <thead className="text-foreground-muted">
                       <tr>
                         <th className="py-1 pr-3">Column</th>
                         <th className="py-1 pr-3">Mapped to</th>
@@ -390,7 +390,7 @@ export default function UploadPage() {
                     </thead>
                     <tbody>
                       {inspectState.data.profile.columns.map((c) => (
-                        <tr key={c.name} className="border-t border-zinc-200 dark:border-zinc-800">
+                        <tr key={c.name} className="border-t border-surface-border  ">
                           <td className="py-1 pr-3 font-mono">{c.name}</td>
                           <td className="py-1 pr-3">{c.canonical ?? "—"}</td>
                           <td className="py-1 pr-3">{c.confidence}</td>
@@ -403,7 +403,7 @@ export default function UploadPage() {
               )}
 
               {inspectState.data.profile.warnings.length > 0 && (
-                <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                <div className="rounded-lg border border-caution/30 bg-caution/10 p-4 text-xs text-caution">
                   {inspectState.data.profile.warnings.map((w) => (
                     <p key={w}>{w}</p>
                   ))}
@@ -413,7 +413,7 @@ export default function UploadPage() {
               <button
                 type="button"
                 onClick={resetForNewFile}
-                className="self-start rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium dark:border-zinc-700"
+                className="self-start rounded-lg border border-surface-border px-3 py-2 text-xs font-medium"
               >
                 Inspect another file
               </button>
@@ -423,14 +423,14 @@ export default function UploadPage() {
       )}
 
       <details
-        className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
+        className="rounded-lg border border-surface-border p-4  "
         open={advancedOpen}
         onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
       >
-        <summary className="cursor-pointer text-sm font-medium text-zinc-500">
+        <summary className="cursor-pointer text-sm font-medium text-foreground-muted">
           Advanced: inspect another (non-FEMTO) dataset
         </summary>
-        <div className="mt-3 flex flex-col gap-3 text-sm text-zinc-500">
+        <div className="mt-3 flex flex-col gap-3 text-sm text-foreground-muted">
           <p>
             Inspects a file&apos;s structure (delimiter, header, column meanings) and reports
             compatibility — it does not run a prediction. Switching here clears any in-progress
@@ -446,7 +446,7 @@ export default function UploadPage() {
             Use the dataset-inspection workflow for my next file
           </label>
           {datasetType === "generic" && (
-            <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="flex flex-col gap-3 rounded-lg border border-surface-border p-3  ">
               <label className="flex flex-col gap-1 text-xs">
                 Declared sampling rate (Hz) — optional, only used if the file has no regular
                 timestamps in seconds.
@@ -457,7 +457,7 @@ export default function UploadPage() {
                   value={declaredSamplingRateHz}
                   onChange={(e) => setDeclaredSamplingRateHz(e.target.value)}
                   placeholder="e.g. 25600"
-                  className="rounded border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                  className="rounded border border-surface-border bg-surface px-2 py-1 text-xs"
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs">
@@ -467,7 +467,7 @@ export default function UploadPage() {
                   value={declaredUnits}
                   onChange={(e) => setDeclaredUnits(e.target.value)}
                   placeholder="e.g. g, m/s^2"
-                  className="rounded border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                  className="rounded border border-surface-border bg-surface px-2 py-1 text-xs"
                 />
               </label>
               <button
