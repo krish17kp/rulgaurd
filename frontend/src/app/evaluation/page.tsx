@@ -253,14 +253,23 @@ function HiComparisonSection({ hiComparison }: { hiComparison: HealthIndicatorCo
           </tr>
         </thead>
         <tbody>
-          {variants.map(([label, v]) => (
-            <tr key={label} className="border-t border-surface-border">
-              <td className="py-1 pr-3 font-mono">{label}</td>
-              <td className="py-1 pr-3">{v.status}</td>
-              <td className="py-1 pr-3">{Math.abs(v.mean_spearman).toFixed(3)}</td>
-              <td className="py-1 pr-3">{v.pinning.mean_pct_at_one.toFixed(1)}%</td>
-            </tr>
-          ))}
+          {variants.map(([label, v]) => {
+            // reference_hi nests its numbers under `pooled` (and `leave_one_bearing_out`)
+            // instead of the top level the legacy transparent_hi/pca_hi variants use -
+            // read whichever is present rather than assuming the flat shape.
+            const spearman = v.mean_spearman ?? v.pooled?.mean_spearman;
+            const pinning = v.pinning ?? v.pooled?.pinning;
+            return (
+              <tr key={label} className="border-t border-surface-border">
+                <td className="py-1 pr-3 font-mono">{label}</td>
+                <td className="py-1 pr-3">{v.status}</td>
+                <td className="py-1 pr-3">{spearman !== undefined ? Math.abs(spearman).toFixed(3) : "n/a"}</td>
+                <td className="py-1 pr-3">
+                  {pinning ? `${pinning.mean_pct_at_one.toFixed(1)}%` : "n/a (fixed, D18)"}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       <p className="mt-2 text-xs text-foreground-muted">

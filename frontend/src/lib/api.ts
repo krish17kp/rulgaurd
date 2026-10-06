@@ -402,8 +402,8 @@ export interface HiVariantSummary {
   status: string;
   failure_mode?: string;
   mean_monotonicity?: number;
-  mean_spearman: number;
-  pinning: { mean_pct_at_one: number; worst_pct_at_one: number; mean_usable_range_p05_p95: number };
+  mean_spearman?: number;
+  pinning?: { mean_pct_at_one: number; worst_pct_at_one: number; mean_usable_range_p05_p95: number };
   per_bearing: Array<{
     bearing_run_id: string;
     monotonicity?: number;
