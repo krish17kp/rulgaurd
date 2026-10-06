@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { ApplicabilityNote } from "@/components/ApplicabilityNote";
 import { ExplainResult } from "@/components/ExplainResult";
+import { SignalAndFeatures } from "@/components/SignalAndFeatures";
 import { SuppressedResultNotice, isSuppressedApplicability } from "@/components/SuppressedResultNotice";
 import { BlobUploadError, DIRECT_UPLOAD_THRESHOLD_BYTES, uploadFileToBlob } from "@/lib/blobUpload";
 
@@ -337,6 +338,9 @@ export default function UploadPage() {
               <p className="text-xs leading-relaxed text-foreground-muted">
                 {applicabilityInterpretation(predictState.data.applicability_level)}
               </p>
+              {selectedFile && (
+                <SignalAndFeatures key={`${selectedFile.name}-${selectedFile.size}`} file={selectedFile} />
+              )}
               <ExplainResult result={predictState.data} />
               <button
                 type="button"

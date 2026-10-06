@@ -241,6 +241,29 @@ export function predictRulFromFemtoAcquisitionBlob(blobUrl: string): Promise<Pre
   });
 }
 
+export interface FemtoSignalChannel {
+  waveform: number[];
+  fft_frequency_hz: number[];
+  fft_magnitude: number[];
+}
+
+export interface FemtoSignalResponse {
+  sample_rate_hz: number;
+  samples: number;
+  vibration_x: FemtoSignalChannel;
+  vibration_y: FemtoSignalChannel;
+  features: Record<string, number>;
+}
+
+/** Raw waveform/FFT/feature values for the Signal & FFT / Features UI tabs -
+ * same FEMTO acc_*.csv upload as predictRulFromFemtoAcquisition, visualization
+ * only (src/bearing_pdm/api.py's /analyze/femto-signal). */
+export async function analyzeFemtoSignal(file: File): Promise<FemtoSignalResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  return requestForm<FemtoSignalResponse>("/analyze/femto-signal", form);
+}
+
 export type Compatibility =
   | "FULLY_SUPPORTED"
   | "ADAPTER_REQUIRED"

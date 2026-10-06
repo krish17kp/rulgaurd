@@ -1647,6 +1647,89 @@ def _process_femto_acquisition_file(tmp_path: str, source: str) -> PredictRulRes
         return response
 
 
+class FemtoSignalChannel(BaseModel):
+    waveform: list[float]
+    fft_frequency_hz: list[float]
+    fft_magnitude: list[float]
+
+
+class FemtoSignalResponse(BaseModel):
+    sample_rate_hz: float
+    samples: int
+    vibration_x: FemtoSignalChannel
+    vibration_y: FemtoSignalChannel
+    features: dict[str, float]
+    note: str = (
+        "Raw waveform and FFT are the actual uploaded samples (0.1 s acquisition at "
+        "25.6 kHz); features are extracted by the same features.py functions the RUL "
+        "model's feature contract uses. Visualization only - no health indicator, stage "
+        "or RUL is computed here."
+    )
+
+
+def _femto_signal_view(tmp_path: str) -> FemtoSignalResponse:
+    """Validate + read a FEMTO acc_*.csv exactly as the prediction path does, then
+    return raw waveform/FFT arrays for the two vibration axes alongside the same
+    feature values the model would see - reusing _process_femto_acquisition_file's
+    validation and _extract_femto_acquisition_features's formulas, never recomputed."""
+    try:
+        raw = pd.read_csv(tmp_path, header=None, dtype="float64")
+    except (ValueError, pd.errors.ParserError, pd.errors.EmptyDataError):
+        raise ApiError(
+            422, "MALFORMED_FILE",
+            "Not a numeric, headerless FEMTO acc_*.csv file: every cell must be a number "
+            f"and every row must have {len(ACC_COLUMNS)} columns.",
+        ) from None
+    if raw.shape[1] != len(ACC_COLUMNS):
+        raise ApiError(
+            422, "ADAPTER_REQUIRED",
+            f"Expected {len(ACC_COLUMNS)} columns (FEMTO's fixed acc_*.csv layout: "
+            f"{ACC_COLUMNS}), got {raw.shape[1]}. This is not a FEMTO acquisition file.",
+            extra={"compatibility": ADAPTER_REQUIRED},
+        )
+    if raw.shape[0] != FEMTO_ACQUISITION_SAMPLES:
+        raise ApiError(
+            422, "INCOMPLETE_ACQUISITION",
+            f"Got {raw.shape[0]} rows - a FEMTO acquisition is exactly "
+            f"{FEMTO_ACQUISITION_SAMPLES} rows (0.1 s at 25.6 kHz).",
+            extra={"compatibility": INVALID_INPUT},
+        )
+    vibration = raw[[4, 5]].to_numpy()
+    if np.isnan(vibration).any() or not np.isfinite(vibration).all():
+        raise ApiError(
+            422, "INCOMPLETE_ACQUISITION",
+            "Vibration samples must all be present and finite.",
+            extra={"compatibility": INVALID_INPUT},
+        )
+    features = _extract_femto_acquisition_features(tmp_path)
+    channels: dict[str, FemtoSignalChannel] = {}
+    for axis, col_index in (("vibration_x", 4), ("vibration_y", 5)):
+        signal = raw[col_index].to_numpy()
+        freqs = np.fft.rfftfreq(signal.size, d=1.0 / FEMTO_SAMPLE_RATE_HZ)
+        magnitude = np.abs(np.fft.rfft(signal))
+        channels[axis] = FemtoSignalChannel(
+            waveform=[float(v) for v in signal],
+            fft_frequency_hz=[float(v) for v in freqs],
+            fft_magnitude=[float(v) for v in magnitude],
+        )
+    return FemtoSignalResponse(
+        sample_rate_hz=FEMTO_SAMPLE_RATE_HZ, samples=int(raw.shape[0]),
+        vibration_x=channels["vibration_x"], vibration_y=channels["vibration_y"],
+        features=features,
+    )
+
+
+@app.post("/analyze/femto-signal", response_model=FemtoSignalResponse)
+async def analyze_femto_signal(file: UploadFile) -> FemtoSignalResponse:
+    """Same FEMTO acc_*.csv upload as /predict/rul/femto-acquisition, but returns
+    the raw waveform/FFT/feature values for the Signal & FFT / Features UI tabs
+    instead of a RUL prediction. A full acquisition is only 2560 samples per
+    axis, so the whole thing is returned (no downsampling needed)."""
+    with _temporary_upload() as tmp:
+        await _spool_upload(file, tmp)
+        return _femto_signal_view(tmp.name)
+
+
 @app.post("/predict/rul/femto-acquisition", response_model=PredictRulResponse)
 async def predict_rul_from_femto_acquisition(file: UploadFile) -> PredictRulResponse:
     """Raw single-acquisition FEMTO acc_*.csv -> features.py -> /predict/rul,

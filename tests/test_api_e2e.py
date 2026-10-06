@@ -100,6 +100,41 @@ def test_raw_femto_csv_upload_rejects_wrong_column_count():
     assert "columns" in response.json()["detail"]
 
 
+def test_femto_signal_endpoint_returns_real_waveform_fft_and_matching_features():
+    """The Signal & FFT / Features UI reads this endpoint. Assert the waveform
+    is literally the uploaded column (not reconstructed), the FFT length
+    matches rfft's N//2+1, and the returned features equal the exact values
+    /predict/rul/femto-acquisition would extract from the same file."""
+    acc_path = FIXTURES / "femto" / "Bearing1_1" / "acc_00001.csv"
+    import pandas as pd
+
+    raw = pd.read_csv(acc_path, header=None)
+    expected_features = _extract_features(acc_path)
+
+    with acc_path.open("rb") as fh:
+        response = client.post(
+            "/analyze/femto-signal", files={"file": ("acc_00001.csv", fh, "text/csv")},
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["sample_rate_hz"] == 25600.0
+    assert body["samples"] == len(raw)
+    assert body["vibration_x"]["waveform"] == pytest.approx(raw[4].tolist())
+    assert body["vibration_y"]["waveform"] == pytest.approx(raw[5].tolist())
+    assert len(body["vibration_x"]["fft_magnitude"]) == len(raw) // 2 + 1
+    assert len(body["vibration_x"]["fft_frequency_hz"]) == len(body["vibration_x"]["fft_magnitude"])
+    for key, value in expected_features.items():
+        assert body["features"][key] == pytest.approx(value), key
+
+
+def test_femto_signal_endpoint_rejects_wrong_column_count():
+    bad_csv = "1,2,3\n" * 300
+    response = client.post(
+        "/analyze/femto-signal", files={"file": ("bad.csv", bad_csv.encode(), "text/csv")},
+    )
+    assert response.status_code == 422
+
+
 def _non_constant_femto_csv(amplitude: float) -> bytes:
     """A FEMTO-shaped CSV with real (non-constant) variation at a given
     amplitude - a constant-value column is caught earlier by the degenerate

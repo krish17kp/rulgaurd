@@ -345,6 +345,20 @@
         "title": "Body_analyze_features_analyze_features_post",
         "type": "object"
       },
+      "Body_analyze_femto_signal_analyze_femto_signal_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_analyze_femto_signal_analyze_femto_signal_post",
+        "type": "object"
+      },
       "Body_analyze_rul_analyze_rul_post": {
         "properties": {
           "file": {
@@ -780,6 +794,77 @@
         "title": "ExplainResponse",
         "type": "object"
       },
+      "FemtoSignalChannel": {
+        "properties": {
+          "fft_frequency_hz": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Fft Frequency Hz",
+            "type": "array"
+          },
+          "fft_magnitude": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Fft Magnitude",
+            "type": "array"
+          },
+          "waveform": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Waveform",
+            "type": "array"
+          }
+        },
+        "required": [
+          "waveform",
+          "fft_frequency_hz",
+          "fft_magnitude"
+        ],
+        "title": "FemtoSignalChannel",
+        "type": "object"
+      },
+      "FemtoSignalResponse": {
+        "properties": {
+          "features": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Features",
+            "type": "object"
+          },
+          "note": {
+            "default": "Raw waveform and FFT are the actual uploaded samples (0.1 s acquisition at 25.6 kHz); features are extracted by the same features.py functions the RUL model's feature contract uses. Visualization only - no health indicator, stage or RUL is computed here.",
+            "title": "Note",
+            "type": "string"
+          },
+          "sample_rate_hz": {
+            "title": "Sample Rate Hz",
+            "type": "number"
+          },
+          "samples": {
+            "title": "Samples",
+            "type": "integer"
+          },
+          "vibration_x": {
+            "$ref": "#/components/schemas/FemtoSignalChannel"
+          },
+          "vibration_y": {
+            "$ref": "#/components/schemas/FemtoSignalChannel"
+          }
+        },
+        "required": [
+          "sample_rate_hz",
+          "samples",
+          "vibration_x",
+          "vibration_y",
+          "features"
+        ],
+        "title": "FemtoSignalResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1177,6 +1262,45 @@
           }
         },
         "summary": "Analyze Features"
+      }
+    },
+    "/analyze/femto-signal": {
+      "post": {
+        "description": "Same FEMTO acc_*.csv upload as /predict/rul/femto-acquisition, but returns\nthe raw waveform/FFT/feature values for the Signal & FFT / Features UI tabs\ninstead of a RUL prediction. A full acquisition is only 2560 samples per\naxis, so the whole thing is returned (no downsampling needed).",
+        "operationId": "analyze_femto_signal_analyze_femto_signal_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_femto_signal_analyze_femto_signal_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FemtoSignalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Femto Signal"
       }
     },
     "/analyze/rul": {

@@ -12,6 +12,7 @@ vi.mock("@/lib/api", async () => {
     inspectDatasetBlob: vi.fn(),
     predictRulFromFemtoAcquisition: vi.fn(),
     predictRulFromFemtoAcquisitionBlob: vi.fn(),
+    analyzeFemtoSignal: vi.fn().mockRejectedValue(new actual.ApiError(0, "not mocked in this test")),
   };
 });
 
