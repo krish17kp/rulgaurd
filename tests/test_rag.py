@@ -16,8 +16,10 @@ from bearing_pdm.rag.corpus import SOURCE_DOCUMENTS, chunk_document, clean_text,
 from bearing_pdm.rag.explain import (
     DeterministicFallbackLLM,
     OpenAIProvider,
+    OpenRouterProvider,
     PredictionContext,
     ProviderBillingBlocked,
+    ProviderUnavailable,
     build_explanation,
 )
 from bearing_pdm.rag.retrieval import VectorIndex
@@ -213,6 +215,78 @@ def test_openai_provider_falls_through_candidate_models_on_model_not_found(monke
 def test_openai_provider_unavailable_without_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     assert OpenAIProvider().available() is False
+
+
+def test_openrouter_provider_unavailable_without_key(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    assert OpenRouterProvider().available() is False
+
+
+def test_openrouter_provider_defaults_to_a_free_model(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-real")
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    assert OpenRouterProvider().model.endswith(":free")
+
+
+def test_openrouter_provider_treats_embedded_error_on_http_200_as_unavailable(monkeypatch):
+    """OpenRouter can return HTTP 200 with an {"error": ...} body when the
+    upstream model provider itself fails (observed live: a free Nemotron
+    model returning provider_overloaded) - this must fall through to the
+    next provider, not crash on a missing "choices" key."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-real")
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def json(self):
+            return {"error": {"message": "Upstream error", "code": 503}}
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.post", lambda *a, **k: FakeResponse())
+    provider = OpenRouterProvider()
+    # build_explanation treats both exceptions identically (fall through to
+    # the next provider) - this just confirms it never reaches "choices".
+    with pytest.raises((ProviderUnavailable, ProviderBillingBlocked)):
+        provider.generate("q", PredictionContext(), [], "")
+
+
+def test_openrouter_provider_treats_null_content_as_unavailable(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-real")
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def json(self):
+            return {"choices": [{"message": {"content": None}}]}
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.post", lambda *a, **k: FakeResponse())
+    with pytest.raises(ProviderUnavailable):
+        OpenRouterProvider().generate("q", PredictionContext(), [], "")
+
+
+def test_build_explanation_chain_falls_through_to_openrouter_when_earlier_providers_fail(
+    monkeypatch, built_index,
+):
+    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("VERCEL_AI_GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("api_key", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-real")
+
+    monkeypatch.setattr(
+        "bearing_pdm.rag.explain.httpx.post",
+        lambda *a, **k: type("R", (), {
+            "status_code": 200,
+            "headers": {"content-type": "application/json"},
+            "json": lambda self: {"choices": [{"message": {"content": "real answer"}}]},
+        })(),
+    )
+    context = PredictionContext(rul_seconds=4610.0, rul_hours=1.28, applicability_level="HIGH")
+    result = build_explanation(context, "leave-one-bearing-out evaluation", built_index)
+    assert result.provider.startswith("online:openrouter")
+    assert result.fallback_used is False
+    assert result.explanation == "real answer"
 
 
 def test_explain_endpoint_real_e2e_high_applicability():

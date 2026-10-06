@@ -8,9 +8,11 @@ authenticates, but generation is blocked at the account level by
 customer_verification_required; see docs/rag.md), (2) `OpenAIProvider`
 (direct OpenAI Chat Completions via OPENAI_API_KEY, tries a short list of
 candidate cheap models and classifies any billing/quota failure instead of
-retrying it), (3) `DeterministicFallbackLLM`. Each provider is a drop-in
+retrying it), (3) `OpenRouterProvider` (direct OpenRouter Chat Completions
+via OPENROUTER_API_KEY, defaults to a verified $0/$0 model so it never
+incurs cost), (4) `DeterministicFallbackLLM`. Each provider is a drop-in
 behind the same (question, context, citations, evidence_text) -> str
-interface; adding a fourth provider later means writing one more class, not
+interface; adding another provider later means writing one more class, not
 touching build_explanation's control flow beyond the tuple it iterates.
 
 `DeterministicFallbackLLM` is not a stub - it is the always-available,
@@ -266,6 +268,63 @@ class OpenAIProvider:
         )
 
 
+class OpenRouterProvider:
+    """Direct OpenRouter Chat Completions client - third online provider in
+    the chain (Vercel AI Gateway -> OpenAI -> OpenRouter -> deterministic
+    fallback). Defaults to a verified-free model so this provider never
+    incurs cost; override via OPENROUTER_MODEL if needed."""
+
+    name = "online:openrouter"
+
+    def __init__(self, timeout: float = 20.0):
+        self.timeout = timeout
+        self.api_key = os.environ.get("OPENROUTER_API_KEY")
+        self.model = os.environ.get("OPENROUTER_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
+
+    def available(self) -> bool:
+        return bool(self.api_key)
+
+    def generate(self, question: str, context: PredictionContext,
+                 citations: list[Citation], evidence_text: str) -> str:
+        if not self.api_key:
+            raise ProviderUnavailable("No OPENROUTER_API_KEY configured.")
+        user_message = (
+            f"Prediction context:\n{context}\n\n"
+            f"Retrieved evidence:\n{_sanitize_retrieved_text(evidence_text)}\n\n"
+            f"Question: {question or '(no question supplied - summarise the result)'}"
+        )
+        response = httpx.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message},
+                ],
+                "max_tokens": 500,
+            },
+            timeout=self.timeout,
+        )
+        body = response.json() if response.headers.get("content-type", "").startswith(
+            "application/json") else {}
+        # OpenRouter can return HTTP 200 with an embedded {"error": ...} body
+        # when the upstream model provider itself fails (e.g. overloaded) -
+        # treat that the same as a non-200 so the chain falls through cleanly
+        # instead of crashing on a missing "choices" key.
+        if response.status_code != 200 or "choices" not in body:
+            category = _classify_openai_error(response.status_code, body)
+            if category is not None:
+                raise ProviderBillingBlocked(
+                    category, f"OpenRouter request failed ({category}).")
+            raise ProviderUnavailable(
+                f"OpenRouter http_{response.status_code}: {body.get('error')}")
+        content = body["choices"][0]["message"]["content"]
+        if not content:
+            raise ProviderUnavailable("OpenRouter returned an empty/null message content.")
+        return content
+
+
 class DeterministicFallbackLLM:
     """Always available. Builds the explanation purely from structured
     fields + retrieved chunk text - no network call, no model, nothing that
@@ -375,7 +434,7 @@ def build_explanation(
     # immediately (no retry) and moves to the next; it is never silently
     # swallowed - the reason is available via the raised exception for
     # whoever calls build_explanation to log if they choose to.
-    for provider in (OnlineLLM(), OpenAIProvider()):
+    for provider in (OnlineLLM(), OpenAIProvider(), OpenRouterProvider()):
         if not provider.available():
             continue
         try:
