@@ -40,6 +40,21 @@
 # ../artifacts/rag_index/ (tracked, committed directly at the repo root).
 /api/rag_index/
 
+# same reason again: a fresh copy of ../deploy_data/*.json, vendored by
+# "prebuild" so /trajectory and /models/* routes work in a real Vercel
+# deployment. Never hand-edit or commit this; the canonical source is
+# ../deploy_data/ (tracked, committed directly at the repo root).
+/api/deploy_data/
+
+# local uv environment/lockfile for api/ - requirements.txt is the only
+# dependency manifest Vercel's Python builder should see. A stray
+# pyproject.toml/uv.lock here makes Vercel prefer the uv/pyproject builder,
+# which resolves against this machine's Python 3.14 with no prebuilt wheels
+# for numpy/scipy/scikit-learn and bloats the function past the 225MB limit.
+/api/pyproject.toml
+/api/uv.lock
+/_uv/
+
 # production
 /build
 
