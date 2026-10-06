@@ -8,6 +8,10 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
     globals: true,
+    // .vercel/cache/**/src mirrors src/ verbatim for the deployed function,
+    // so without this exclude a local `vercel build`/deploy makes every test
+    // run twice (found running this suite after a preview deploy).
+    exclude: ["**/node_modules/**", "**/.vercel/**"],
   },
   resolve: {
     alias: {
