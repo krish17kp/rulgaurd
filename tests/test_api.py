@@ -143,6 +143,48 @@ def test_models_evaluation_falls_back_to_the_file_on_malformed_env_var(monkeypat
     assert response.status_code in (200, 503)
 
 
+HIDDEN_SET_PRESENT = (api.DEPLOY_DATA_DIR / "hidden_set_evaluation.json").exists()
+
+
+@pytest.mark.skipif(not HIDDEN_SET_PRESENT, reason="deploy_data/hidden_set_evaluation.json not present")
+def test_models_hidden_set_evaluation_matches_committed_artifact():
+    response = client.get("/models/hidden-set-evaluation")
+    assert response.status_code == 200
+    body = response.json()
+    expected = json.loads((api.DEPLOY_DATA_DIR / "hidden_set_evaluation.json").read_text())
+    assert body == expected
+    assert len(body["results"]["official"]["per_bearing"]) == 22  # 11 bearings x 2 models
+
+
+def test_models_hidden_set_evaluation_prefers_the_inline_env_var(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "DEPLOY_DATA_DIR", tmp_path / "does-not-exist")
+    monkeypatch.setenv("HIDDEN_SET_EVALUATION_JSON", json.dumps({"convention": "test"}))
+    response = client.get("/models/hidden-set-evaluation")
+    assert response.status_code == 200
+    assert response.json() == {"convention": "test"}
+
+
+HI_COMPARISON_PRESENT = (api.METRICS_DIR / "health_indicator_comparison.json").exists()
+
+
+@pytest.mark.skipif(not HI_COMPARISON_PRESENT, reason="reports/metrics/health_indicator_comparison.json not present")
+def test_models_health_indicator_comparison_matches_committed_artifact():
+    response = client.get("/models/health-indicator-comparison")
+    assert response.status_code == 200
+    body = response.json()
+    expected = json.loads((api.METRICS_DIR / "health_indicator_comparison.json").read_text())
+    assert body == expected
+    assert body["selected"] == "reference_hi"
+
+
+def test_models_health_indicator_comparison_prefers_the_inline_env_var(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "METRICS_DIR", tmp_path / "does-not-exist")
+    monkeypatch.setenv("HEALTH_INDICATOR_COMPARISON_JSON", json.dumps({"selected": "test"}))
+    response = client.get("/models/health-indicator-comparison")
+    assert response.status_code == 200
+    assert response.json() == {"selected": "test"}
+
+
 def test_predict_rul_rejects_non_femto_dataset():
     response = client.post(
         "/predict/rul", json={"dataset_id": "college", "features": {}}

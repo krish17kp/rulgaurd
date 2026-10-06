@@ -73,6 +73,8 @@ export interface ModelMetrics {
   mae_seconds: number;
   rmse_seconds: number;
   median_abs_error_seconds: number;
+  mean_signed_error_seconds?: number;
+  overestimate_rate?: number;
   n: number;
 }
 
@@ -81,6 +83,7 @@ export interface EvaluationResponse {
   femto_lobo_overall_by_model: Record<string, ModelMetrics>;
   femto_lobo: Array<ModelMetrics & { model: string; held_out_bearing: string }>;
   college_mean_mae_by_model?: Record<string, number>;
+  college_overall_by_model?: Record<string, ModelMetrics>;
   college_naive_caveat: string;
 }
 
@@ -362,4 +365,62 @@ export interface TrajectoryResponse {
  * dashboard.py uses) - no model runs in the browser or at request time. */
 export function getTrajectory(bearingRunId: string): Promise<TrajectoryResponse> {
   return request<TrajectoryResponse>(`/trajectory/femto/${encodeURIComponent(bearingRunId)}`);
+}
+
+/** FEMTO Full_Test_Set (hidden/frozen) PHM2012 challenge results, verbatim
+ * from deploy_data/hidden_set_evaluation.json (src/bearing_pdm/api.py's
+ * /models/hidden-set-evaluation) - scored once post-freeze (M4b), never
+ * refit against. */
+export interface HiddenSetBearingResult {
+  model: string;
+  bearing: string;
+  actual_rul_seconds: number;
+  predicted_rul_seconds: number;
+  error_seconds: number;
+  percent_error: number;
+  phm2012_score: number;
+}
+
+export interface HiddenSetEvaluationResponse {
+  convention: string;
+  scoring_function: string;
+  ground_truth_variants: { official: string; archive_derived: string };
+  lower_mae_model_official: string;
+  results: {
+    official: { per_bearing: HiddenSetBearingResult[] };
+    archive_derived: { per_bearing: HiddenSetBearingResult[] };
+  };
+}
+
+export function getHiddenSetEvaluation(): Promise<HiddenSetEvaluationResponse> {
+  return request<HiddenSetEvaluationResponse>("/models/hidden-set-evaluation");
+}
+
+/** Transparent/PCA/reference HI comparison (docs/decisions.md D18-D20),
+ * verbatim from reports/metrics/health_indicator_comparison.json. */
+export interface HiVariantSummary {
+  status: string;
+  failure_mode?: string;
+  mean_monotonicity?: number;
+  mean_spearman: number;
+  pinning: { mean_pct_at_one: number; worst_pct_at_one: number; mean_usable_range_p05_p95: number };
+  per_bearing: Array<{
+    bearing_run_id: string;
+    monotonicity?: number;
+    trend_corr?: number;
+    spearman: number;
+    n: number;
+  }>;
+}
+
+export interface HealthIndicatorComparisonResponse {
+  transparent_hi: HiVariantSummary;
+  pca_hi: HiVariantSummary;
+  reference_hi: HiVariantSummary & { pooled?: { mean_spearman: number; pinning: HiVariantSummary["pinning"] } };
+  selected: string;
+  selection_reason: string;
+}
+
+export function getHealthIndicatorComparison(): Promise<HealthIndicatorComparisonResponse> {
+  return request<HealthIndicatorComparisonResponse>("/models/health-indicator-comparison");
 }

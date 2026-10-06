@@ -1,0 +1,462 @@
+{
+  "transparent_hi": {
+    "status": "legacy - retained as documented failure (docs/decisions.md D18)",
+    "failure_mode": "hard floor at anomaly=0 plus a healthy reference pooled across three operating conditions pins most acquisitions at exactly 1.0",
+    "mean_monotonicity": 0.00868060889970733,
+    "mean_trend_corr": -0.5254548897500945,
+    "mean_spearman": -0.4142667292925331,
+    "pinning": {
+      "mean_pct_at_one": 47.53635730785822,
+      "worst_pct_at_one": 88.9431887599267,
+      "mean_usable_range_p05_p95": 0.678964201434551
+    },
+    "per_bearing": [
+      {
+        "bearing_run_id": "femto:Bearing1_1",
+        "monotonicity": 0.007851534618129907,
+        "trend_corr": -0.8746166692755767,
+        "spearman": -0.8325148586699043,
+        "n": 2803
+      },
+      {
+        "bearing_run_id": "femto:Bearing1_2",
+        "monotonicity": 0.022988505747126436,
+        "trend_corr": -0.14288209744513164,
+        "spearman": -0.07847842091374412,
+        "n": 871
+      },
+      {
+        "bearing_run_id": "femto:Bearing2_1",
+        "monotonicity": 0.001098901098901099,
+        "trend_corr": -0.6645606082793253,
+        "spearman": -0.47684984254339835,
+        "n": 911
+      },
+      {
+        "bearing_run_id": "femto:Bearing2_2",
+        "monotonicity": 0.017587939698492462,
+        "trend_corr": -0.7805531660886464,
+        "spearman": -0.6354029523710532,
+        "n": 797
+      },
+      {
+        "bearing_run_id": "femto:Bearing3_1",
+        "monotonicity": 0.0019455252918287938,
+        "trend_corr": -0.31513786999061416,
+        "spearman": -0.10452890450658993,
+        "n": 515
+      },
+      {
+        "bearing_run_id": "femto:Bearing3_2",
+        "monotonicity": 0.0006112469437652812,
+        "trend_corr": -0.37497892742127276,
+        "spearman": -0.35782539675050884,
+        "n": 1637
+      }
+    ]
+  },
+  "pca_hi": {
+    "status": "legacy - retained as documented failure (docs/decisions.md D18)",
+    "failure_mode": "pooled PC1 min-max is set by rare end-of-life spikes, so the usable range collapses",
+    "selected_features": [
+      "vibration_x_spectral_centroid_hz",
+      "vibration_x_band_energy_frac_mid",
+      "vibration_y_abs_mean",
+      "vibration_x_band_energy_frac_high",
+      "vibration_y_rms",
+      "vibration_y_std",
+      "vibration_y_total_spectral_energy",
+      "vibration_y_var"
+    ],
+    "mean_monotonicity": 0.01932303519009935,
+    "mean_trend_corr": -0.46478710209880963,
+    "mean_spearman": -0.3979437753227418,
+    "pinning": {
+      "mean_pct_at_one": 0.020911752404851523,
+      "worst_pct_at_one": 0.12547051442910914,
+      "mean_usable_range_p05_p95": 0.10590801819257663
+    },
+    "per_bearing": [
+      {
+        "bearing_run_id": "femto:Bearing1_1",
+        "monotonicity": 0.0014275517487508922,
+        "trend_corr": -0.2697355900454908,
+        "spearman": -0.2739842312325336,
+        "n": 2803
+      },
+      {
+        "bearing_run_id": "femto:Bearing1_2",
+        "monotonicity": 0.016091954022988506,
+        "trend_corr": -0.36347911355323065,
+        "spearman": -0.4687392739657515,
+        "n": 871
+      },
+      {
+        "bearing_run_id": "femto:Bearing2_1",
+        "monotonicity": 0.01978021978021978,
+        "trend_corr": -0.6742765850750653,
+        "spearman": -0.5366444217865444,
+        "n": 911
+      },
+      {
+        "bearing_run_id": "femto:Bearing2_2",
+        "monotonicity": 0.022613065326633167,
+        "trend_corr": -0.6588165726353208,
+        "spearman": -0.5523654631304086,
+        "n": 797
+      },
+      {
+        "bearing_run_id": "femto:Bearing3_1",
+        "monotonicity": 0.038910505836575876,
+        "trend_corr": -0.4432607797479492,
+        "spearman": -0.517532921064122,
+        "n": 515
+      },
+      {
+        "bearing_run_id": "femto:Bearing3_2",
+        "monotonicity": 0.017114914425427872,
+        "trend_corr": -0.3791539715358008,
+        "spearman": -0.03839634075709072,
+        "n": 1637
+      }
+    ]
+  },
+  "reference_hi": {
+    "status": "current",
+    "features": [
+      "vibration_x_rms",
+      "vibration_y_rms",
+      "vibration_x_peak_to_peak",
+      "vibration_y_peak_to_peak",
+      "vibration_x_kurtosis",
+      "vibration_y_kurtosis",
+      "vibration_x_crest_factor",
+      "vibration_y_crest_factor"
+    ],
+    "log_features": [
+      "vibration_x_kurtosis",
+      "vibration_y_kurtosis"
+    ],
+    "reference_window_acquisitions": [
+      10,
+      60
+    ],
+    "smooth_window": 11,
+    "healthy_score": 0.040574132418913236,
+    "failure_score": 3.378651226779923,
+    "pooled": {
+      "mean_spearman": -0.5346844746281042,
+      "pinning": {
+        "mean_pct_at_one": 0.0,
+        "worst_pct_at_one": 0.0,
+        "mean_usable_range_p05_p95": 0.7562016888485336
+      },
+      "per_bearing": [
+        {
+          "bearing_run_id": "femto:Bearing1_1",
+          "n": 2803,
+          "hi_min": 3.1454046016800967e-17,
+          "hi_max": 0.98373519372822,
+          "pct_at_one": 0.0,
+          "pct_at_zero": 1.9265073135925792,
+          "hi_healthy_window": 0.9516465769247285,
+          "hi_final_1pct": 2.2745740441516162e-10,
+          "usable_range_p05_p95": 0.8113383113928626,
+          "spearman": -0.8380361247028206,
+          "monotonicity": 0.004996431120628123
+        },
+        {
+          "bearing_run_id": "femto:Bearing1_2",
+          "n": 871,
+          "hi_min": 3.1428753450002645e-08,
+          "hi_max": 0.9675947799823661,
+          "pct_at_one": 0.0,
+          "pct_at_zero": 12.973593570608497,
+          "hi_healthy_window": 0.9536762806232708,
+          "hi_final_1pct": 0.00015314178413371814,
+          "usable_range_p05_p95": 0.9573930848388041,
+          "spearman": -0.32665865486075535,
+          "monotonicity": 0.011494252873563218
+        },
+        {
+          "bearing_run_id": "femto:Bearing2_1",
+          "n": 911,
+          "hi_min": 9.399564159105766e-07,
+          "hi_max": 0.9714777457109298,
+          "pct_at_one": 0.0,
+          "pct_at_zero": 1.3172338090010975,
+          "hi_healthy_window": 0.952048870274837,
+          "hi_final_1pct": 0.0010952520627998184,
+          "usable_range_p05_p95": 0.8750657100450383,
+          "spearman": -0.7790464638091837,
+          "monotonicity": 0.03626373626373627
+        },
+        {
+          "bearing_run_id": "femto:Bearing2_2",
+          "n": 797,
+          "hi_min": 1.7830068309818329e-06,
+          "hi_max": 0.9757994352301883,
+          "pct_at_one": 0.0,
+          "pct_at_zero": 0.6273525721455459,
+          "hi_healthy_window": 0.9499295351455879,
+          "hi_final_1pct": 4.4717533324504e-05,
+          "usable_range_p05_p95": 0.9415246193079803,
+          "spearman": -0.6425737202451622,
+          "monotonicity": 0.10301507537688442
+        },
+        {
+          "bearing_run_id": "femto:Bearing3_1",
+          "n": 515,
+          "hi_min": 0.009074828086822076,
+          "hi_max": 0.9709135337711539,
+          "pct_at_one": 0.0,
+          "pct_at_zero": 0.0,
+          "hi_healthy_window": 0.9540416521617264,
+          "hi_final_1pct": 0.04924578849988897,
+          "usable_range_p05_p95": 0.078557620397118,
+          "spearman": -0.4699498665891104,
+          "monotonicity": 0.005836575875486381
+        },
+        {
+          "bearing_run_id": "femto:Bearing3_2",
+          "n": 1637,
+          "hi_min": 9.490736157387962e-07,
+          "hi_max": 0.9818833108870099,
+          "pct_at_one": 0.0,
+          "pct_at_zero": 0.6719609040928528,
+          "hi_healthy_window": 0.957252154335749,
+          "hi_final_1pct": 8.308541369256274e-05,
+          "usable_range_p05_p95": 0.8733307871093976,
+          "spearman": -0.15184201756159274,
+          "monotonicity": 0.029339853300733496
+        }
+      ]
+    },
+    "leave_one_bearing_out": {
+      "mean_spearman": -0.5337619151818672,
+      "pinning": {
+        "mean_pct_at_one": 0.0,
+        "worst_pct_at_one": 0.0,
+        "mean_usable_range_p05_p95": 0.7757043133510386
+      },
+      "per_bearing": [
+        {
+          "bearing_run_id": "femto:Bearing1_1",
+          "n": 2803,
+          "hi_min": 7.624791784742476e-18,
+          "hi_max": 0.985580253475544,
+          "pct_at_one": 0.0,
+          "pct_at_zero": 1.783803068141277,
+          "hi_healthy_window": 0.9527203908922863,
+          "hi_final_1pct": 7.1727881426441986e-12,
+          "usable_range_p05_p95": 0.8954197961507622,
+          "spearman": -0.844372634881873,
+          "monotonicity": 0.01034975017844397
+        },
+        {
+          "bearing_run_id": "femto:Bearing1_2",
+          "n": 871,
+          "hi_min": 1.4796684854234953e-08,
+          "hi_max": 0.9684943466814798,
+          "pct_at_one": 0.0,
+          "pct_at_zero": 13.088404133180253,
+          "hi_healthy_window": 0.9543356906886302,
+          "hi_final_1pct": 8.099543765144164e-05,
+          "usable_range_p05_p95": 0.9580749779661117,
+          "spearman": -0.3232285929746538,
+          "monotonicity": 0.01264367816091954
+        },
+        {
+          "bearing_run_id": "femto:Bearing2_1",
+          "n": 911,
+          "hi_min": 3.019793893787612e-06,
+          "hi_max": 0.9708579560177842,
+          "pct_at_one": 0.0,
+          "pct_at_zero": 1.2074643249176729,
+          "hi_healthy_window": 0.9517846697914984,
+          "hi_final_1pct": 0.001431349638592796,
+          "usable_range_p05_p95": 0.8470965551841745,
+          "spearman": -0.7438700700409878,
+          "monotonicity": 0.04395604395604396
+        },
+        {
+          "bearing_run_id": "femto:Bearing2_2",
+          "n": 797,
+          "hi_min": 9.385131875396276e-07,
+          "hi_max": 0.9770126737020055,
+          "pct_at_one": 0.0,
+          "pct_at_zero": 0.8782936010037641,
+          "hi_healthy_window": 0.948789802699139,
+          "hi_final_1pct": 3.539186832992253e-05,
+          "usable_range_p05_p95": 0.9445233881603678,
+          "spearman": -0.6329725605779405,
+          "monotonicity": 0.11306532663316583
+        },
+        {
+          "bearing_run_id": "femto:Bearing3_1",
+          "n": 515,
+          "hi_min": 0.010620654278262495,
+          "hi_max": 0.9715403444924401,
+          "pct_at_one": 0.0,
+          "pct_at_zero": 0.0,
+          "hi_healthy_window": 0.9542315241375859,
+          "hi_final_1pct": 0.06285674613169583,
+          "usable_range_p05_p95": 0.08282374386595914,
+          "spearman": -0.47738538825790305,
+          "monotonicity": 0.009727626459143969
+        },
+        {
+          "bearing_run_id": "femto:Bearing3_2",
+          "n": 1637,
+          "hi_min": 3.537782579405688e-06,
+          "hi_max": 0.9831156513951018,
+          "pct_at_one": 0.0,
+          "pct_at_zero": 1.5271838729383016,
+          "hi_healthy_window": 0.9591029944703517,
+          "hi_final_1pct": 0.00018437083089384773,
+          "usable_range_p05_p95": 0.9262874187788561,
+          "spearman": -0.18074224435784494,
+          "monotonicity": 0.022616136919315404
+        }
+      ]
+    },
+    "smoothing_window_sweep": [
+      {
+        "smooth_window": 1,
+        "mean_spearman": -0.45623517126278007,
+        "worst_pct_at_one": 0.0,
+        "mean_hi_final_1pct": 0.01606268310882494,
+        "worst_hi_final_1pct": 0.0963267165161984
+      },
+      {
+        "smooth_window": 5,
+        "mean_spearman": -0.5063721131324249,
+        "worst_pct_at_one": 0.0,
+        "mean_hi_final_1pct": 0.009742174238628378,
+        "worst_hi_final_1pct": 0.058348037210397156
+      },
+      {
+        "smooth_window": 11,
+        "mean_spearman": -0.5346844746281042,
+        "worst_pct_at_one": 0.0,
+        "mean_hi_final_1pct": 0.00843699758688283,
+        "worst_hi_final_1pct": 0.04924578849988897
+      },
+      {
+        "smooth_window": 21,
+        "mean_spearman": -0.5574386692439489,
+        "worst_pct_at_one": 0.0,
+        "mean_hi_final_1pct": 0.005384286478829951,
+        "worst_hi_final_1pct": 0.02559319249452214
+      },
+      {
+        "smooth_window": 31,
+        "mean_spearman": -0.5666905530488571,
+        "worst_pct_at_one": 0.0,
+        "mean_hi_final_1pct": 0.007033593137321992,
+        "worst_hi_final_1pct": 0.024298034259267146
+      }
+    ]
+  },
+  "selection": {
+    "selected": "reference_hi",
+    "gate": "worst per-bearing pct_at_one < 5.0% (a pinned HI cannot carry a degradation stage), then strongest |mean rank trend| vs life progression",
+    "eligible": {
+      "pca_hi": 0.3979437753227418,
+      "reference_hi": 0.5337619151818672
+    },
+    "ineligible": {
+      "transparent_hi": 88.9431887599267
+    }
+  },
+  "stages": {
+    "method": "statistical alarm band on the selected HI plus a persistence rule. hi_warn is a genuine fitted quantile of the training bearings' healthy HI. hi_critical is a quantile of HI values already compressed by the reference HI's fixed /6 logistic steepness toward a constant end-of-life anchor (~0.047, docs/decisions.md D20) - a threshold computed from data, but not an independent fit the way hi_warn is",
+    "order": [
+      "HEALTHY",
+      "DEGRADING",
+      "CRITICAL"
+    ],
+    "not_a_diagnosis": "a stage is a severity band on a health indicator, not a fault type - no inner-race/outer-race/ball/cage/lubrication claim",
+    "persistence_acquisitions": 5,
+    "pooled_thresholds": {
+      "hi_warn": 0.9381157448864352,
+      "hi_critical": 0.04793838694033707
+    },
+    "leave_one_bearing_out": [
+      {
+        "bearing_run_id": "femto:Bearing1_1",
+        "n": 2803,
+        "frac_healthy": 0.5062433107384945,
+        "frac_degrading": 0.46093471280770604,
+        "frac_critical": 0.0328219764537995,
+        "life_frac_at_first_critical": 0.47377809489832323,
+        "rul_at_first_critical_seconds": 14740.0,
+        "n_severity_reversions": 5,
+        "hi_warn": 0.9408789881793567,
+        "hi_critical": 0.04742587317756678
+      },
+      {
+        "bearing_run_id": "femto:Bearing1_2",
+        "n": 871,
+        "frac_healthy": 0.2158438576349024,
+        "frac_degrading": 0.5625717566016073,
+        "frac_critical": 0.22158438576349024,
+        "life_frac_at_first_critical": 0.14580941446613088,
+        "rul_at_first_critical_seconds": 7430.0,
+        "n_severity_reversions": 19,
+        "hi_warn": 0.9364664674227213,
+        "hi_critical": 0.04742587317756678
+      },
+      {
+        "bearing_run_id": "femto:Bearing2_1",
+        "n": 911,
+        "frac_healthy": 0.13830954994511527,
+        "frac_degrading": 0.8441273326015367,
+        "frac_critical": 0.01756311745334797,
+        "life_frac_at_first_critical": 0.9385290889132821,
+        "rul_at_first_critical_seconds": 550.0,
+        "n_severity_reversions": 1,
+        "hi_warn": 0.9382797515222486,
+        "hi_critical": 0.04742587317756678
+      },
+      {
+        "bearing_run_id": "femto:Bearing2_2",
+        "n": 797,
+        "frac_healthy": 0.23462986198243413,
+        "frac_degrading": 0.6511919698870765,
+        "frac_critical": 0.11417816813048934,
+        "life_frac_at_first_critical": 0.5508155583437893,
+        "rul_at_first_critical_seconds": 3570.0,
+        "n_severity_reversions": 1,
+        "hi_warn": 0.935886516577492,
+        "hi_critical": 0.04742587317756678
+      },
+      {
+        "bearing_run_id": "femto:Bearing3_1",
+        "n": 515,
+        "frac_healthy": 0.5611650485436893,
+        "frac_degrading": 0.4155339805825243,
+        "frac_critical": 0.02330097087378641,
+        "life_frac_at_first_critical": 0.974757281553398,
+        "rul_at_first_critical_seconds": 120.0,
+        "n_severity_reversions": 8,
+        "hi_warn": 0.9418018757480439,
+        "hi_critical": 0.04768088750154072
+      },
+      {
+        "bearing_run_id": "femto:Bearing3_2",
+        "n": 1637,
+        "frac_healthy": 0.10201588271227856,
+        "frac_degrading": 0.8399511301160659,
+        "frac_critical": 0.05803298717165547,
+        "life_frac_at_first_critical": 0.8790470372632865,
+        "rul_at_first_critical_seconds": 1970.0,
+        "n_severity_reversions": 4,
+        "hi_warn": 0.939266271078598,
+        "hi_critical": 0.04742587317756678
+      }
+    ]
+  },
+  "selected": "reference_hi",
+  "selection_reason": "worst per-bearing pct_at_one < 5.0% (a pinned HI cannot carry a degradation stage), then strongest |mean rank trend| vs life progression"
+}

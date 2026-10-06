@@ -26,6 +26,7 @@ export function MultiSeriesChart({
   xLabel,
   yLabel,
   referenceLine,
+  mode = "line",
 }: {
   series: ChartSeries[];
   width?: number;
@@ -34,6 +35,8 @@ export function MultiSeriesChart({
   yLabel?: string;
   /** Optional y=x style reference line, e.g. perfect actual==predicted. */
   referenceLine?: boolean;
+  /** "line" connects points (trajectories); "points" draws dots only (scatter). */
+  mode?: "line" | "points";
 }) {
   const downsampled = series.map((s) => ({ ...s, points: downsamplePoints(s.points, 1200) }));
   const allX = downsampled.flatMap((s) => s.points.map((p) => p.x));
@@ -62,23 +65,31 @@ export function MultiSeriesChart({
             stroke="currentColor" strokeOpacity={0.25} strokeDasharray="4 3"
           />
         )}
-        {downsampled.map((s) => {
-          // Break the polyline at null gaps instead of drawing through them.
-          const segments: string[] = [];
-          let current: string[] = [];
-          for (const p of s.points) {
-            if (p.y === null) {
+        {mode === "points"
+          ? downsampled.map((s) =>
+              s.points
+                .filter((p): p is { x: number; y: number } => p.y !== null)
+                .map((p, i) => (
+                  <circle key={`${s.label}-${i}`} cx={toX(p.x)} cy={toY(p.y)} r={2} fill={s.color} fillOpacity={0.6} />
+                ))
+            )
+          : downsampled.map((s) => {
+              // Break the polyline at null gaps instead of drawing through them.
+              const segments: string[] = [];
+              let current: string[] = [];
+              for (const p of s.points) {
+                if (p.y === null) {
+                  if (current.length) segments.push(current.join(" "));
+                  current = [];
+                  continue;
+                }
+                current.push(`${toX(p.x).toFixed(1)},${toY(p.y).toFixed(1)}`);
+              }
               if (current.length) segments.push(current.join(" "));
-              current = [];
-              continue;
-            }
-            current.push(`${toX(p.x).toFixed(1)},${toY(p.y).toFixed(1)}`);
-          }
-          if (current.length) segments.push(current.join(" "));
-          return segments.map((points, i) => (
-            <polyline key={`${s.label}-${i}`} points={points} fill="none" stroke={s.color} strokeWidth={1.5} />
-          ));
-        })}
+              return segments.map((points, i) => (
+                <polyline key={`${s.label}-${i}`} points={points} fill="none" stroke={s.color} strokeWidth={1.5} />
+              ));
+            })}
         {xLabel && (
           <text x={width / 2} y={height - 4} textAnchor="middle" fontSize="10" fill="currentColor" opacity={0.6}>
             {xLabel}

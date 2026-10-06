@@ -1397,6 +1397,52 @@ def models_evaluation() -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
+@app.get("/models/hidden-set-evaluation")
+def models_hidden_set_evaluation() -> dict[str, Any]:
+    """FEMTO Full_Test_Set (hidden/frozen, scored once post-freeze per M4b)
+    PHM2012 challenge results, read verbatim from
+    deploy_data/hidden_set_evaluation.json - same inline-env-var escape hatch
+    as models_evaluation for Vercel's packaging gap, same verbatim-file
+    discipline (no recomputation, no hand-typed numbers)."""
+    inline = os.environ.get("HIDDEN_SET_EVALUATION_JSON")
+    if inline:
+        try:
+            return json.loads(inline)
+        except json.JSONDecodeError:
+            logger.warning("HIDDEN_SET_EVALUATION_JSON is set but could not be parsed - ignoring it")
+    path = DEPLOY_DATA_DIR / "hidden_set_evaluation.json"
+    if not path.exists():
+        raise ApiError(
+            503, "HIDDEN_SET_EVALUATION_UNAVAILABLE",
+            "deploy_data/hidden_set_evaluation.json missing. Run scripts/score_hidden_set.py first.",
+            retryable=True,
+        )
+    return json.loads(path.read_text())
+
+
+@app.get("/models/health-indicator-comparison")
+def models_health_indicator_comparison() -> dict[str, Any]:
+    """Transparent/PCA/reference HI comparison (docs/decisions.md D18-D20),
+    read verbatim from reports/metrics/health_indicator_comparison.json."""
+    inline = os.environ.get("HEALTH_INDICATOR_COMPARISON_JSON")
+    if inline:
+        try:
+            return json.loads(inline)
+        except json.JSONDecodeError:
+            logger.warning(
+                "HEALTH_INDICATOR_COMPARISON_JSON is set but could not be parsed - ignoring it"
+            )
+    path = METRICS_DIR / "health_indicator_comparison.json"
+    if not path.exists():
+        raise ApiError(
+            503, "HI_COMPARISON_UNAVAILABLE",
+            "reports/metrics/health_indicator_comparison.json missing. "
+            "Run scripts/build_health.py first.",
+            retryable=True,
+        )
+    return json.loads(path.read_text())
+
+
 _TRAJECTORY_CACHE: dict[str, Any] | None = None
 _TRAJECTORY_CACHE_LOCK = threading.Lock()
 

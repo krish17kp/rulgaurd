@@ -1616,6 +1616,48 @@
         "summary": "Models Evaluation"
       }
     },
+    "/models/health-indicator-comparison": {
+      "get": {
+        "description": "Transparent/PCA/reference HI comparison (docs/decisions.md D18-D20),\nread verbatim from reports/metrics/health_indicator_comparison.json.",
+        "operationId": "models_health_indicator_comparison_models_health_indicator_comparison_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Models Health Indicator Comparison Models Health Indicator Comparison Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Models Health Indicator Comparison"
+      }
+    },
+    "/models/hidden-set-evaluation": {
+      "get": {
+        "description": "FEMTO Full_Test_Set (hidden/frozen, scored once post-freeze per M4b)\nPHM2012 challenge results, read verbatim from\ndeploy_data/hidden_set_evaluation.json - same inline-env-var escape hatch\nas models_evaluation for Vercel's packaging gap, same verbatim-file\ndiscipline (no recomputation, no hand-typed numbers).",
+        "operationId": "models_hidden_set_evaluation_models_hidden_set_evaluation_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Models Hidden Set Evaluation Models Hidden Set Evaluation Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Models Hidden Set Evaluation"
+      }
+    },
     "/models/info": {
       "get": {
         "operationId": "models_info_models_info_get",
