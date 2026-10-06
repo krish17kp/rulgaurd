@@ -2035,6 +2035,116 @@ def model_compatibility(request: CompatibilityRequest) -> CompatibilityResponse:
     )
 
 
+class ExplainPredictionContext(BaseModel):
+    """Mirrors PredictRulResponse's own fields, not a free-form bag - every
+    field here is one the model pipeline already produces (goals.md #14:
+    "validate prediction context")."""
+
+    dataset_id: str | None = None
+    model_name: str | None = None
+    model_version: str | None = None
+    rul_seconds: float | None = None
+    rul_hours: float | None = None
+    applicability_level: str | None = None
+    applicability_reasons: list[str] = Field(default_factory=list)
+    compatibility: str | None = None
+    health_indicator: float | None = None
+    degradation_stage: str | None = None
+    reliability: dict[str, Any] | None = None
+
+
+class ExplainRequest(BaseModel):
+    prediction_id: str | None = None
+    context: ExplainPredictionContext
+    question: str = Field(default="", max_length=500)
+
+
+class CitationModel(BaseModel):
+    chunk_id: str
+    document_title: str
+    source: str
+    relevance_score: float
+
+
+class ExplainResponse(BaseModel):
+    explanation: str
+    citations: list[CitationModel]
+    status: str
+    provider: str
+    fallback_used: bool
+
+
+_rag_index_lock = threading.Lock()
+_rag_index_cache: Any | None = None
+
+
+def _rag_index():
+    global _rag_index_cache
+    with _rag_index_lock:
+        if _rag_index_cache is None:
+            from bearing_pdm.rag.retrieval import DEFAULT_INDEX_PATH, VectorIndex
+            _rag_index_cache = VectorIndex.load(DEFAULT_INDEX_PATH)
+        return _rag_index_cache
+
+
+@app.post("/explain", response_model=ExplainResponse)
+def explain(request: ExplainRequest) -> ExplainResponse:
+    """Explanation-only layer (goals.md #1, #13-14): consumes an immutable
+    prediction context, never recomputes RUL/HI/stage/applicability. When
+    `prediction_id` is supplied, the server's own bounded history summary
+    (docs/prediction-history.md) is cross-checked against the client-supplied
+    context so a client cannot assert a fabricated rul_hours/applicability_level
+    for a request the server actually served - a mismatch is rejected rather
+    than explained. History only stores a bounded summary (rul_hours,
+    applicability_level), so only those two fields are cross-checked; the
+    richer fields (reliability, HI, stage) are taken from the client body as
+    this endpoint does not currently have a fuller server-side record to
+    check them against."""
+    if request.prediction_id is not None:
+        try:
+            records = _history_store.recent()
+        except Exception:
+            raise ApiError(503, "HISTORY_UNAVAILABLE",
+                           "Prediction history could not be read.", retryable=True) from None
+        match = next((r for r in records if r.get("id") == request.prediction_id), None)
+        if match is None:
+            raise ApiError(404, "PREDICTION_NOT_FOUND",
+                           "No stored prediction with that id.", retryable=False)
+        stored = match.get("result") or {}
+        if stored.get("rul_hours") is not None and request.context.rul_hours is not None:
+            if abs(stored["rul_hours"] - request.context.rul_hours) > 1e-3:
+                raise ApiError(422, "CONTEXT_MISMATCH",
+                               "Supplied rul_hours does not match the stored prediction.",
+                               retryable=False)
+        if (stored.get("applicability_level") is not None
+                and request.context.applicability_level is not None
+                and stored["applicability_level"] != request.context.applicability_level):
+            raise ApiError(422, "CONTEXT_MISMATCH",
+                           "Supplied applicability_level does not match the stored prediction.",
+                           retryable=False)
+
+    from bearing_pdm.rag.explain import PredictionContext, build_explanation
+
+    context = PredictionContext(**request.context.model_dump())
+    try:
+        index = _rag_index()
+    except FileNotFoundError:
+        raise ApiError(503, "RAG_INDEX_UNAVAILABLE",
+                       "RAG index has not been built yet; run "
+                       "scripts/build_rag_index.py.", retryable=False) from None
+
+    result = build_explanation(context, request.question, index)
+    return ExplainResponse(
+        explanation=result.explanation,
+        citations=[CitationModel(chunk_id=c.chunk_id, document_title=c.document_title,
+                                  source=c.source, relevance_score=c.relevance_score)
+                   for c in result.citations],
+        status=result.status,
+        provider=result.provider,
+        fallback_used=result.fallback_used,
+    )
+
+
 @app.get("/predictions/history")
 def prediction_history() -> dict[str, Any]:
     """Bounded prediction summaries, newest first, from the configured store

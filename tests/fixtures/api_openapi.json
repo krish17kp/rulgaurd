@@ -412,6 +412,34 @@
         "title": "Body_predict_rul_from_femto_acquisition_predict_rul_femto_acquisition_post",
         "type": "object"
       },
+      "CitationModel": {
+        "properties": {
+          "chunk_id": {
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "document_title": {
+            "title": "Document Title",
+            "type": "string"
+          },
+          "relevance_score": {
+            "title": "Relevance Score",
+            "type": "number"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunk_id",
+          "document_title",
+          "source",
+          "relevance_score"
+        ],
+        "title": "CitationModel",
+        "type": "object"
+      },
       "CompatibilityRequest": {
         "properties": {
           "dataset_id": {
@@ -560,6 +588,196 @@
           "sampling"
         ],
         "title": "DatasetProfileResponse",
+        "type": "object"
+      },
+      "ExplainPredictionContext": {
+        "description": "Mirrors PredictRulResponse's own fields, not a free-form bag - every\nfield here is one the model pipeline already produces (goals.md #14:\n\"validate prediction context\").",
+        "properties": {
+          "applicability_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicability Level"
+          },
+          "applicability_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applicability Reasons",
+            "type": "array"
+          },
+          "compatibility": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compatibility"
+          },
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Id"
+          },
+          "degradation_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degradation Stage"
+          },
+          "health_indicator": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health Indicator"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "reliability": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reliability"
+          },
+          "rul_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rul Hours"
+          },
+          "rul_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rul Seconds"
+          }
+        },
+        "title": "ExplainPredictionContext",
+        "type": "object"
+      },
+      "ExplainRequest": {
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ExplainPredictionContext"
+          },
+          "prediction_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction Id"
+          },
+          "question": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "context"
+        ],
+        "title": "ExplainRequest",
+        "type": "object"
+      },
+      "ExplainResponse": {
+        "properties": {
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/CitationModel"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "fallback_used": {
+            "title": "Fallback Used",
+            "type": "boolean"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "explanation",
+          "citations",
+          "status",
+          "provider",
+          "fallback_used"
+        ],
+        "title": "ExplainResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -1153,6 +1371,45 @@
           }
         },
         "summary": "Inspect Dataset Blob"
+      }
+    },
+    "/explain": {
+      "post": {
+        "description": "Explanation-only layer (goals.md #1, #13-14): consumes an immutable\nprediction context, never recomputes RUL/HI/stage/applicability. When\n`prediction_id` is supplied, the server's own bounded history summary\n(docs/prediction-history.md) is cross-checked against the client-supplied\ncontext so a client cannot assert a fabricated rul_hours/applicability_level\nfor a request the server actually served - a mismatch is rejected rather\nthan explained. History only stores a bounded summary (rul_hours,\napplicability_level), so only those two fields are cross-checked; the\nricher fields (reliability, HI, stage) are taken from the client body as\nthis endpoint does not currently have a fuller server-side record to\ncheck them against.",
+        "operationId": "explain_explain_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplainResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Explain"
       }
     },
     "/health": {

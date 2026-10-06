@@ -1,6 +1,9 @@
-# M7 only - not on the review critical path (deadline 2026-07-25).
-# Embeddings via local Ollama nomic-embed-text (already installed) preferred
-# over sentence-transformers to avoid a heavy extra dependency; add
-# sentence-transformers only if Ollama embeddings prove insufficient.
+# M7. Implemented online-first (Vercel AI Gateway via httpx, already in
+# requirements.txt) + a NumPy/TF-IDF local fallback for embeddings/retrieval
+# (src/bearing_pdm/rag/), since no online embedding provider or Ollama is
+# configured in this environment (docs/rag.md). faiss-cpu/ollama remain the
+# original-plan offline path (goals.md #8), activated only if the online
+# path is later proven infeasible - not needed for the TF-IDF fallback.
+pypdf
 faiss-cpu
 ollama
