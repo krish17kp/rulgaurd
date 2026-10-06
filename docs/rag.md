@@ -50,13 +50,21 @@ SOURCE_DOCUMENTS (corpus.py)
   -> chunk_document (1200 chars, 200 overlap, deterministic sha256-based chunk IDs)
   -> ingest_corpus (dedupes identical-content sources, records skips)
   -> TfidfEmbedder.fit/embed (retrieval.py)
-  -> VectorIndex.build/save -> artifacts/rag_index/index.json (sparse, ~2.2MB)
+  -> VectorIndex.build/save -> src/bearing_pdm/rag/data/index.json (sparse, ~2.2MB)
   -> VectorIndex.load/search (top-k cosine similarity, MIN_RELEVANCE_SCORE=0.15)
   -> build_explanation (explain.py): retrieves, then OnlineLLM if a key
      exists else DeterministicFallbackLLM
 ```
 
-Rebuild the index: `python scripts/build_rag_index.py`.
+Rebuild the index: `python scripts/build_rag_index.py`. The index lives
+inside the `bearing_pdm.rag` package itself (not under the repo-root
+`artifacts/`) deliberately: `frontend/package.json`'s `prebuild` script
+copies the whole `src/bearing_pdm/` directory into `frontend/api/bearing_pdm/`
+for the Vercel Python function, and a repo-root-relative path computed from
+`parents[N]` resolves to a different, wrong directory after that copy -
+verified by reproducing the bug, fixing it, then re-running the frontend
+build and confirming `frontend/api/bearing_pdm/rag/data/index.json` is
+present.
 
 ## API
 

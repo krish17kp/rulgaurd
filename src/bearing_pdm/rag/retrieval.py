@@ -125,9 +125,15 @@ class RetrievedChunk:
     score: float
 
 
-DEFAULT_INDEX_PATH = (
-    Path(__file__).resolve().parents[3] / "artifacts" / "rag_index" / "index.json"
-)
+# Package-relative, not repo-root-relative: the frontend build's prebuild
+# step copies the whole src/bearing_pdm/ directory into
+# frontend/api/bearing_pdm/ for the Vercel Python function (see
+# frontend/package.json's "prebuild" script). A path computed from
+# Path(__file__).resolve().parents[N] would silently resolve to the wrong
+# directory after that copy (parents[3] from here means something different
+# under frontend/api/bearing_pdm/rag/ than under src/bearing_pdm/rag/) - a
+# path inside this same package travels correctly either way.
+DEFAULT_INDEX_PATH = Path(__file__).resolve().parent / "data" / "index.json"
 
 
 class VectorIndex:

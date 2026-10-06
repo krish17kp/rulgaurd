@@ -154,6 +154,35 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+export interface ExplainCitation {
+  chunk_id: string;
+  document_title: string;
+  source: string;
+  relevance_score: number;
+}
+
+export interface ExplainResponse {
+  explanation: string;
+  citations: ExplainCitation[];
+  /** "complete" | "insufficient_evidence" - the deterministic fallback's own
+   * reported status (src/bearing_pdm/rag/explain.py), not an HTTP status. */
+  status: string;
+  provider: string;
+  fallback_used: boolean;
+}
+
+/** M7 explanation layer (docs/rag.md) - never computes or alters RUL/HI/
+ * stage/applicability; only explains a result already produced above. */
+export async function explainPrediction(
+  context: Partial<PredictRulResponse> & { health_indicator?: number | null; degradation_stage?: string | null },
+  question: string
+): Promise<ExplainResponse> {
+  return request<ExplainResponse>("/explain", {
+    method: "POST",
+    body: JSON.stringify({ context, question }),
+  });
+}
+
 /** Shared by the two multipart-upload endpoints below - same
  * network-failure/non-2xx handling as `request`, but with a `FormData` body
  * and no JSON Content-Type header (the browser sets the multipart boundary

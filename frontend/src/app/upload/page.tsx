@@ -12,6 +12,7 @@ import {
   predictRulFromFemtoAcquisitionBlob,
 } from "@/lib/api";
 import { ApplicabilityNote } from "@/components/ApplicabilityNote";
+import { ExplainResult } from "@/components/ExplainResult";
 import { SuppressedResultNotice, isSuppressedApplicability } from "@/components/SuppressedResultNotice";
 import { BlobUploadError, DIRECT_UPLOAD_THRESHOLD_BYTES, uploadFileToBlob } from "@/lib/blobUpload";
 
@@ -282,7 +283,16 @@ export default function UploadPage() {
           {predictState.status === "loading" && <p className="text-sm">Extracting features and predicting…</p>}
 
           {predictState.status === "error" && predictState.suppressed && (
-            <SuppressedResultNotice detail={predictState.error} />
+            <>
+              <SuppressedResultNotice detail={predictState.error} />
+              <ExplainResult
+                result={{
+                  applicability_level: "LOW",
+                  compatibility: "RETRAIN_REQUIRED",
+                  applicability_reasons: [predictState.error],
+                }}
+              />
+            </>
           )}
 
           {predictState.status === "error" && !predictState.suppressed && (
@@ -327,6 +337,7 @@ export default function UploadPage() {
               <p className="text-xs leading-relaxed text-foreground-muted">
                 {applicabilityInterpretation(predictState.data.applicability_level)}
               </p>
+              <ExplainResult result={predictState.data} />
               <button
                 type="button"
                 onClick={resetForNewFile}
