@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "rm -rf api/bearing_pdm && cp -r ../src/bearing_pdm api/bearing_pdm && find api/bearing_pdm -name __pycache__ -type d -prune -exec rm -rf {} + && rm -rf api/reports && mkdir -p api/reports/metrics && cp reports/metrics/rul_evaluation.json api/reports/metrics/rul_evaluation.json && cp reports/metrics/health_indicator_comparison.json api/reports/metrics/health_indicator_comparison.json && rm -rf api/rag_index && mkdir -p api/rag_index && cp ../artifacts/rag_index/index.json api/rag_index/index.json && rm -rf api/deploy_data && mkdir -p api/deploy_data && cp ../deploy_data/trajectory_data.json api/deploy_data/trajectory_data.json && cp ../deploy_data/hidden_set_evaluation.json api/deploy_data/hidden_set_evaluation.json",
+    "prebuild": "rm -rf api/bearing_pdm && cp -r ../src/bearing_pdm api/bearing_pdm && find api/bearing_pdm -name __pycache__ -type d -prune -exec rm -rf {} + && rm -rf api/reports && mkdir -p api/reports/metrics && cp reports/metrics/rul_evaluation.json api/reports/metrics/rul_evaluation.json && cp reports/metrics/health_indicator_comparison.json api/reports/metrics/health_indicator_comparison.json && rm -rf api/rag_index && mkdir -p api/rag_index && cp ../artifacts/rag_index/index.json api/rag_index/index.json && rm -rf api/deploy_data && mkdir -p api/deploy_data && cp deploy_data/trajectory_data.json api/deploy_data/trajectory_data.json && cp deploy_data/hidden_set_evaluation.json api/deploy_data/hidden_set_evaluation.json",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

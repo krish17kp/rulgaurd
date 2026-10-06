@@ -1,0 +1,565 @@
+{
+  "convention": "One prediction per bearing at the last acquisition of the censored prefix. n=11 bearings, not 13959 acquisitions.",
+  "scoring_function": "PHM2012 A_i = exp(-ln(0.5)*Er/5) for Er<=0 (over-estimate, harsh); exp(+ln(0.5)*Er/20) for Er>0 (under-estimate, lenient); Er = 100*(actual-predicted)/actual. Verified against IEEEPHM2012-Challenge-Details.pdf s5.1 eq.2 and Nectoux et al. (PRONOSTIA, IEEE PHM 2012) eq.2. Aggregate = arithmetic mean (eq.3).",
+  "ground_truth_variants": {
+    "official": "Table 3 of the official challenge document - the citable, literature-comparable table.",
+    "archive_derived": "(Full_Test_Set acc count - Test_set acc count) * 10s, re-derived from the archives. Agrees with official on 10/11 bearings; Bearing1_4 differs (339s official vs 2890s derived) - see D17."
+  },
+  "official_rul_seconds": {
+    "Bearing1_3": 5730.0,
+    "Bearing1_4": 339.0,
+    "Bearing1_5": 1610.0,
+    "Bearing1_6": 1460.0,
+    "Bearing1_7": 7570.0,
+    "Bearing2_3": 7530.0,
+    "Bearing2_4": 1390.0,
+    "Bearing2_5": 3090.0,
+    "Bearing2_6": 1290.0,
+    "Bearing2_7": 580.0,
+    "Bearing3_3": 820.0
+  },
+  "archive_derived_rul_seconds": {
+    "Bearing1_3": 5730.0,
+    "Bearing1_4": 2890.0,
+    "Bearing1_5": 1610.0,
+    "Bearing1_6": 1460.0,
+    "Bearing1_7": 7570.0,
+    "Bearing2_3": 7530.0,
+    "Bearing2_4": 1390.0,
+    "Bearing2_5": 3090.0,
+    "Bearing2_6": 1290.0,
+    "Bearing2_7": 580.0,
+    "Bearing3_3": 820.0
+  },
+  "results": {
+    "official": {
+      "per_bearing": [
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing1_3",
+          "condition_id": 1,
+          "n_censored_acquisitions": 1802,
+          "actual_rul_seconds": 5730.0,
+          "predicted_rul_seconds": 7678.2,
+          "error_seconds": 1948.1999999999998,
+          "percent_error": -33.99999999999999,
+          "phm2012_score": 0.008974205898414347
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing1_3",
+          "condition_id": 1,
+          "n_censored_acquisitions": 1802,
+          "actual_rul_seconds": 5730.0,
+          "predicted_rul_seconds": 0.0,
+          "error_seconds": -5730.0,
+          "percent_error": 100.0,
+          "phm2012_score": 0.03125
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing1_4",
+          "condition_id": 1,
+          "n_censored_acquisitions": 1139,
+          "actual_rul_seconds": 339.0,
+          "predicted_rul_seconds": 60.0,
+          "error_seconds": -279.0,
+          "percent_error": 82.30088495575221,
+          "phm2012_score": 0.05770962442603445
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing1_4",
+          "condition_id": 1,
+          "n_censored_acquisitions": 1139,
+          "actual_rul_seconds": 339.0,
+          "predicted_rul_seconds": 1166.666666666666,
+          "error_seconds": 827.6666666666661,
+          "percent_error": -244.14945919370678,
+          "phm2012_score": 1.998655170904292e-15
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing1_5",
+          "condition_id": 1,
+          "n_censored_acquisitions": 2302,
+          "actual_rul_seconds": 1610.0,
+          "predicted_rul_seconds": 7144.5,
+          "error_seconds": 5534.5,
+          "percent_error": -343.7577639751553,
+          "phm2012_score": 2.012428041471878e-21
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing1_5",
+          "condition_id": 1,
+          "n_censored_acquisitions": 2302,
+          "actual_rul_seconds": 1610.0,
+          "predicted_rul_seconds": 0.0,
+          "error_seconds": -1610.0,
+          "percent_error": 100.0,
+          "phm2012_score": 0.03125
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing1_6",
+          "condition_id": 1,
+          "n_censored_acquisitions": 2302,
+          "actual_rul_seconds": 1460.0,
+          "predicted_rul_seconds": 3556.0,
+          "error_seconds": 2096.0,
+          "percent_error": -143.56164383561645,
+          "phm2012_score": 2.2736719067927744e-09
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing1_6",
+          "condition_id": 1,
+          "n_censored_acquisitions": 2302,
+          "actual_rul_seconds": 1460.0,
+          "predicted_rul_seconds": 0.0,
+          "error_seconds": -1460.0,
+          "percent_error": 100.0,
+          "phm2012_score": 0.03125
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing1_7",
+          "condition_id": 1,
+          "n_censored_acquisitions": 1502,
+          "actual_rul_seconds": 7570.0,
+          "predicted_rul_seconds": 2086.0,
+          "error_seconds": -5484.0,
+          "percent_error": 72.44385733157199,
+          "phm2012_score": 0.08121033408031553
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing1_7",
+          "condition_id": 1,
+          "n_censored_acquisitions": 1502,
+          "actual_rul_seconds": 7570.0,
+          "predicted_rul_seconds": 0.0,
+          "error_seconds": -7570.0,
+          "percent_error": 100.0,
+          "phm2012_score": 0.03125
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing2_3",
+          "condition_id": 2,
+          "n_censored_acquisitions": 1202,
+          "actual_rul_seconds": 7530.0,
+          "predicted_rul_seconds": 6512.7,
+          "error_seconds": -1017.3000000000002,
+          "percent_error": 13.509960159362551,
+          "phm2012_score": 0.6261160512396262
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing2_3",
+          "condition_id": 2,
+          "n_censored_acquisitions": 1202,
+          "actual_rul_seconds": 7530.0,
+          "predicted_rul_seconds": 536.6666666666661,
+          "error_seconds": -6993.333333333334,
+          "percent_error": 92.87295263390881,
+          "phm2012_score": 0.04000578287576593
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing2_4",
+          "condition_id": 2,
+          "n_censored_acquisitions": 612,
+          "actual_rul_seconds": 1390.0,
+          "predicted_rul_seconds": 10179.0,
+          "error_seconds": 8789.0,
+          "percent_error": -632.3021582733813,
+          "phm2012_score": 8.54312591420397e-39
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing2_4",
+          "condition_id": 2,
+          "n_censored_acquisitions": 612,
+          "actual_rul_seconds": 1390.0,
+          "predicted_rul_seconds": 6436.666666666666,
+          "error_seconds": 5046.666666666666,
+          "percent_error": -363.0695443645084,
+          "phm2012_score": 1.38367892708362e-22
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing2_5",
+          "condition_id": 2,
+          "n_censored_acquisitions": 2002,
+          "actual_rul_seconds": 3090.0,
+          "predicted_rul_seconds": 8075.7,
+          "error_seconds": 4985.7,
+          "percent_error": -161.3495145631068,
+          "phm2012_score": 1.9310399830577205e-10
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing2_5",
+          "condition_id": 2,
+          "n_censored_acquisitions": 2002,
+          "actual_rul_seconds": 3090.0,
+          "predicted_rul_seconds": 0.0,
+          "error_seconds": -3090.0,
+          "percent_error": 100.0,
+          "phm2012_score": 0.03125
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing2_6",
+          "condition_id": 2,
+          "n_censored_acquisitions": 572,
+          "actual_rul_seconds": 1290.0,
+          "predicted_rul_seconds": 7867.5,
+          "error_seconds": 6577.5,
+          "percent_error": -509.8837209302326,
+          "phm2012_score": 2.004200378658332e-31
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing2_6",
+          "condition_id": 2,
+          "n_censored_acquisitions": 572,
+          "actual_rul_seconds": 1290.0,
+          "predicted_rul_seconds": 6836.666666666666,
+          "error_seconds": 5546.666666666666,
+          "percent_error": -429.9741602067183,
+          "phm2012_score": 1.2971078374874997e-26
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing2_7",
+          "condition_id": 2,
+          "n_censored_acquisitions": 172,
+          "actual_rul_seconds": 580.0,
+          "predicted_rul_seconds": 10316.4,
+          "error_seconds": 9736.4,
+          "percent_error": -1678.6896551724137,
+          "phm2012_score": 8.56667076649017e-102
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing2_7",
+          "condition_id": 2,
+          "n_censored_acquisitions": 172,
+          "actual_rul_seconds": 580.0,
+          "predicted_rul_seconds": 10836.666666666666,
+          "error_seconds": 10256.666666666666,
+          "percent_error": -1768.3908045977012,
+          "phm2012_score": 3.4061577052536033e-107
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing3_3",
+          "condition_id": 3,
+          "n_censored_acquisitions": 352,
+          "actual_rul_seconds": 820.0,
+          "predicted_rul_seconds": 1931.2,
+          "error_seconds": 1111.2,
+          "percent_error": -135.5121951219512,
+          "phm2012_score": 6.93989497342867e-09
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing3_3",
+          "condition_id": 3,
+          "n_censored_acquisitions": 352,
+          "actual_rul_seconds": 820.0,
+          "predicted_rul_seconds": 9036.666666666666,
+          "error_seconds": 8216.666666666666,
+          "percent_error": -1002.0325203252032,
+          "phm2012_score": 4.694949770428149e-61
+        }
+      ],
+      "summary_by_model": {
+        "extra_trees": {
+          "mae_seconds": 4323.527272727272,
+          "rmse_seconds": 5320.678937538295,
+          "mean_abs_percent_error": 346.11921402895854,
+          "phm2012_score": 0.07036456591373286,
+          "n_bearings": 11,
+          "n_overestimates": 8
+        },
+        "naive": {
+          "mae_seconds": 5122.515151515151,
+          "rmse_seconds": 5900.296764493368,
+          "mean_abs_percent_error": 400.0444946656134,
+          "phm2012_score": 0.017841434806887994,
+          "n_bearings": 11,
+          "n_overestimates": 5
+        }
+      }
+    },
+    "archive_derived": {
+      "per_bearing": [
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing1_3",
+          "condition_id": 1,
+          "n_censored_acquisitions": 1802,
+          "actual_rul_seconds": 5730.0,
+          "predicted_rul_seconds": 7678.2,
+          "error_seconds": 1948.1999999999998,
+          "percent_error": -33.99999999999999,
+          "phm2012_score": 0.008974205898414347
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing1_3",
+          "condition_id": 1,
+          "n_censored_acquisitions": 1802,
+          "actual_rul_seconds": 5730.0,
+          "predicted_rul_seconds": 0.0,
+          "error_seconds": -5730.0,
+          "percent_error": 100.0,
+          "phm2012_score": 0.03125
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing1_4",
+          "condition_id": 1,
+          "n_censored_acquisitions": 1139,
+          "actual_rul_seconds": 2890.0,
+          "predicted_rul_seconds": 60.0,
+          "error_seconds": -2830.0,
+          "percent_error": 97.92387543252595,
+          "phm2012_score": 0.033581400955083565
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing1_4",
+          "condition_id": 1,
+          "n_censored_acquisitions": 1139,
+          "actual_rul_seconds": 2890.0,
+          "predicted_rul_seconds": 1166.666666666666,
+          "error_seconds": -1723.333333333334,
+          "percent_error": 59.63091118800464,
+          "phm2012_score": 0.1266092258126894
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing1_5",
+          "condition_id": 1,
+          "n_censored_acquisitions": 2302,
+          "actual_rul_seconds": 1610.0,
+          "predicted_rul_seconds": 7144.5,
+          "error_seconds": 5534.5,
+          "percent_error": -343.7577639751553,
+          "phm2012_score": 2.012428041471878e-21
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing1_5",
+          "condition_id": 1,
+          "n_censored_acquisitions": 2302,
+          "actual_rul_seconds": 1610.0,
+          "predicted_rul_seconds": 0.0,
+          "error_seconds": -1610.0,
+          "percent_error": 100.0,
+          "phm2012_score": 0.03125
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing1_6",
+          "condition_id": 1,
+          "n_censored_acquisitions": 2302,
+          "actual_rul_seconds": 1460.0,
+          "predicted_rul_seconds": 3556.0,
+          "error_seconds": 2096.0,
+          "percent_error": -143.56164383561645,
+          "phm2012_score": 2.2736719067927744e-09
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing1_6",
+          "condition_id": 1,
+          "n_censored_acquisitions": 2302,
+          "actual_rul_seconds": 1460.0,
+          "predicted_rul_seconds": 0.0,
+          "error_seconds": -1460.0,
+          "percent_error": 100.0,
+          "phm2012_score": 0.03125
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing1_7",
+          "condition_id": 1,
+          "n_censored_acquisitions": 1502,
+          "actual_rul_seconds": 7570.0,
+          "predicted_rul_seconds": 2086.0,
+          "error_seconds": -5484.0,
+          "percent_error": 72.44385733157199,
+          "phm2012_score": 0.08121033408031553
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing1_7",
+          "condition_id": 1,
+          "n_censored_acquisitions": 1502,
+          "actual_rul_seconds": 7570.0,
+          "predicted_rul_seconds": 0.0,
+          "error_seconds": -7570.0,
+          "percent_error": 100.0,
+          "phm2012_score": 0.03125
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing2_3",
+          "condition_id": 2,
+          "n_censored_acquisitions": 1202,
+          "actual_rul_seconds": 7530.0,
+          "predicted_rul_seconds": 6512.7,
+          "error_seconds": -1017.3000000000002,
+          "percent_error": 13.509960159362551,
+          "phm2012_score": 0.6261160512396262
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing2_3",
+          "condition_id": 2,
+          "n_censored_acquisitions": 1202,
+          "actual_rul_seconds": 7530.0,
+          "predicted_rul_seconds": 536.6666666666661,
+          "error_seconds": -6993.333333333334,
+          "percent_error": 92.87295263390881,
+          "phm2012_score": 0.04000578287576593
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing2_4",
+          "condition_id": 2,
+          "n_censored_acquisitions": 612,
+          "actual_rul_seconds": 1390.0,
+          "predicted_rul_seconds": 10179.0,
+          "error_seconds": 8789.0,
+          "percent_error": -632.3021582733813,
+          "phm2012_score": 8.54312591420397e-39
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing2_4",
+          "condition_id": 2,
+          "n_censored_acquisitions": 612,
+          "actual_rul_seconds": 1390.0,
+          "predicted_rul_seconds": 6436.666666666666,
+          "error_seconds": 5046.666666666666,
+          "percent_error": -363.0695443645084,
+          "phm2012_score": 1.38367892708362e-22
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing2_5",
+          "condition_id": 2,
+          "n_censored_acquisitions": 2002,
+          "actual_rul_seconds": 3090.0,
+          "predicted_rul_seconds": 8075.7,
+          "error_seconds": 4985.7,
+          "percent_error": -161.3495145631068,
+          "phm2012_score": 1.9310399830577205e-10
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing2_5",
+          "condition_id": 2,
+          "n_censored_acquisitions": 2002,
+          "actual_rul_seconds": 3090.0,
+          "predicted_rul_seconds": 0.0,
+          "error_seconds": -3090.0,
+          "percent_error": 100.0,
+          "phm2012_score": 0.03125
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing2_6",
+          "condition_id": 2,
+          "n_censored_acquisitions": 572,
+          "actual_rul_seconds": 1290.0,
+          "predicted_rul_seconds": 7867.5,
+          "error_seconds": 6577.5,
+          "percent_error": -509.8837209302326,
+          "phm2012_score": 2.004200378658332e-31
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing2_6",
+          "condition_id": 2,
+          "n_censored_acquisitions": 572,
+          "actual_rul_seconds": 1290.0,
+          "predicted_rul_seconds": 6836.666666666666,
+          "error_seconds": 5546.666666666666,
+          "percent_error": -429.9741602067183,
+          "phm2012_score": 1.2971078374874997e-26
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing2_7",
+          "condition_id": 2,
+          "n_censored_acquisitions": 172,
+          "actual_rul_seconds": 580.0,
+          "predicted_rul_seconds": 10316.4,
+          "error_seconds": 9736.4,
+          "percent_error": -1678.6896551724137,
+          "phm2012_score": 8.56667076649017e-102
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing2_7",
+          "condition_id": 2,
+          "n_censored_acquisitions": 172,
+          "actual_rul_seconds": 580.0,
+          "predicted_rul_seconds": 10836.666666666666,
+          "error_seconds": 10256.666666666666,
+          "percent_error": -1768.3908045977012,
+          "phm2012_score": 3.4061577052536033e-107
+        },
+        {
+          "model": "extra_trees",
+          "bearing": "Bearing3_3",
+          "condition_id": 3,
+          "n_censored_acquisitions": 352,
+          "actual_rul_seconds": 820.0,
+          "predicted_rul_seconds": 1931.2,
+          "error_seconds": 1111.2,
+          "percent_error": -135.5121951219512,
+          "phm2012_score": 6.93989497342867e-09
+        },
+        {
+          "model": "naive",
+          "bearing": "Bearing3_3",
+          "condition_id": 3,
+          "n_censored_acquisitions": 352,
+          "actual_rul_seconds": 820.0,
+          "predicted_rul_seconds": 9036.666666666666,
+          "error_seconds": 8216.666666666666,
+          "percent_error": -1002.0325203252032,
+          "phm2012_score": 4.694949770428149e-61
+        }
+      ],
+      "summary_by_model": {
+        "extra_trees": {
+          "mae_seconds": 4555.436363636363,
+          "rmse_seconds": 5388.007954708307,
+          "mean_abs_percent_error": 347.53948589048343,
+          "phm2012_score": 0.06817109105273732,
+          "n_bearings": 11,
+          "n_overestimates": 8
+        },
+        "naive": {
+          "mae_seconds": 5203.939393939393,
+          "rmse_seconds": 5917.872519032085,
+          "mean_abs_percent_error": 383.2700812105495,
+          "phm2012_score": 0.029351364426223214,
+          "n_bearings": 11,
+          "n_overestimates": 4
+        }
+      }
+    }
+  },
+  "lower_mae_model_official": "extra_trees"
+}
