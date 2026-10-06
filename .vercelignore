@@ -6,7 +6,7 @@
 datasets/
 data/
 context/
-deploy_data/
+/deploy_data/
 /reports/
 deliverables/
 md/
