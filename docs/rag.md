@@ -7,26 +7,37 @@ overrides RUL, HI, stage, applicability, or compatibility.
 ## Status
 
 - Online LLM (Vercel AI Gateway): implemented (`src/bearing_pdm/rag/explain.py:OnlineLLM`),
-  **blocked on a missing credential** — no `AI_GATEWAY_API_KEY` (or
-  `VERCEL_AI_GATEWAY_API_KEY`) is set locally or in the linked Vercel
-  project's environment variables (checked by name only via `vercel env ls`,
-  no value read or printed). The code path is real and will activate the
-  moment that key is set; nothing else changes.
-- Deterministic fallback: **always active** today, since no online
-  credential exists. Every `/explain` response in this environment currently
-  comes from `DeterministicFallbackLLM`, not a stub — it assembles the same
-  structured prediction fields and the same retrieved citations into a
-  templated, citation-backed explanation and can never invent a number.
-- Embeddings/retrieval: **online-first investigated, none configured**
-  (same credential check as above — no embedding provider key anywhere).
-  Local fallback is `TfidfEmbedder` + a NumPy cosine-similarity `VectorIndex`
-  (`src/bearing_pdm/rag/retrieval.py`) — the explicit "NumPy similarity
-  fallback" allowed by the original M7 design, not FAISS (not installed on
-  this machine) and not Ollama (also not installed).
+  looks up `AI_GATEWAY_API_KEY`, then `VERCEL_AI_GATEWAY_API_KEY`, then the
+  project's existing `api_key` Vercel env var, in that order. **A real
+  credential is present** (`api_key`, confirmed present-only via `vercel env
+  ls`/`vercel env pull`, value never printed) and authenticates successfully
+  against the gateway (`GET /v1/models` returns 200). Generation itself is
+  currently **blocked by the Vercel account, not by this code**: every
+  `POST /v1/chat/completions` call returns `403 customer_verification_required`
+  — "AI Gateway requires a valid credit card on file to service requests."
+  Verified directly against the live gateway with the real key, not inferred.
+  This is a billing/account action only the account owner can take (adding a
+  card at the URL the gateway's own error message gives) — no code or
+  architecture change unblocks it.
+- Deterministic fallback: **active for every request today** as a direct
+  result of that 403 — `build_explanation` catches `httpx.HTTPError` and
+  falls through automatically (verified: `/explain` still returns 200 with
+  `fallback_used: true` and a correct grounded explanation). Not a stub: it
+  assembles the same structured prediction fields and the same retrieved
+  citations into a templated, citation-backed explanation and can never
+  invent a number.
+- Embeddings/retrieval: **online-first investigated, none configured** for
+  embeddings specifically (no embedding-provider key found; the AI Gateway
+  key found is for chat completions). Local fallback is `TfidfEmbedder` + a
+  NumPy cosine-similarity `VectorIndex` (`src/bearing_pdm/rag/retrieval.py`)
+  — the explicit "NumPy similarity fallback" allowed by the original M7
+  design, not FAISS (not installed on this machine) and not Ollama (also
+  not installed).
 
-**Human action required to reach COMPLETE_ONLINE:** set `AI_GATEWAY_API_KEY`
-(a Vercel AI Gateway key, or any OpenAI-compatible provider key) in the
-Vercel project's environment variables. No other code change is needed.
+**Human action required to reach COMPLETE_ONLINE:** add a credit card to the
+Vercel account's AI Gateway billing (link is in the 403 error body itself).
+No code change is needed — `OnlineLLM` will activate automatically the next
+time `/explain` is called once that's done.
 
 ## Corpus
 

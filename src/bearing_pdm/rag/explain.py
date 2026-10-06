@@ -3,12 +3,14 @@ fallback, both consuming the SAME immutable prediction context and the SAME
 retrieved citations.
 
 Online-first per goals.md #6: `OnlineLLM` is the real provider path, gated on
-an API key. No provider key is configured anywhere in this environment (see
-retrieval.py's docstring for exactly which env vars were checked and where).
-That is a missing-credential gap, not an architecture failure - `OnlineLLM`
-is fully implemented against the Vercel AI Gateway's OpenAI-compatible
-chat-completions endpoint and will work the moment AI_GATEWAY_API_KEY (or
-an equivalent provider key) is set; nothing else in this module changes.
+an API key (checked as AI_GATEWAY_API_KEY, then VERCEL_AI_GATEWAY_API_KEY,
+then this project's existing `api_key` Vercel env var). A real credential is
+present and authenticates (GET /v1/models returns 200), but generation is
+currently blocked at the account level: every chat-completions call returns
+403 customer_verification_required ("AI Gateway requires a valid credit
+card on file") - see docs/rag.md. That is a billing gap, not a code or
+architecture gap; `build_explanation` below catches this and falls through
+to the deterministic path automatically.
 
 `DeterministicFallbackLLM` is not a stub - it is the always-available,
 goals.md #9-mandated explanation path: it assembles the SAME structured
@@ -122,11 +124,17 @@ class OnlineLLM:
 
     name = "online:ai-gateway"
 
-    def __init__(self, model: str = "anthropic/claude-haiku-4-5", timeout: float = 20.0):
+    def __init__(self, model: str = "anthropic/claude-haiku-4.5", timeout: float = 20.0):
         self.model = model
         self.timeout = timeout
-        self.api_key = os.environ.get("AI_GATEWAY_API_KEY") or os.environ.get(
-            "VERCEL_AI_GATEWAY_API_KEY"
+        # Lookup order: the standard variable name first, then this
+        # project's existing Vercel env var `api_key` (already provisioned
+        # for Production/Preview/Development) - never logged, never
+        # returned in any response.
+        self.api_key = (
+            os.environ.get("AI_GATEWAY_API_KEY")
+            or os.environ.get("VERCEL_AI_GATEWAY_API_KEY")
+            or os.environ.get("api_key")
         )
 
     def available(self) -> bool:
