@@ -1,0 +1,50 @@
+import { test, expect } from "@playwright/test";
+
+// Golden-path + key-state smoke coverage across desktop and 390px mobile
+// (see playwright.config.ts projects). Runs against a live backend so the
+// FEMTO sample-data prediction is a real model call, not a mock.
+
+test("home links to Analyze", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: /analyze/i }).first().click();
+  await expect(page).toHaveURL(/\/upload/);
+});
+
+test("trusted FEMTO sample produces a HIGH-applicability RUL result", async ({ page }) => {
+  await page.goto("/upload");
+  await page.getByRole("button", { name: /try sample data/i }).click();
+  await expect(page.getByText(/hours/)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/model applicability: high/i)).toBeVisible();
+});
+
+test("invalid upload shows a readable error, not a crash", async ({ page }) => {
+  await page.goto("/upload");
+  await page.setInputFiles('[data-testid="file-input"]', {
+    name: "garbage.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("not,numeric,data\nfoo,bar,baz\n"),
+  });
+  await page.getByRole("button", { name: /analyze bearing/i }).click();
+  await expect(page.getByText(/won't succeed on retry|error|RUL suppressed/i)).toBeVisible({
+    timeout: 20_000,
+  });
+});
+
+test("Advanced Predict page links back to Analyze", async ({ page }) => {
+  await page.goto("/predict");
+  await expect(page.getByText(/Advanced Tool — Direct Model Input/)).toBeVisible();
+  await page.getByRole("link", { name: /analyze a raw bearing file instead/i }).click();
+  await expect(page).toHaveURL(/\/upload/);
+});
+
+test("Advanced Degradation page links back to Analyze", async ({ page }) => {
+  await page.goto("/degradation");
+  await expect(page.getByText(/Advanced Tool — Health Indicator/)).toBeVisible();
+  await page.locator("main").getByRole("link", { name: "Analyze" }).click();
+  await expect(page).toHaveURL(/\/upload/);
+});
+
+test("Reliability/evaluation page loads without a 5xx", async ({ page }) => {
+  const response = await page.goto("/evaluation");
+  expect(response?.status()).toBeLessThan(500);
+});

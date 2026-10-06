@@ -17,12 +17,17 @@ export class ApiError extends Error {
   // 500) keeps today's "always offer Retry" behaviour rather than silently
   // hiding it.
   retryable: boolean;
+  // Stable UPPER_SNAKE code from the same error body (api.py's _error_content).
+  // Used to distinguish a real failure from an intentional policy outcome
+  // like APPLICABILITY_LOW, rather than pattern-matching the human-readable detail text.
+  code?: string;
 
-  constructor(status: number, detail: string, retryable = true) {
+  constructor(status: number, detail: string, retryable = true, code?: string) {
     super(detail);
     this.status = status;
     this.detail = detail;
     this.retryable = retryable;
+    this.code = code;
   }
 }
 
@@ -125,7 +130,11 @@ async function parseErrorResponse(response: Response): Promise<ApiError> {
     body && typeof body === "object" && "retryable" in body
       ? Boolean((body as { retryable: unknown }).retryable)
       : true;
-  return new ApiError(response.status, detail, retryable);
+  const code =
+    body && typeof body === "object" && "code" in body
+      ? String((body as { code: unknown }).code)
+      : undefined;
+  return new ApiError(response.status, detail, retryable, code);
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

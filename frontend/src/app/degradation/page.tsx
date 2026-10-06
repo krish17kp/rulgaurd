@@ -43,13 +43,16 @@ export default function DegradationPage() {
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
       <div className="rounded-lg border border-caution/30 bg-caution/10 p-3 text-xs text-caution">
-        Advanced / developer tool — there is currently no raw-file upload path for a
-        multi-acquisition health trend, only this manual feature-row interface. For a single
-        file&apos;s RUL estimate, use{" "}
-        <Link href="/upload" className="underline">
-          Analyze
-        </Link>
-        .
+        <p className="font-semibold">Advanced Tool — Health Indicator / Degradation Trend</p>
+        <p className="mt-1">
+          This interface expects ordered, pre-extracted feature rows for one bearing run — there
+          is no raw multi-file degradation analysis here, only this manual feature-row input. For
+          a single file&apos;s RUL estimate, use{" "}
+          <Link href="/upload" className="underline">
+            Analyze
+          </Link>
+          .
+        </p>
       </div>
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Advanced: degradation / health indicator trend</h1>

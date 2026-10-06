@@ -11,7 +11,7 @@ export default defineConfig({
     // .vercel/cache/**/src mirrors src/ verbatim for the deployed function,
     // so without this exclude a local `vercel build`/deploy makes every test
     // run twice (found running this suite after a preview deploy).
-    exclude: ["**/node_modules/**", "**/.vercel/**"],
+    exclude: ["**/node_modules/**", "**/.vercel/**", "**/e2e/**"],
   },
   resolve: {
     alias: {

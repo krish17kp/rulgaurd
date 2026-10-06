@@ -12,6 +12,7 @@ import {
   predictRulFromFemtoAcquisitionBlob,
 } from "@/lib/api";
 import { ApplicabilityNote } from "@/components/ApplicabilityNote";
+import { SuppressedResultNotice, isSuppressedApplicability } from "@/components/SuppressedResultNotice";
 import { BlobUploadError, DIRECT_UPLOAD_THRESHOLD_BYTES, uploadFileToBlob } from "@/lib/blobUpload";
 
 type DatasetType = "femto" | "generic";
@@ -31,7 +32,7 @@ type PredictState =
   | { status: "idle" }
   | { status: "uploading"; progress: number }
   | { status: "loading" }
-  | { status: "error"; error: string; retryable: boolean; retry: () => void }
+  | { status: "error"; error: string; retryable: boolean; retry: () => void; suppressed: boolean }
   | { status: "ready"; data: PredictRulResponse };
 
 const BADGE: Record<Compatibility, string> = {
@@ -156,7 +157,8 @@ export default function UploadPage() {
       if (seq !== requestSeq.current) return;
       const message = err instanceof BlobUploadError ? err.message : (err as ApiError).detail;
       const retryable = err instanceof BlobUploadError ? true : (err as ApiError).retryable;
-      setPredictState({ status: "error", error: message, retryable, retry });
+      const suppressed = err instanceof ApiError && isSuppressedApplicability(err);
+      setPredictState({ status: "error", error: message, retryable, retry, suppressed });
     }
   }
 
@@ -279,7 +281,11 @@ export default function UploadPage() {
           )}
           {predictState.status === "loading" && <p className="text-sm">Extracting features and predicting…</p>}
 
-          {predictState.status === "error" && (
+          {predictState.status === "error" && predictState.suppressed && (
+            <SuppressedResultNotice detail={predictState.error} />
+          )}
+
+          {predictState.status === "error" && !predictState.suppressed && (
             <div className="flex flex-col gap-2 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
               <p>{predictState.error}</p>
               {predictState.retryable ? (

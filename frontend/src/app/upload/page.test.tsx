@@ -176,6 +176,26 @@ describe("UploadPage", () => {
     expect(screen.getByText(/Model applicability: MEDIUM/)).toBeInTheDocument();
   });
 
+  it("shows the policy-suppressed warning, not a generic error, when applicability is LOW", async () => {
+    vi.mocked(predictRulFromFemtoAcquisition).mockRejectedValueOnce(
+      new ApiError(
+        422,
+        "RUL suppressed: model applicability is LOW (shift ratio 9.10x the in-domain reference) - " +
+          "this signal does not look like the model's training population.",
+        false,
+        "APPLICABILITY_LOW"
+      )
+    );
+    render(<UploadPage />);
+
+    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, smallFile());
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+
+    await waitFor(() => expect(screen.getByText(/not a failed request/i)).toBeInTheDocument());
+    expect(screen.getByText(/shift ratio 9\.10x/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^retry$/i })).not.toBeInTheDocument();
+  });
+
   it("the Advanced section provides generic dataset inspection, off by default", async () => {
     vi.mocked(inspectDataset).mockResolvedValue(genericProfile("UNSUPPORTED", ["no vibration channel recognised in the header"]));
     render(<UploadPage />);

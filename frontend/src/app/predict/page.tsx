@@ -4,11 +4,12 @@ import Link from "next/link";
 import { useState } from "react";
 import { ApiError, PredictRulResponse, predictRul } from "@/lib/api";
 import { ApplicabilityNote } from "@/components/ApplicabilityNote";
+import { SuppressedResultNotice, isSuppressedApplicability } from "@/components/SuppressedResultNotice";
 
 type SubmitState =
   | { status: "idle" }
   | { status: "loading" }
-  | { status: "error"; error: string }
+  | { status: "error"; error: string; suppressed: boolean }
   | { status: "ready"; data: PredictRulResponse };
 
 export default function PredictPage() {
@@ -21,7 +22,11 @@ export default function PredictPage() {
     try {
       features = JSON.parse(featuresJson);
     } catch {
-      setResult({ status: "error", error: "Features must be valid JSON: {\"col\": 1.23, ...}" });
+      setResult({
+        status: "error",
+        error: "Features must be valid JSON: {\"col\": 1.23, ...}",
+        suppressed: false,
+      });
       return;
     }
     setResult({ status: "loading" });
@@ -29,18 +34,23 @@ export default function PredictPage() {
       const data = await predictRul({ dataset_id: "femto", features });
       setResult({ status: "ready", data });
     } catch (err) {
-      setResult({ status: "error", error: (err as ApiError).detail });
+      const apiErr = err as ApiError;
+      setResult({ status: "error", error: apiErr.detail, suppressed: isSuppressedApplicability(apiErr) });
     }
   }
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
       <div className="rounded-lg border border-caution/30 bg-caution/10 p-3 text-xs text-caution">
-        Advanced / developer tool. Normal users should use{" "}
-        <Link href="/upload" className="underline">
-          Analyze
-        </Link>{" "}
-        to upload a raw file instead.
+        <p className="font-semibold">Advanced Tool — Direct Model Input</p>
+        <p className="mt-1">
+          For researchers/developers who already have extracted FEMTO feature values, not raw
+          sensor files.{" "}
+          <Link href="/upload" className="underline">
+            Analyze a raw bearing file instead
+          </Link>
+          .
+        </p>
       </div>
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Advanced: manual feature-row prediction</h1>
@@ -67,7 +77,9 @@ export default function PredictPage() {
         </button>
       </form>
 
-      {result.status === "error" && (
+      {result.status === "error" && result.suppressed && <SuppressedResultNotice detail={result.error} />}
+
+      {result.status === "error" && !result.suppressed && (
         <p className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
           {result.error}
         </p>

@@ -68,6 +68,17 @@ describe("PredictPage", () => {
     await waitFor(() => expect(screen.getByText(/dataset_id is not supported/)).toBeInTheDocument());
   });
 
+  it("shows the policy-suppressed warning, not a generic error, when applicability is LOW", async () => {
+    vi.mocked(predictRul).mockRejectedValue(
+      new ApiError(422, "RUL suppressed: model applicability is LOW (shift ratio 9.10x).", false, "APPLICABILITY_LOW")
+    );
+
+    render(<PredictPage />);
+    await userEvent.click(screen.getByRole("button", { name: /predict/i }));
+
+    await waitFor(() => expect(screen.getByText(/not a failed request/i)).toBeInTheDocument());
+  });
+
   it("rejects invalid JSON client-side without calling the API", async () => {
     render(<PredictPage />);
     const textarea = screen.getByRole("textbox");
