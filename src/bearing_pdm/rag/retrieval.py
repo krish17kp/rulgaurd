@@ -125,15 +125,24 @@ class RetrievedChunk:
     score: float
 
 
-# Package-relative, not repo-root-relative: the frontend build's prebuild
-# step copies the whole src/bearing_pdm/ directory into
-# frontend/api/bearing_pdm/ for the Vercel Python function (see
-# frontend/package.json's "prebuild" script). A path computed from
-# Path(__file__).resolve().parents[N] would silently resolve to the wrong
-# directory after that copy (parents[3] from here means something different
-# under frontend/api/bearing_pdm/rag/ than under src/bearing_pdm/rag/) - a
-# path inside this same package travels correctly either way.
-DEFAULT_INDEX_PATH = Path(__file__).resolve().parent / "data" / "index.json"
+# Sibling of the bearing_pdm package under api/, not inside it, mirroring
+# api.py's _METRICS_DIR_CANDIDATES exactly. Verified on a real Vercel Preview
+# deployment that an index.json living INSIDE api/bearing_pdm/rag/data/ was
+# silently pruned by the Python builder's size-triggered "optimizing
+# dependencies" step ("Bundle size (246.38 MB) exceeds the standard size"),
+# while api/reports/metrics/rul_evaluation.json - same prebuild-copy
+# pattern, but a sibling of bearing_pdm under api/ - survived and served
+# correctly on the same deployment. frontend/package.json's prebuild script
+# copies artifacts/rag_index/index.json to api/rag_index/index.json the
+# same way it already copies rul_evaluation.json.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+_INDEX_PATH_CANDIDATES = (
+    Path(__file__).resolve().parents[2] / "rag_index" / "index.json",
+    REPO_ROOT / "artifacts" / "rag_index" / "index.json",
+)
+DEFAULT_INDEX_PATH = next(
+    (p for p in _INDEX_PATH_CANDIDATES if p.exists()), _INDEX_PATH_CANDIDATES[-1]
+)
 
 
 class VectorIndex:

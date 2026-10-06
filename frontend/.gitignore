@@ -34,6 +34,12 @@
 # (tracked, committed directly under frontend/).
 /api/reports/
 
+# same reason again: a fresh copy of ../artifacts/rag_index/index.json,
+# vendored by "prebuild" so /explain's RAG retrieval works in a real Vercel
+# deployment. Never hand-edit or commit this; the canonical source is
+# ../artifacts/rag_index/ (tracked, committed directly at the repo root).
+/api/rag_index/
+
 # production
 /build
 

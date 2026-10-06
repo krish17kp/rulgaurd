@@ -61,21 +61,32 @@ SOURCE_DOCUMENTS (corpus.py)
   -> chunk_document (1200 chars, 200 overlap, deterministic sha256-based chunk IDs)
   -> ingest_corpus (dedupes identical-content sources, records skips)
   -> TfidfEmbedder.fit/embed (retrieval.py)
-  -> VectorIndex.build/save -> src/bearing_pdm/rag/data/index.json (sparse, ~2.2MB)
+  -> VectorIndex.build/save -> artifacts/rag_index/index.json (sparse, ~2.2MB)
   -> VectorIndex.load/search (top-k cosine similarity, MIN_RELEVANCE_SCORE=0.15)
   -> build_explanation (explain.py): retrieves, then OnlineLLM if a key
      exists else DeterministicFallbackLLM
 ```
 
-Rebuild the index: `python scripts/build_rag_index.py`. The index lives
-inside the `bearing_pdm.rag` package itself (not under the repo-root
-`artifacts/`) deliberately: `frontend/package.json`'s `prebuild` script
-copies the whole `src/bearing_pdm/` directory into `frontend/api/bearing_pdm/`
-for the Vercel Python function, and a repo-root-relative path computed from
-`parents[N]` resolves to a different, wrong directory after that copy -
-verified by reproducing the bug, fixing it, then re-running the frontend
-build and confirming `frontend/api/bearing_pdm/rag/data/index.json` is
-present.
+Rebuild the index: `python scripts/build_rag_index.py` (writes to
+`artifacts/rag_index/index.json`). The deployed copy lives at
+`frontend/api/rag_index/index.json` - a SIBLING of the `bearing_pdm` package
+under `api/`, not inside it - copied there by `frontend/package.json`'s
+`prebuild` script, mirroring exactly how `api.py`'s `_METRICS_DIR_CANDIDATES`
+already handles `reports/metrics/rul_evaluation.json`. Two real bugs were
+found and fixed getting here, both verified on a live Vercel Preview
+deployment, not just locally:
+1. A repo-root-relative path computed via `Path(__file__).resolve().parents[N]`
+   resolves to a different (wrong) directory once `prebuild` copies
+   `src/bearing_pdm/` into `frontend/api/bearing_pdm/`.
+2. Moving the index inside the `bearing_pdm` package tree to fix (1) created
+   a second bug: Vercel's Python builder logged `"Bundle size (246.38 MB)
+   exceeds the standard size; optimizing dependencies"` and silently pruned
+   `api/bearing_pdm/rag/data/index.json` from the deployed function -
+   `/explain` returned `RAG_INDEX_UNAVAILABLE` on the live preview while
+   `/models/evaluation` (same prebuild-copy pattern, but outside the
+   package tree) worked correctly on the same deployment. `DEFAULT_INDEX_PATH`
+   now uses the same two-candidate pattern as `_METRICS_DIR_CANDIDATES`,
+   putting the deployed copy outside the package tree entirely.
 
 ## API
 
