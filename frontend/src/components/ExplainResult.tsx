@@ -3,6 +3,23 @@
 import { useState } from "react";
 import { ExplainResponse, PredictRulResponse, explainPrediction } from "@/lib/api";
 
+/**
+ * Defensive cleanup only - the system prompt (src/bearing_pdm/rag/explain.py
+ * SYSTEM_PROMPT) already asks the model for plain text. This strips Markdown
+ * markers that slip through anyway (asterisks, headings, lettered points)
+ * without rewriting wording, so the UI never shows raw "**" or "##".
+ */
+export function stripMarkdown(text: string): string {
+  return text
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\*(.*?)\*/g, "$1")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/^\s*\(?[a-z]\)\s*/gim, "")
+    .replace(/\s*\([a-c]\):?/g, "")
+    .trim();
+}
+
 type ExplainUiState =
   | { phase: "ready" }
   | { phase: "generating" }
@@ -78,7 +95,9 @@ export function ExplainResult({ result }: { result: Partial<PredictRulResponse> 
                   No indexed source closely matched this question - showing the model result only.
                 </p>
               )}
-              <p className="whitespace-pre-line leading-relaxed">{state.data.explanation}</p>
+              <p className="whitespace-pre-line leading-relaxed">
+                {stripMarkdown(state.data.explanation)}
+              </p>
               {state.data.citations.length > 0 && (
                 <div>
                   <p className="font-medium text-foreground-muted">Sources</p>
