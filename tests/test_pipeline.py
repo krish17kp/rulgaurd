@@ -9,6 +9,7 @@ from bearing_pdm.femto import FemtoBearing
 from bearing_pdm.pipeline import (
     _college_run_end_timestamp,
     build_college_feature_rows,
+    build_college_feature_rows_resumable,
     build_college_window_rows,
     build_femto_feature_rows,
 )
@@ -86,6 +87,53 @@ def test_college_feature_rows_global_sequence_index_increases_across_files(tmp_p
             seen_file1 = True
         elif seen_file1:
             pytest.fail("file0 row found after file1 row - not chronological")
+
+
+def test_resumable_college_rows_match_the_non_resumable_path(tmp_path):
+    """Phase 4: the checkpointed builder must produce the identical rows a
+    fresh (non-resumable) run would - only the on-disk resumability differs,
+    never the values."""
+    files = _copy_college_fixtures(tmp_path)
+    fresh = list(build_college_feature_rows(files, window_samples=1000, overlap_fraction=0.5))
+
+    checkpoint_dir = tmp_path / "checkpoints"
+    resumable = list(build_college_feature_rows_resumable(
+        files, checkpoint_dir, window_samples=1000, overlap_fraction=0.5, log=lambda *a: None,
+    ))
+    for row in resumable:
+        row["sequence_index"] = resumable.index(row)  # reassign as build_features.py does
+    # Compare the feature contract, not acquisition_id (regenerated each call).
+    compare_keys = [k for k in fresh[0] if k != "acquisition_id"]
+    assert len(fresh) == len(resumable)
+    for f, r in zip(fresh, resumable, strict=True):
+        for k in compare_keys:
+            assert f[k] == r[k] or (f[k] != f[k] and r[k] != r[k]), k  # NaN-safe equality
+
+
+def test_resumable_college_rows_skip_already_checkpointed_files(tmp_path):
+    """The regression this exists for: an interrupted 129-file run must not
+    re-read a file whose checkpoint already exists."""
+    files = _copy_college_fixtures(tmp_path)
+    checkpoint_dir = tmp_path / "checkpoints"
+
+    first_pass = list(build_college_feature_rows_resumable(
+        files[:1], checkpoint_dir, window_samples=1000, overlap_fraction=0.5, log=lambda *a: None,
+    ))
+    assert (checkpoint_dir / f"{files[0].path.stem}.parquet").exists()
+
+    # Corrupt the raw source file after checkpointing: if the resumable
+    # builder re-read it, this would raise or change the result.
+    files[0].path.write_text("not a valid college csv")
+
+    seen = []
+    second_pass = list(build_college_feature_rows_resumable(
+        files, checkpoint_dir, window_samples=1000, overlap_fraction=0.5, log=seen.append,
+    ))
+    assert any("reusing checkpoint" in msg for msg in seen)
+    assert any(files[1].path.name in msg for msg in seen)  # file 1 freshly processed
+    assert len(second_pass) == len(first_pass) + 9  # file1 adds its own 9 windows
+    assert {r["acquisition_id"] for r in second_pass[: len(first_pass)]} == \
+           {r["acquisition_id"] for r in first_pass}
 
 
 def test_femto_feature_rows_learning_role_has_rul(tmp_path):

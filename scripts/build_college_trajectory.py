@@ -21,6 +21,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from bearing_pdm.config import load_data_paths
+from bearing_pdm.storage import get_connection, latest_batch_parquet
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BEARING_RUN_ID = "college:nsk6205"
 
@@ -41,14 +44,23 @@ TREND_COLUMNS = [
 ]
 
 
-def _find_college_parquet() -> Path:
-    candidates = sorted((REPO_ROOT / "data/processed").glob("college_*.parquet"))
-    if not candidates:
+def _find_college_parquet(config_path: str = "config/data_paths.toml") -> Path:
+    """The DuckDB-registered newest college batch (storage.latest_batch_parquet)
+    - NOT a filename glob+sort: college_*.parquet names are uuid4, so sorting
+    them is arbitrary and can silently pick a stale, partial-coverage batch
+    over a newer, fuller one (or vice versa)."""
+    paths = load_data_paths(config_path)
+    con = get_connection(paths.duckdb_path, read_only=True)
+    try:
+        path = latest_batch_parquet(con, "college", role="college_run")
+    finally:
+        con.close()
+    if path is None or not path.is_file():
         raise SystemExit(
-            "No data/processed/college_*.parquet found. Run "
+            "No registered college feature batch found. Run "
             "scripts/build_features.py --dataset college first."
         )
-    return candidates[-1]
+    return path
 
 
 def main() -> None:
@@ -78,9 +90,12 @@ def main() -> None:
             "n_source_files_in_cache": int(n_source_files),
             "n_raw_college_files_on_disk": int(n_raw_college_files) or None,
             "coverage_note": (
-                "The cached feature parquet was built with --sample-stride 5, so it "
-                "represents a subset of the 129 raw LogFile_*.csv files, not every file. "
-                "This is a sampling stride, not missing/dropped data."
+                f"Full coverage: all {n_raw_college_files} raw LogFile_*.csv files are "
+                "represented in this cache (built with --sample-stride 1)."
+                if n_raw_college_files and n_source_files >= n_raw_college_files else
+                f"The cached feature parquet covers {n_source_files}/{n_raw_college_files or '?'} "
+                "raw LogFile_*.csv files - built with a --sample-stride > 1 representative "
+                "sample, not every file. This is a sampling stride, not missing/dropped data."
             ),
             "n_acquisitions": int(len(features)),
             "sample_rate_hz": float(features["sample_rate_hz"].iloc[0]),

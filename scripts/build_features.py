@@ -12,11 +12,17 @@ import argparse
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from bearing_pdm.college import discover_college_files
 from bearing_pdm.config import load_data_paths
 from bearing_pdm.femto import discover_femto_bearings
-from bearing_pdm.pipeline import build_college_feature_rows, build_femto_feature_rows
+from bearing_pdm.pipeline import (
+    DEFAULT_COLLEGE_OVERLAP_FRACTION,
+    DEFAULT_COLLEGE_WINDOW_SAMPLES,
+    build_college_feature_rows_resumable,
+    build_femto_feature_rows,
+)
 from bearing_pdm.storage import (
     ensure_bearing_run,
     ensure_dataset,
@@ -48,9 +54,22 @@ def build_college(paths, con, code_version: str, sample_stride: int = 1) -> None
     ensure_dataset(con, "college", "College run-to-failure (NSK 6205)", "v1")
     ensure_bearing_run(con, "college:nsk6205", "college", "nsk6205", "college_run")
 
+    # Checkpoint dir name encodes window params so a changed window size can
+    # never silently reuse a stale, differently-windowed checkpoint.
+    cfg_tag = f"w{DEFAULT_COLLEGE_WINDOW_SAMPLES}_o{DEFAULT_COLLEGE_OVERLAP_FRACTION}"
+    checkpoint_dir = Path(paths.interim_dir) / f"college_checkpoints_{cfg_tag}"
+
     t0 = time.time()
-    rows = list(build_college_feature_rows(files, code_version=code_version))
-    print(f"[college] {len(rows)} window rows built in {time.time()-t0:.0f}s")
+    rows = list(build_college_feature_rows_resumable(files, checkpoint_dir, code_version=code_version))
+    # Per-file checkpoints carry a LOCAL window index; reassign the global,
+    # chronologically-contiguous sequence_index the rest of the pipeline
+    # relies on (build_college_feature_rows does the same for the
+    # non-resumable path).
+    for i, row in enumerate(rows):
+        row["sequence_index"] = i
+    n_files_present = len({r["source_file_path"] for r in rows})
+    print(f"[college] {len(rows)} window rows built from {n_files_present} files in "
+          f"{time.time()-t0:.0f}s (checkpoints: {checkpoint_dir})")
 
     batch_id, parquet_path = write_feature_batch(
         rows, dataset_id="college", processed_dir=paths.processed_dir, code_version=code_version, con=con

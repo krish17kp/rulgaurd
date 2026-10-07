@@ -122,6 +122,47 @@ def build_college_window_rows(
             window_index += 1
 
 
+def build_college_feature_rows_resumable(
+    files: list[CollegeFile],
+    checkpoint_dir: Path | str,
+    code_version: str = "unknown",
+    log=print,
+    **window_kwargs,
+) -> Iterator[dict]:
+    """Same rows as `build_college_feature_rows` (per-file sequence_index -
+    the caller reassigns a global one across the full file list), but each
+    file's windows are persisted to a small Parquet checkpoint under
+    `checkpoint_dir` as soon as they are computed. A rerun that finds a
+    file's checkpoint already there skips re-reading that (up to ~140MB) CSV
+    entirely - the only way to make a 129-file / ~18GB run survive being
+    interrupted without starting over. `checkpoint_dir` is scratch
+    (data/interim/, gitignored); callers own its lifetime.
+
+    The checkpoint directory name must change if window parameters change -
+    callers pass a config-tagged directory (see build_features.py) so a
+    stale checkpoint from a different window size can never be reused
+    silently.
+    """
+    checkpoint_dir = Path(checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    run_end_timestamp = _college_run_end_timestamp(files)
+
+    for f in files:
+        ckpt = checkpoint_dir / f"{f.path.stem}.parquet"
+        if ckpt.exists():
+            log(f"[college:resume] {f.path.name}: reusing checkpoint")
+            df = pd.read_parquet(ckpt)
+        else:
+            rows = list(build_college_window_rows(f, run_end_timestamp, code_version=code_version,
+                                                    **window_kwargs))
+            df = pd.DataFrame(rows)
+            tmp = ckpt.with_suffix(".tmp")
+            df.to_parquet(tmp, index=False)
+            tmp.replace(ckpt)          # atomic within the same directory
+            log(f"[college:resume] {f.path.name}: {len(df)} windows -> checkpoint")
+        yield from df.to_dict(orient="records")
+
+
 def build_college_feature_rows(
     files: list[CollegeFile], code_version: str = "unknown", **window_kwargs
 ) -> Iterator[dict]:
