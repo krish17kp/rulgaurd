@@ -19,6 +19,7 @@ import joblib
 import pandas as pd
 
 from bearing_pdm.config import load_data_paths
+from bearing_pdm.evaluation import assert_no_leakage
 from bearing_pdm.modeling import fit_naive_baseline, fit_tree_baseline
 from bearing_pdm.storage import get_connection, latest_batch_parquet
 
@@ -59,6 +60,7 @@ def main() -> int:
 
     df = pd.read_parquet(parquet_path)
     df = df[df["role"] == "learning"].reset_index(drop=True)
+    assert_no_leakage(df, allowed_roles={"learning"})
     print(f"Fitting on {len(df)} learning-role rows from {parquet_path} (all 6 bearings, frozen)")
 
     naive_model = fit_naive_baseline(df)

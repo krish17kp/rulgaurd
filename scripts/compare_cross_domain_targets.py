@@ -21,6 +21,7 @@ import pandas as pd
 
 from bearing_pdm import experiments as E
 from bearing_pdm.domain import SN_FEATURES
+from bearing_pdm.evaluation import assert_no_leakage
 from bearing_pdm.modeling import bearing_balanced_weights, fit_tree_baseline
 
 
@@ -40,6 +41,7 @@ def main() -> int:
         test = test[test["evaluable"]]
         truth = test["life_fraction"].to_numpy()
         preds = {}
+        assert_no_leakage(train, allowed_roles={"learning", "college_run"})
         for target in ("life_fraction", "log_ratio"):
             m = fit_tree_baseline(train, feature_columns=SN_FEATURES, target=target,
                                   sample_weight=bearing_balanced_weights(train))
