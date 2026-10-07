@@ -90,6 +90,27 @@ def test_raw_femto_csv_upload_produces_the_same_prediction_as_manual_extraction(
     assert body["features_missing"] == []
 
 
+@pytest.mark.skipif(not MODEL_PRESENT, reason="artifacts/models/rul_extra_trees.joblib not present")
+def test_bearing2_1_acc_00450_regression_anchor():
+    """Pins the live /predict/rul/femto-acquisition result for a known
+    acquisition (Bearing2_1/acc_00450.csv) that prior manual verification
+    found to be 4610.0s / HIGH / FULLY_SUPPORTED. Previously this value only
+    existed in a mocked RAG fixture (test_rag.py); this exercises the real
+    feature-extraction -> model -> applicability pipeline end to end."""
+    acc_path = FIXTURES / "femto" / "Bearing2_1" / "acc_00450.csv"
+    with acc_path.open("rb") as fh:
+        response = client.post(
+            "/predict/rul/femto-acquisition",
+            files={"file": ("acc_00450.csv", fh, "text/csv")},
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["rul_seconds"] == pytest.approx(4610.0)
+    assert body["rul_hours"] == pytest.approx(4610.0 / 3600.0)
+    assert body["applicability_level"] == "HIGH"
+    assert body["compatibility"] == "FULLY_SUPPORTED"
+
+
 def test_raw_femto_csv_upload_rejects_wrong_column_count():
     bad_csv = "1,2,3\n" * 300
     response = client.post(
