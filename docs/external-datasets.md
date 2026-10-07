@@ -236,6 +236,57 @@ Supporting documents from the same official MediaFire folder (`xjtu/_docs/`):
 | IEEEPHM2012-Challenge-Details.pdf | raw.githubusercontent.com/wkzs111/phm-ieee-2012-data-challenge-dataset/master/… (GitHub re-host of the FEMTO-ST document) | 2,279,692 | 13bd43eb2dc4c8455e36584094552ccbd8101b9a0b99bd10ca82103453585ba5 |
 | Lessmeier2016_PHME.pdf | papers.phmsociety.org/index.php/phme/article/download/1577/542 | 1,655,352 | c1f75c79cfbcbcbfd24b32bf034cebb76d1c3ff7864827575d37387bb0955f84 |
 
+### CWRU (downloaded 2026-10-07)
+
+Official source: Case Western Reserve University Bearing Data Center,
+`https://engineering.case.edu/bearingdatacenter/download-data-file`. Individual files
+are served at `https://engineering.case.edu/sites/default/files/<id>.mat` (confirmed by
+HTTP HEAD, 200 OK, `Content-Length` matching the downloaded file size).
+
+**Classification: FAULT_DIAGNOSIS / CONDITION_MONITORING, NOT run-to-failure.** Each file
+is a single short recording at one fixed fault condition and load - there is no elapsed-time
+axis and no degradation trajectory, so no RUL ground truth exists for this dataset. This
+project never reports an RUL metric for CWRU (see `ml-data.md`).
+
+Format: MATLAB v5 `.mat` files. Each carries 2-4 variables named `X<id>_<channel>_time`
+(DE = drive end accelerometer, FE = fan end, BA = base; `channel` is what the published
+literature centers fault-diagnosis features on) plus an `X<id>RPM` scalar when recorded.
+**Variable-name zero-padding is inconsistent across the archive** - file 97 stores its
+variable as `X097_DE_time` (zero-padded), while e.g. 105 stores `X105_DE_time` (not
+padded); `cwru.py`'s `_find_time_variable` resolves by channel suffix rather than
+assuming either convention.
+
+`scipy.io.loadmat` cannot read every variable of some of these files in a single call
+(`OSError: could not read bytes` on a later variable) - confirmed not to be a download
+problem (`scipy.io.whosmat` lists all variables correctly, and reading any one named
+variable alone succeeds for every file tested). `cwru.py` always reads one named variable
+per call.
+
+4 files downloaded (12 kHz drive-end set, 0.007" fault diameter, 0 HP load) for adapter
+development/tests - not the full archive (hundreds of files across fault diameters,
+loads, and sampling rates):
+
+| file | label | bytes | sha256 |
+|---|---|---|---|
+| 97.mat | normal baseline | 1,965,609 | 6abd6f41c69ab2a46f6bc5f73b325d3ddd4c2c336e9ee9f2468b0aec7dcda4cc |
+| 105.mat | inner race fault, 0.007in | 2,910,768 | f80b0ea04fd06b372a0eaec7c056543ea37e4bb4727a5b173d2a5bacd2aa9cab |
+| 118.mat | ball fault, 0.007in | 2,942,112 | b00628f8dd8d1d930af77fa465d1e5cdb385fe259489053f91f3680bda7f640e |
+| 130.mat | outer race fault @6:00, 0.007in | 2,928,192 | 35a095307d0971477049b343a1b5981dde465a58fb7f233ad89b035068c1717d |
+
+Raw files kept outside both repo clones at `/mnt/NewVolume/capstone/data/CWRU_12k_DE/`
+(same convention as the other external raw-data downloads documented in the capstone-root
+`CLAUDE.md`). Small excerpts (first 12,000 samples = 1s at 12kHz of the DE channel only)
+are committed as test fixtures at `data/fixtures/cwru/*.mat`.
+
+Real applicability check against the frozen FEMTO `cross_domain_bundle.joblib`
+(`tests/test_cwru.py::test_cwru_applicability_against_frozen_femto_model`, run
+2026-10-07): **level = LOW** - every `vibration_y_*` column reported missing (CWRU has
+only one accelerometer axis per recording, FEMTO's model expects two), plus a genuine
+feature-distribution shift (median kNN distance 2.62 vs in-domain 1.36, shift_ratio
+1.92x). This is the scientifically correct outcome, not a failure: CWRU is a dataset type
+the FEMTO model was never fit on, and the applicability layer correctly flags it rather
+than scoring it as if in-domain.
+
 ### IMS (downloaded 2026-09-25)
 
 Official NASA route `https://phm-datasets.s3.amazonaws.com/NASA/4.+Bearings.zip`, downloaded with
