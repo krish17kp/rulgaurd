@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -35,24 +37,88 @@ from bearing_pdm.modeling import SEED
 
 CANONICAL = ["canonical_femto_learning", "canonical_femto_test_censored", "canonical_college",
              "canonical_ims", "canonical_xjtu"]
+# Every experiment in experiments.run_all() keys off FEMTO learning bearings
+# (the frozen raw model, both cross-domain HIs, every applicability model);
+# without it the run degrades to garbage, not merely "fewer datasets". The
+# other four CANONICAL entries are genuinely optional (documented: "skipped
+# and listed"). Overwriting a good cross_domain_bundle.joblib with the output
+# of a FEMTO-less run would silently poison routing - see docs/decisions.md.
+REQUIRED_CANONICAL = ["canonical_femto_learning"]
 
 
-def main() -> int:
+def check_inputs_present(processed_dir: Path, required: list[str] = REQUIRED_CANONICAL,
+                          ) -> list[str]:
+    """Return the subset of `required` canonical parquets missing or unreadable
+    under `processed_dir`. An empty result means it is safe to proceed."""
+    bad = []
+    for name in required:
+        path = Path(processed_dir) / f"{name}.parquet"
+        if not path.exists():
+            bad.append(name)
+            continue
+        try:
+            pd.read_parquet(path)
+        except Exception:
+            bad.append(name)
+    return bad
+
+
+def atomic_dump(obj, target: str | Path) -> None:
+    """Write `obj` with joblib and only replace `target` once the write is
+    verified readable. A failure anywhere (serialization, disk full, process
+    kill) leaves `target` byte-for-byte as it was - never a truncated or
+    partial bundle."""
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=target.name + ".", suffix=".tmp")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        joblib.dump(obj, tmp_path)
+        reloaded = joblib.load(tmp_path)          # fail before replacing, not after
+        if not isinstance(reloaded, dict) or not reloaded:
+            raise ValueError(f"bundle validation failed: expected a non-empty dict, "
+                              f"got {type(reloaded)}")
+        os.replace(tmp_path, target)               # atomic on the same filesystem
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="config/data_paths.toml")
     parser.add_argument("--processed-dir", default="data/processed")
-    args = parser.parse_args()
+    parser.add_argument("--bundle-out", default="artifacts/models/cross_domain_bundle.joblib")
+    args = parser.parse_args(argv)
     t0 = time.time()
 
     processed = Path(args.processed_dir)
+    bundle_target = Path(args.bundle_out)
+
+    missing_required = check_inputs_present(processed)
+    if missing_required:
+        print(f"ERROR: required canonical dataset(s) missing or unreadable under "
+              f"{processed}: {missing_required}. Refusing to touch {bundle_target} "
+              f"(fail-closed - existing bundle left untouched).", file=sys.stderr)
+        return 1
+
     frames, manifests, missing = [], {}, []
     for name in CANONICAL:
         path = processed / f"{name}.parquet"
         if not path.exists():
             missing.append(name)
             continue
-        frames.append(pd.read_parquet(path))
-        manifests[name] = json.loads(path.with_suffix(".json").read_text())
+        try:
+            frames.append(pd.read_parquet(path))
+            manifests[name] = json.loads(path.with_suffix(".json").read_text())
+        except Exception as exc:
+            if name in REQUIRED_CANONICAL:
+                print(f"ERROR: required canonical dataset {name} became unreadable "
+                      f"mid-run ({exc}). Refusing to touch {bundle_target}.", file=sys.stderr)
+                return 1
+            print(f"WARNING: optional dataset {name} unreadable ({exc}); treating as missing.",
+                  file=sys.stderr)
+            missing.append(name)
     print(f"Loaded {[n for n in CANONICAL if n not in missing]}; missing: {missing}")
     df = E.prepare(frames)
 
@@ -130,7 +196,7 @@ def main() -> int:
     bundle = result["bundle"] | {"hi_model": health["hi_models"][E.ROUTING_HI],
                                  "stage_thresholds": health["stage_thresholds"][E.ROUTING_HI],
                                  "hi_name": E.ROUTING_HI}
-    joblib.dump(bundle, "artifacts/models/cross_domain_bundle.joblib")
+    atomic_dump(bundle, bundle_target)
 
     cols = ["experiment", "model", "test_domain", "n_bearings", "mae_seconds", "nmae_life",
             "naive_mae_seconds", "overestimate_pct", "fraction_mae", "fraction_skill",
