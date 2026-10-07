@@ -77,6 +77,71 @@ def test_raw_explorer_loads_a_real_analysis_bundle(tmp_path):
     assert at.file_uploader
 
 
+def _femto_bundle_script():
+    import streamlit as st
+
+    from bearing_pdm.dashboard import _render_femto_bundle
+
+    _render_femto_bundle({
+        "bearing_run_id": "femto:Bearing2_1",
+        "acquisition_count": 3,
+        "sample_rate_hz": 25600.0,
+        "sequence_index": [0, 1, 2],
+        "representative_signals": {"early": {"vibration_x": [0.1, 0.2, 0.1]}},
+        "representative_fft": {"early": {"vibration_x": {"frequency_hz": [0, 1, 2], "magnitude": [0.1, 0.2, 0.3]}}},
+        "reference_hi": [1.0, 0.8, 0.4],
+        "transparent_hi": None,
+        "pca_hi": None,
+        "stage": ["HEALTHY", "DEGRADING", "CRITICAL"],
+        "actual_rul_seconds": [20.0, 10.0, 0.0],
+        "held_out_predicted_rul_seconds": [18.0, 9.0, 1.0],
+        "held_out_mae_seconds": 120.0,
+        "held_out_unavailable_reason": None,
+        "warnings": [],
+    })
+    st.write("DONE_FEMTO_BUNDLE")
+
+
+def test_render_femto_bundle_charts_not_a_raw_json_dump():
+    at = AppTest.from_function(_femto_bundle_script)
+    at.run()
+    assert not at.exception, f"_render_femto_bundle raised: {at.exception}"
+    assert not at.json, "FEMTO bundle must render charts/metrics, not st.json(payload)"
+    assert at.metric  # Bearing / Acquisitions / Sample rate
+    texts = " ".join(md.value for md in at.markdown)
+    assert "Health Indicator" in texts
+    assert "CRITICAL" in " ".join(c.value for c in at.caption)
+
+
+def _college_bundle_script():
+    import streamlit as st
+
+    from bearing_pdm.dashboard import _render_college_bundle
+
+    _render_college_bundle({
+        "dataset_id": "college",
+        "n_acquisitions": 2,
+        "temp_available_fraction": 1.0,
+        "coverage_note": "Full coverage: all 129 raw LogFile_*.csv files are represented.",
+        "sequence_index": [0, 1],
+        "feature_trends": {"vibration_x_rms": [0.1, 0.2], "bearing_temp_mean": [30.0, 31.0]},
+        "actual_rul_seconds": [10.0, 0.0],
+        "held_out_predicted_rul_seconds": {"sequence_index": [0, 1], "predicted_rul_seconds": [9.0, 1.0]},
+        "naive_caveat": "College naive MAE is an algebraic oracle identity, not a real baseline.",
+        "domain_shift_note": "FEMTO-fit models are not applied to college data here (D11).",
+    })
+    st.write("DONE_COLLEGE_BUNDLE")
+
+
+def test_render_college_bundle_shows_caveats_not_a_raw_json_dump():
+    at = AppTest.from_function(_college_bundle_script)
+    at.run()
+    assert not at.exception, f"_render_college_bundle raised: {at.exception}"
+    assert not at.json, "college bundle must render charts/metrics, not st.json(payload)"
+    assert "algebraic oracle identity" in " ".join(w.value for w in at.warning)
+    assert "D11" in " ".join(c.value for c in at.caption)
+
+
 def _open(view: str) -> AppTest:
     """Select a view from the sidebar. Views are a radio rather than st.tabs so
     that the bearing/window controls can be hidden for the two views they do not

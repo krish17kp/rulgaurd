@@ -318,7 +318,7 @@ def _render_raw_explorer() -> None:
             })
 
     else:  # RULGuard Analysis Bundle
-        from bearing_pdm.analysis_bundle import BundleValidationError, load_bundle
+        from bearing_pdm.analysis_bundle import BundleValidationError, bundle_kind, load_bundle
 
         uploaded = st.file_uploader("RULGuard Analysis Bundle (.rulguard.zip)", type=["zip"])
         if uploaded is not None:
@@ -327,12 +327,127 @@ def _render_raw_explorer() -> None:
                 tmp.write(uploaded.getvalue())
                 tmp.flush()
                 try:
-                    payload = load_bundle(tmp.name)
+                    payload, manifest = load_bundle(tmp.name, with_manifest=True)
                 except BundleValidationError as exc:
                     st.error(f"Bundle rejected: {exc}")
                     return
             st.success("Bundle loaded and checksum-verified.")
-            st.json(payload)
+            kind = bundle_kind(manifest.get("dataset_id"), payload)
+            if kind == "femto":
+                _render_femto_bundle(payload)
+            elif kind == "college":
+                _render_college_bundle(next(iter(payload.values())))
+            else:
+                st.warning(
+                    f"Bundle loaded (dataset_id={manifest.get('dataset_id')!r}) but its shape "
+                    "does not match a known FEMTO or college Analysis Bundle - showing raw "
+                    "fields instead of guessing a chart."
+                )
+                st.json(payload)
+
+
+def _render_femto_bundle(payload: dict) -> None:
+    """A `.rulguard.zip` FEMTO bundle (bearing_archive.BearingAnalysis,
+    asdict'd): Overview / Signals / FFT / Health+stage / RUL, mirroring the
+    web /analyze-bundle page's FEMTO renderer - same fields, same "no
+    retraining" rule."""
+    seq = payload.get("sequence_index") or []
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Bearing", payload.get("bearing_run_id", "unknown"))
+    col2.metric("Acquisitions", payload.get("acquisition_count") or len(seq))
+    col3.metric("Sample rate", f"{payload.get('sample_rate_hz', 0):.0f} Hz")
+    for w in payload.get("warnings") or []:
+        st.caption(f"⚠ {w}")
+
+    rep_signals = payload.get("representative_signals") or {}
+    if rep_signals:
+        st.markdown("**Representative signal (early / middle / late) - vibration X**")
+        for pos in ("early", "middle", "late"):
+            if pos in rep_signals and "vibration_x" in rep_signals[pos]:
+                st.caption(pos)
+                st.line_chart(pd.DataFrame({"vibration_x": rep_signals[pos]["vibration_x"]}))
+
+    rep_fft = payload.get("representative_fft") or {}
+    if rep_fft:
+        st.markdown("**Representative FFT (early / middle / late) - vibration X**")
+        for pos in ("early", "middle", "late"):
+            if pos in rep_fft and "vibration_x" in rep_fft[pos]:
+                fft = rep_fft[pos]["vibration_x"]
+                st.caption(pos)
+                st.line_chart(pd.DataFrame({"magnitude": fft["magnitude"]}, index=fft["frequency_hz"]))
+
+    if seq and (payload.get("reference_hi") or payload.get("transparent_hi") or payload.get("pca_hi")):
+        st.markdown("**Health Indicator**")
+        chart = {}
+        if payload.get("reference_hi"):
+            chart["reference_hi (selected)"] = payload["reference_hi"]
+        if payload.get("transparent_hi"):
+            chart["transparent_hi (legacy)"] = payload["transparent_hi"]
+        if payload.get("pca_hi"):
+            chart["pca_hi (legacy)"] = payload["pca_hi"]
+        st.line_chart(pd.DataFrame(chart, index=seq))
+        stage = payload.get("stage")
+        if stage:
+            st.caption(f"Latest stage: **{stage[-1]}** - a severity band on the health "
+                       "indicator, not a physical fault diagnosis.")
+
+    if seq and payload.get("actual_rul_seconds"):
+        st.markdown("**RUL: actual vs. held-out prediction**")
+        rul_chart = {"actual RUL (h)": [v / 3600 if v is not None else None
+                                        for v in payload["actual_rul_seconds"]]}
+        predicted = payload.get("held_out_predicted_rul_seconds")
+        if predicted:
+            rul_chart["predicted RUL - held out (h)"] = [v / 3600 for v in predicted]
+        st.line_chart(pd.DataFrame(rul_chart, index=seq))
+        if payload.get("held_out_mae_seconds") is not None:
+            st.caption(f"Leave-one-bearing-out MAE: {payload['held_out_mae_seconds']/3600:.2f} h")
+        elif payload.get("held_out_unavailable_reason"):
+            st.caption(payload["held_out_unavailable_reason"])
+
+
+def _render_college_bundle(entry: dict) -> None:
+    """A `.rulguard.zip` college bundle entry (build_college_trajectory.py's
+    single BEARING_RUN_ID key): coverage, feature/temperature trends, the
+    chronological walk-forward RUL, and the D10/D11 caveats shown inline -
+    never a FEMTO-fit Health Indicator for college data."""
+    seq = entry.get("sequence_index") or []
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Dataset", entry.get("dataset_id", "college"))
+    col2.metric("Acquisitions", entry.get("n_acquisitions") or len(seq))
+    col3.metric("Temp coverage", f"{entry.get('temp_available_fraction', 0) * 100:.1f}%")
+    st.caption(entry.get("coverage_note", ""))
+
+    trends = entry.get("feature_trends") or {}
+    amp_cols = {k: trends[k] for k in
+                ("vibration_x_rms", "vibration_x_kurtosis", "vibration_x_crest_factor") if k in trends}
+    if seq and amp_cols:
+        st.markdown("**Vibration feature trend**")
+        st.line_chart(pd.DataFrame(amp_cols, index=seq))
+
+    temp_cols = {k: trends[k] for k in
+                 ("bearing_temp_mean", "ambient_temp_mean", "bearing_minus_ambient_temp_mean")
+                 if k in trends}
+    if seq and temp_cols:
+        st.markdown("**Bearing / ambient temperature (°C)**")
+        st.line_chart(pd.DataFrame(temp_cols, index=seq))
+
+    if seq and entry.get("actual_rul_seconds"):
+        st.markdown("**RUL: actual vs. chronological walk-forward**")
+        rul_chart = {"actual RUL (h)": [v / 3600 if v is not None else None
+                                        for v in entry["actual_rul_seconds"]]}
+        held_out = entry.get("held_out_predicted_rul_seconds") or {}
+        pred_by_seq = dict(zip(held_out.get("sequence_index", []),
+                               held_out.get("predicted_rul_seconds", []), strict=False))
+        if pred_by_seq:
+            rul_chart["predicted RUL - walk-forward (h)"] = [
+                pred_by_seq[s] / 3600 if s in pred_by_seq else None for s in seq
+            ]
+        st.line_chart(pd.DataFrame(rul_chart, index=seq))
+
+    if entry.get("naive_caveat"):
+        st.warning(entry["naive_caveat"])
+    if entry.get("domain_shift_note"):
+        st.caption(entry["domain_shift_note"])
 
 
 def main() -> None:
@@ -820,11 +935,15 @@ def main() -> None:
             "```"
         )
         st.markdown(
-            "Everything above is batch and local. There is **no** backend service, HTTP API, "
-            "database server, message queue, cloud component, or live sensor feed. The "
-            "dashboard never fits a model - it reads Parquet, DuckDB and `artifacts/models/*.joblib` "
-            "that the scripts produced earlier. No deep-learning model (LSTM/CNN/transformer) and "
-            "no LLM or RAG layer is implemented in this repository."
+            "This Streamlit dashboard itself is batch and local: no backend service, HTTP API, "
+            "database server, message queue, or live sensor feed, and it never fits a model - it "
+            "reads Parquet, DuckDB and `artifacts/models/*.joblib` that the scripts produced "
+            "earlier. No deep-learning model (LSTM/CNN/transformer) is implemented anywhere in "
+            "this repository. A RAG/LLM explanation layer *does* exist elsewhere in the repo "
+            "(`src/bearing_pdm/rag/`, the FastAPI `/explain` endpoint, M7/docs/rag.md) - it "
+            "explains a prediction already computed by the pipeline and never alters the number - "
+            "but it is a separate web (FastAPI + Next.js) feature, not wired into this Streamlit "
+            "page's UI."
         )
         if _cloud_mode():
             st.markdown(
@@ -843,14 +962,17 @@ def main() -> None:
             "- No guaranteed physical root-cause diagnosis (stage != fault type)\n"
             "- No production safety certification\n"
             "- No cross-bearing validation from the single college run\n"
-            "- No LLM-generated numeric prediction (RAG/LLM deferred to M7, not on this dashboard)\n"
+            "- No LLM-generated numeric prediction - the M7 RAG/explain layer (separate web "
+            "feature, see above) only explains a number the pipeline already computed, never "
+            "produces or adjusts one\n"
             "- No uncertainty interval on the RUL point estimate yet\n"
         )
         st.subheader("Known limitations found during development (docs/decisions.md)")
         st.markdown(
             "- College's `rul_seconds` label uses the known final timestamp (uncensored run) - "
             "its naive baseline scores a trivial 0.0 MAE by construction (D10), not a real result.\n"
-            "- College feature batch shown here is a representative sample, not the full 129-file run (section 26.8).\n"
+            "- College feature cache covers the full 129/129-file run (Nightshift Phase 4); "
+            "earlier builds used a 1-in-5 representative sample (section 26.8).\n"
             "- Per-acquisition HI monotonicity is low (~0.01-0.11) for every HI tried. "
             "|mean(sign(diff))| is near zero for any noisy real signal, so Spearman rank "
             "correlation and the healthy-vs-end-of-life separation are the headline metrics "

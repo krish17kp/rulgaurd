@@ -66,6 +66,25 @@ def build_bundle(dataset_id: str, payload: Any, out_path: str | Path) -> Path:
     return out_path
 
 
+def bundle_kind(dataset_id: str | None, payload: dict[str, Any]) -> str:
+    """"femto" | "college" | "unknown" - which renderer a loaded bundle needs.
+    Shared by the web endpoint (api.py's /analyze/bundle) and the Streamlit
+    explorer (dashboard.py) so the two UIs can never classify the same
+    bundle differently. Prefers the manifest's dataset_id; falls back to
+    sniffing the payload shape for a bundle built without one.
+    """
+    if dataset_id and dataset_id.startswith("femto"):
+        return "femto"
+    if dataset_id and dataset_id.startswith("college"):
+        return "college"
+    if "bearing_run_id" in payload and "acquisition_count" in payload:
+        return "femto"
+    if any(isinstance(v, dict) and str(v.get("dataset_id", "")).startswith("college")
+           for v in payload.values()):
+        return "college"
+    return "unknown"
+
+
 def load_bundle(path: str | Path, with_manifest: bool = False) -> dict[str, Any]:
     """Read a `.rulguard.zip`, verify its checksums, and return `dataset.json`.
 

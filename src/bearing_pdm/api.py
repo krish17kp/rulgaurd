@@ -2644,19 +2644,6 @@ class AnalysisBundleResponse(BaseModel):
     payload: dict[str, Any] | None = None
 
 
-def _analysis_bundle_kind(dataset_id: str | None, payload: dict[str, Any]) -> str:
-    if dataset_id and dataset_id.startswith("femto"):
-        return "femto"
-    if dataset_id and dataset_id.startswith("college"):
-        return "college"
-    if "bearing_run_id" in payload and "acquisition_count" in payload:
-        return "femto"
-    if any(isinstance(v, dict) and str(v.get("dataset_id", "")).startswith("college")
-           for v in payload.values()):
-        return "college"
-    return "unknown"
-
-
 @app.post("/analyze/bundle", response_model=AnalysisBundleResponse)
 async def analyze_bundle(file: UploadFile) -> AnalysisBundleResponse:
     """Load a portable `.rulguard.zip` Analysis Bundle (Phase J) for display.
@@ -2669,7 +2656,7 @@ async def analyze_bundle(file: UploadFile) -> AnalysisBundleResponse:
     malformed ZIP all surface as analysis_bundle.BundleValidationError and
     are returned as a 400 with that reason, never a raw traceback.
     """
-    from bearing_pdm.analysis_bundle import BundleValidationError, load_bundle
+    from bearing_pdm.analysis_bundle import BundleValidationError, bundle_kind, load_bundle
 
     with _temporary_upload() as tmp:
         await _spool_upload(file, tmp, expect_text=False)
@@ -2679,7 +2666,7 @@ async def analyze_bundle(file: UploadFile) -> AnalysisBundleResponse:
             raise HTTPException(status_code=400, detail=f"invalid analysis bundle: {exc}") from exc
     dataset_id = manifest.get("dataset_id")
     return AnalysisBundleResponse(
-        status="ok", dataset_id=dataset_id, kind=_analysis_bundle_kind(dataset_id, payload),
+        status="ok", dataset_id=dataset_id, kind=bundle_kind(dataset_id, payload),
         payload=payload,
     )
 
