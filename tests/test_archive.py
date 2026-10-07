@@ -140,6 +140,16 @@ def test_encrypted_zip_rejected(tmp_path):
         safe_extract_zip(zip_path, tmp_path / "out", LOCAL_FULL_MODE)
 
 
+def test_symlink_entry_rejected(tmp_path):
+    zip_path = tmp_path / "symlink.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        info = zipfile.ZipInfo("link.csv")
+        info.external_attr = (0o120777 << 16)  # S_IFLNK | rwxrwxrwx
+        zf.writestr(info, "/etc/passwd")
+    with pytest.raises(ZipSecurityError, match="symlink"):
+        safe_extract_zip(zip_path, tmp_path / "out", LOCAL_FULL_MODE)
+
+
 def test_vercel_bounded_mode_flags_oversized_manifest(tmp_path):
     zip_path = tmp_path / "big.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
