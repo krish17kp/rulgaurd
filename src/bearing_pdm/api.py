@@ -1212,14 +1212,15 @@ class BlobUploadRequest(BaseModel):
     blob_url: str = Field(..., description="A client-uploaded Vercel Blob object URL.")
 
 
-def _stream_blob_to_tempfile(blob_url: str, tmp, max_bytes: int) -> int:
+def _stream_blob_to_tempfile(blob_url: str, tmp, max_bytes: int, *, expect_text: bool = True) -> int:
     """Bounded-memory download of a direct-to-storage upload (python.md:
     'all raw reads are chunked') - this server never buffers the whole
     object in memory, the same chunked pattern as the direct upload path
-    (_spool_upload), including its text-head check on the first bytes. A
-    missing object (expired/already cleaned up) and a connection dropping
-    mid-transfer are reported as distinct, truthful error states rather
-    than one generic failure."""
+    (_spool_upload), including its text-head check on the first bytes
+    (skipped when `expect_text=False`, e.g. ZIP uploads). A missing object
+    (expired/already cleaned up) and a connection dropping mid-transfer are
+    reported as distinct, truthful error states rather than one generic
+    failure."""
     written = 0
     try:
         with _get_http_client() as client, client.stream("GET", blob_url) as response:
@@ -1236,7 +1237,7 @@ def _stream_blob_to_tempfile(blob_url: str, tmp, max_bytes: int) -> int:
                     retryable=True,
                 )
             for chunk in response.iter_bytes(UPLOAD_CHUNK_BYTES):
-                if written == 0 and chunk:
+                if written == 0 and chunk and expect_text:
                     _check_text_head(chunk)
                 written += len(chunk)
                 if written > max_bytes:
@@ -1871,6 +1872,124 @@ async def predict_rul_from_femto_acquisition(file: UploadFile) -> PredictRulResp
         return _process_femto_acquisition_file(tmp.name, "upload")
 
 
+class BearingZipAnalysisResponse(BaseModel):
+    status: str  # "ok" | "analysis_bundle_required"
+    bearing_run_id: str | None = None
+    acquisition_count: int | None = None
+    sample_rate_hz: float | None = None
+    representative_indices: dict[str, int] | None = None
+    representative_signals: dict[str, dict[str, list[float]]] | None = None
+    representative_fft: dict[str, dict[str, dict[str, list[float]]]] | None = None
+    feature_trajectory: dict[str, list[float | None]] | None = None
+    sequence_index: list[int] | None = None
+    reference_hi: list[float] | None = None
+    transparent_hi: list[float] | None = None
+    pca_hi: list[float] | None = None
+    stage: list[str] | None = None
+    actual_rul_seconds: list[float | None] | None = None
+    held_out_predicted_rul_seconds: list[float] | None = None
+    held_out_mae_seconds: float | None = None
+    held_out_unavailable_reason: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    message: str | None = None
+
+
+def _bearing_zip_response(path: str) -> BearingZipAnalysisResponse:
+    from bearing_pdm.archive import VERCEL_BOUNDED_MODE, ZipSecurityError
+    from bearing_pdm.bearing_archive import BearingArchiveError, analyze_femto_bearing_zip
+
+    try:
+        a = analyze_femto_bearing_zip(path, limits=VERCEL_BOUNDED_MODE)
+    except ZipSecurityError as exc:
+        raise HTTPException(status_code=400, detail=f"unsafe archive: {exc}") from exc
+    except BearingArchiveError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return BearingZipAnalysisResponse(
+        status="ok",
+        bearing_run_id=a.bearing_run_id,
+        acquisition_count=a.acquisition_count,
+        sample_rate_hz=a.sample_rate_hz,
+        representative_indices=a.representative_indices,
+        representative_signals=a.representative_signals,
+        representative_fft=a.representative_fft,
+        feature_trajectory=a.feature_trajectory,
+        sequence_index=a.sequence_index,
+        reference_hi=a.reference_hi,
+        transparent_hi=a.transparent_hi,
+        pca_hi=a.pca_hi,
+        stage=a.stage,
+        actual_rul_seconds=a.actual_rul_seconds,
+        held_out_predicted_rul_seconds=a.held_out_predicted_rul_seconds,
+        held_out_mae_seconds=a.held_out_mae_seconds,
+        held_out_unavailable_reason=a.held_out_unavailable_reason,
+        warnings=list(a.warnings),
+    )
+
+
+# Vercel's serverless request body is capped around ~4.5MB; a full FEMTO
+# bearing ZIP (~900 acquisitions) is typically ~15-20MB, so the direct-upload
+# route only accepts small archives and otherwise asks for the blob route -
+# never silently truncates or times out on an oversized body.
+MAX_DIRECT_BEARING_ZIP_BYTES = 4 * 1024 * 1024
+
+
+@app.post("/analyze/femto-bearing-zip", response_model=BearingZipAnalysisResponse)
+async def analyze_femto_bearing_zip_endpoint(file: UploadFile) -> BearingZipAnalysisResponse:
+    """Direct-upload variant for small bearing ZIPs (a short acquisition run,
+    or a deliberately trimmed sample). A full ~900-acquisition bearing ZIP is
+    well over Vercel's request-body limit - use the /blob variant below for
+    that, which streams via Vercel Blob instead. See bearing_archive.py for
+    the actual analysis (reuses femto.py/pipeline.py/health.py/stages.py -
+    no duplicated formulas, no retraining)."""
+    with _temporary_upload() as tmp:
+        try:
+            await _spool_upload(
+                file, tmp, max_bytes=MAX_DIRECT_BEARING_ZIP_BYTES, expect_text=False
+            )
+        except HTTPException as exc:
+            if exc.status_code == 413:
+                return BearingZipAnalysisResponse(
+                    status="analysis_bundle_required",
+                    message=(
+                        "This bearing ZIP is too large for direct upload. Use the blob "
+                        "upload flow, or export a RULGuard Analysis Bundle instead."
+                    ),
+                )
+            raise
+        return _bearing_zip_response(tmp.name)
+
+
+@app.post("/analyze/femto-bearing-zip/blob", response_model=BearingZipAnalysisResponse)
+def analyze_femto_bearing_zip_blob(request: BlobUploadRequest) -> BearingZipAnalysisResponse:
+    """Blob counterpart of /analyze/femto-bearing-zip: browser uploads the ZIP
+    straight to Vercel Blob, this endpoint streams it down in MAX_UPLOAD_BYTES
+    bounded chunks (same limit/helper as the single-acquisition blob route),
+    analyzes it, and always deletes the blob afterward. MAX_UPLOAD_BYTES
+    (64MB) comfortably covers a full ~900-acquisition bearing ZIP (~15-20MB);
+    anything that still exceeds it returns analysis_bundle_required rather
+    than crashing on a truncated download."""
+    _validate_blob_url(request.blob_url)
+    with _temporary_upload() as tmp:
+        try:
+            try:
+                _stream_blob_to_tempfile(
+                    request.blob_url, tmp, MAX_UPLOAD_BYTES, expect_text=False
+                )
+            except HTTPException as exc:
+                if exc.status_code == 413:
+                    return BearingZipAnalysisResponse(
+                        status="analysis_bundle_required",
+                        message=(
+                            "This bearing ZIP exceeds the supported upload size. Export a "
+                            "RULGuard Analysis Bundle instead of uploading the raw archive."
+                        ),
+                    )
+                raise
+            return _bearing_zip_response(tmp.name)
+        finally:
+            _delete_blob(request.blob_url)
+
+
 @app.post("/predict/rul/femto-acquisition/blob", response_model=PredictRulResponse)
 def predict_rul_from_femto_acquisition_blob(request: BlobUploadRequest) -> PredictRulResponse:
     """Direct-to-storage counterpart of /predict/rul/femto-acquisition: the
@@ -2407,20 +2526,28 @@ def _temporary_upload():
             _note(cleanup_state="deleted")
 
 
-async def _spool_upload(file: UploadFile, tmp: Any) -> int:
-    """Copy the upload into `tmp` in bounded chunks, enforcing MAX_UPLOAD_BYTES and
-    the text-head check. The caller owns `tmp` (a NamedTemporaryFile context, so
-    the raw file is deleted on every exit path)."""
+async def _spool_upload(
+    file: UploadFile, tmp: Any, *, max_bytes: int | None = None, expect_text: bool = True
+) -> int:
+    """Copy the upload into `tmp` in bounded chunks, enforcing `max_bytes`
+    (module-global MAX_UPLOAD_BYTES by default - read at call time, not bound
+    as a default argument, so tests that monkeypatch it still take effect)
+    and (for text uploads) the text-head check. The caller owns `tmp` (a
+    NamedTemporaryFile context, so the raw file is deleted on every exit
+    path). `expect_text=False` (ZIP uploads) skips the text-head check, which
+    would otherwise reject every ZIP as a binary file."""
+    if max_bytes is None:
+        max_bytes = MAX_UPLOAD_BYTES
     written = 0
     try:
         while chunk := await file.read(UPLOAD_CHUNK_BYTES):
-            if written == 0:
+            if written == 0 and expect_text:
                 _check_text_head(chunk)
             written += len(chunk)
-            if written > MAX_UPLOAD_BYTES:
+            if written > max_bytes:
                 raise ApiError(
                     413, "UPLOAD_TOO_LARGE",
-                    f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB inspection limit.",
+                    f"File exceeds the {max_bytes // (1024 * 1024)}MB inspection limit.",
                 )
             tmp.write(chunk)
         tmp.flush()

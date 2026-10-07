@@ -8,6 +8,7 @@ const PRIMARY_LINKS = [
   { href: "/upload", label: "Analyze" },
   { href: "/evaluation", label: "Reliability" },
   { href: "/trajectory", label: "Explore bearing trajectory" },
+  { href: "/analyze-bearing-zip", label: "Analyze bearing ZIP" },
 ];
 
 const ADVANCED_LINKS = [

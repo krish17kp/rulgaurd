@@ -267,6 +267,49 @@ export async function analyzeFemtoSignal(file: File): Promise<FemtoSignalRespons
   return requestForm<FemtoSignalResponse>("/analyze/femto-signal", form);
 }
 
+export interface BearingZipAnalysisResponse {
+  status: "ok" | "analysis_bundle_required";
+  bearing_run_id: string | null;
+  acquisition_count: number | null;
+  sample_rate_hz: number | null;
+  representative_indices: Record<string, number> | null;
+  representative_signals: Record<string, { vibration_x: number[]; vibration_y: number[] }> | null;
+  representative_fft: Record<
+    string,
+    { vibration_x: { frequency_hz: number[]; magnitude: number[] }; vibration_y: { frequency_hz: number[]; magnitude: number[] } }
+  > | null;
+  feature_trajectory: Record<string, (number | null)[]> | null;
+  sequence_index: number[] | null;
+  reference_hi: number[] | null;
+  transparent_hi: number[] | null;
+  pca_hi: number[] | null;
+  stage: string[] | null;
+  actual_rul_seconds: (number | null)[] | null;
+  held_out_predicted_rul_seconds: number[] | null;
+  held_out_mae_seconds: number | null;
+  held_out_unavailable_reason: string | null;
+  warnings: string[];
+  message: string | null;
+}
+
+/** One FEMTO bearing's full ZIP of acc_* / temp_* files -> the same
+ * femto.py/pipeline.py/health.py/stages.py pipeline used offline
+ * (src/bearing_pdm/api.py's /analyze/femto-bearing-zip). A ZIP too large for
+ * a direct request body comes back as status: "analysis_bundle_required"
+ * rather than failing - see /analyze/femto-bearing-zip/blob for large files. */
+export async function analyzeFemtoBearingZip(file: File): Promise<BearingZipAnalysisResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  return requestForm<BearingZipAnalysisResponse>("/analyze/femto-bearing-zip", form);
+}
+
+export function analyzeFemtoBearingZipBlob(blobUrl: string): Promise<BearingZipAnalysisResponse> {
+  return request<BearingZipAnalysisResponse>("/analyze/femto-bearing-zip/blob", {
+    method: "POST",
+    body: JSON.stringify({ blob_url: blobUrl }),
+  });
+}
+
 export type Compatibility =
   | "FULLY_SUPPORTED"
   | "ADAPTER_REQUIRED"

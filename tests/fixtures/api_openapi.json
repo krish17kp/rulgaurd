@@ -281,6 +281,278 @@
         "title": "AnalyzedWindow",
         "type": "object"
       },
+      "BearingZipAnalysisResponse": {
+        "properties": {
+          "acquisition_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acquisition Count"
+          },
+          "actual_rul_seconds": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Rul Seconds"
+          },
+          "bearing_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bearing Run Id"
+          },
+          "feature_trajectory": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Trajectory"
+          },
+          "held_out_mae_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Out Mae Seconds"
+          },
+          "held_out_predicted_rul_seconds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Out Predicted Rul Seconds"
+          },
+          "held_out_unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Out Unavailable Reason"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "pca_hi": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pca Hi"
+          },
+          "reference_hi": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Hi"
+          },
+          "representative_fft": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "additionalProperties": {
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    },
+                    "type": "object"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Representative Fft"
+          },
+          "representative_indices": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Representative Indices"
+          },
+          "representative_signals": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Representative Signals"
+          },
+          "sample_rate_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Rate Hz"
+          },
+          "sequence_index": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sequence Index"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "transparent_hi": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transparent Hi"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "BearingZipAnalysisResponse",
+        "type": "object"
+      },
       "BlobInspectRequest": {
         "properties": {
           "blob_url": {
@@ -343,6 +615,20 @@
           "file"
         ],
         "title": "Body_analyze_features_analyze_features_post",
+        "type": "object"
+      },
+      "Body_analyze_femto_bearing_zip_endpoint_analyze_femto_bearing_zip_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_analyze_femto_bearing_zip_endpoint_analyze_femto_bearing_zip_post",
         "type": "object"
       },
       "Body_analyze_femto_signal_analyze_femto_signal_post": {
@@ -1262,6 +1548,84 @@
           }
         },
         "summary": "Analyze Features"
+      }
+    },
+    "/analyze/femto-bearing-zip": {
+      "post": {
+        "description": "Direct-upload variant for small bearing ZIPs (a short acquisition run,\nor a deliberately trimmed sample). A full ~900-acquisition bearing ZIP is\nwell over Vercel's request-body limit - use the /blob variant below for\nthat, which streams via Vercel Blob instead. See bearing_archive.py for\nthe actual analysis (reuses femto.py/pipeline.py/health.py/stages.py -\nno duplicated formulas, no retraining).",
+        "operationId": "analyze_femto_bearing_zip_endpoint_analyze_femto_bearing_zip_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_femto_bearing_zip_endpoint_analyze_femto_bearing_zip_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BearingZipAnalysisResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Femto Bearing Zip Endpoint"
+      }
+    },
+    "/analyze/femto-bearing-zip/blob": {
+      "post": {
+        "description": "Blob counterpart of /analyze/femto-bearing-zip: browser uploads the ZIP\nstraight to Vercel Blob, this endpoint streams it down in MAX_UPLOAD_BYTES\nbounded chunks (same limit/helper as the single-acquisition blob route),\nanalyzes it, and always deletes the blob afterward. MAX_UPLOAD_BYTES\n(64MB) comfortably covers a full ~900-acquisition bearing ZIP (~15-20MB);\nanything that still exceeds it returns analysis_bundle_required rather\nthan crashing on a truncated download.",
+        "operationId": "analyze_femto_bearing_zip_blob_analyze_femto_bearing_zip_blob_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlobUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BearingZipAnalysisResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Femto Bearing Zip Blob"
       }
     },
     "/analyze/femto-signal": {
