@@ -211,9 +211,68 @@ def test_cross_dataset_comparison_matches_source_artifacts_and_separates_section
     assert "femto" not in body["not_zero_shot_single_dataset_results"]
     assert "college" not in body["in_domain_trained_results"]
 
-    assert body["not_yet_available"]["ims"]["status"] == "NOT_YET_AVAILABLE"
+    # XJTU-SY genuinely has no archive on this machine (docs/external-datasets.md) and
+    # is always NOT_YET_AVAILABLE. IMS/college are dynamic: present once their
+    # canonical_*.parquet exists, so this only asserts the reported status
+    # matches what reports/metrics/cross_dataset.json's own datasets_missing
+    # says - never a hardcoded claim (that staleness is exactly what nightshift
+    # Phase 7 found and fixed: this endpoint used to hardcode ims as
+    # NOT_YET_AVAILABLE even after real IMS data had been obtained and scored).
     assert body["not_yet_available"]["xjtu_sy"]["status"] == "NOT_YET_AVAILABLE"
+    cross_dataset_path = api.METRICS_DIR / "cross_dataset.json"
+    if cross_dataset_path.exists():
+        cde = json.loads(cross_dataset_path.read_text())
+        missing = set(cde["config"].get("datasets_missing", []))
+        assert ("ims" in body["not_yet_available"]) == ("canonical_ims" in missing)
+        assert body["cross_dataset_experiments"] is not None
+        assert body["cross_dataset_experiments"]["schema_version"] == cde["schema_version"]
     assert "never" in body["comparability_warning"].lower()
+
+
+def test_cross_dataset_experiments_reflects_datasets_missing_not_a_hardcoded_claim(monkeypatch, tmp_path):
+    """Deterministic coverage of the new cross_dataset_experiments field and the
+    dynamic not_yet_available computation, independent of this machine's real
+    cross_dataset.json - synthesizes a report where IMS has real (bad)
+    zero-shot skill and college is genuinely missing, and asserts both are
+    reported honestly rather than IMS being hidden behind a stale claim."""
+    monkeypatch.setenv("RUL_EVALUATION_JSON", json.dumps({
+        "femto_lobo_overall_by_model": {
+            "extra_trees": {"mae_seconds": 1.0, "n": 1, "overestimate_rate": 0.5},
+            "naive": {"mae_seconds": 2.0},
+        },
+        "college_overall_by_model": {
+            "extra_trees": {"mae_seconds": 1.0, "n": 1, "overestimate_rate": 0.5},
+            "naive": {"mae_seconds": 0.0},
+        },
+        "college_naive_caveat": "caveat",
+    }))
+    monkeypatch.setenv("HEALTH_INDICATOR_COMPARISON_JSON", json.dumps({"selected": "reference_hi"}))
+    monkeypatch.setenv("CROSS_DATASET_JSON", json.dumps({
+        "schema_version": "cross-dataset-v2",
+        "config": {"datasets_missing": ["canonical_college", "canonical_xjtu"]},
+        "summary": [{
+            "experiment": "ZS: FEMTO -> ims", "category": "ZERO-SHOT", "model": "raw_seconds",
+            "test_domain": "ims", "n_bearings": 4, "mae_seconds": 936139.7,
+            "naive_mae_seconds": 600000.0, "fraction_mae": 0.4, "fraction_skill": -0.555,
+            "overestimate_pct": 80.0,
+        }],
+        "routing_skill_by_dataset": {"raw_seconds": {"ims": -0.555, "unseen": -0.555}},
+        "applicability_vs_error": {},
+    }))
+    response = client.get("/evaluation/cross-dataset")
+    assert response.status_code == 200
+    body = response.json()
+
+    # IMS is NOT in not_yet_available (it's present and scored); college and
+    # XJTU-SY are, because datasets_missing says so.
+    assert "ims" not in body["not_yet_available"]
+    assert body["not_yet_available"]["college"]["status"] == "NOT_YET_AVAILABLE"
+    assert body["not_yet_available"]["xjtu_sy"]["status"] == "NOT_YET_AVAILABLE"
+
+    cde = body["cross_dataset_experiments"]
+    assert cde["summary"][0]["test_domain"] == "ims"
+    assert cde["summary"][0]["fraction_skill"] == -0.555  # worse than guessing, shown as-is
+    assert cde["routing_skill_by_dataset"]["raw_seconds"]["ims"] == -0.555
 
 
 def test_predict_rul_rejects_non_femto_dataset():

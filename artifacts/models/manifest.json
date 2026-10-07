@@ -1,8 +1,8 @@
 {
   "artifacts": {
     "cross_domain_bundle.joblib": {
-      "sha256": "6729d5d5bdc4e3b1569b7be093f057fe712974a006b601681a34914437e084c9",
-      "size_bytes": 219386562,
+      "sha256": "04262433e7450855cf526c42006d0d70d8454318929a34696482bec88030dbe5",
+      "size_bytes": 361632809,
       "source_url": "https://ctu3kekak2ukxspd.public.blob.vercel-storage.com/models/cross_domain_bundle.joblib"
     },
     "pca_hi_model.joblib": {

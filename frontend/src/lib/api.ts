@@ -532,10 +532,41 @@ export interface NotYetAvailableDataset {
   reason: string;
 }
 
+/** One row of reports/metrics/cross_dataset.json's `summary` table
+ * (scripts/run_cross_dataset.py / docs/cross-dataset.md) - a real
+ * within-domain, zero-shot, calibrated, or multi-dataset-LOBO result. */
+export interface CrossDatasetSummaryRow {
+  experiment: string;
+  category: "WITHIN-DOMAIN" | "ZERO-SHOT" | "CALIBRATED" | "MULTI-DATASET";
+  model: "raw_seconds" | "sn_fraction";
+  test_domain: string;
+  n_bearings: number;
+  mae_seconds: number | null;
+  naive_mae_seconds: number | null;
+  fraction_mae: number | null;
+  /** Held-out skill vs. a label-free constant guess, life-fraction units.
+   * 0 = no skill, negative = worse than guessing - the honest signal for a
+   * failed zero-shot transfer (e.g. FEMTO -> IMS). */
+  fraction_skill: number | null;
+  overestimate_pct: number | null;
+}
+
+export interface CrossDatasetExperiments {
+  schema_version: string;
+  generated_from: string;
+  summary: CrossDatasetSummaryRow[];
+  /** model -> dataset_id -> mean held-out skill; "unseen" = mean zero-shot
+   * / leave-one-domain-out skill, i.e. "how this does on a machine it
+   * never saw". */
+  routing_skill_by_dataset: Record<string, Record<string, number>>;
+  applicability_vs_error: Record<string, unknown> | null;
+}
+
 export interface CrossDatasetResponse {
   in_domain_trained_results: { femto: DatasetMetricSummary };
   not_zero_shot_single_dataset_results: { college: DatasetMetricSummary };
-  not_yet_available: { ims: NotYetAvailableDataset; xjtu_sy: NotYetAvailableDataset };
+  not_yet_available: Record<string, NotYetAvailableDataset>;
+  cross_dataset_experiments: CrossDatasetExperiments | null;
   comparability_warning: string;
 }
 

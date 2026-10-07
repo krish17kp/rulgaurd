@@ -1444,25 +1444,71 @@ def models_health_indicator_comparison() -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
+#: canonical_<x>.parquet name -> the friendly dataset id this endpoint reports.
+#: canonical_femto_test_censored is a FEMTO role, not a separate dataset, and
+#: is intentionally not in this map.
+_CANONICAL_TO_DATASET_ID = {
+    "canonical_college": "college", "canonical_ims": "ims", "canonical_xjtu": "xjtu_sy",
+}
+# Real, specific blockers (Phase 3/7 nightshift investigation) for a dataset
+# that is genuinely still missing - never a generic "not obtained" filler.
+_UNAVAILABLE_REASONS = {
+    "ims": "canonical_ims.parquet not found under data/processed/. Build it with "
+           "scripts/build_canonical_features.py --dataset ims --root <extracted IMS dir>.",
+    "xjtu_sy": "No XJTU-SY archive found on this machine (checked datasets/, data/, and the "
+               "locations docs/external-datasets.md names). The official mirrors (Google "
+               "Drive/Dropbox/MediaFire/MEGA/Baidu) require interactive browser/account auth "
+               "with no direct-file HTTP endpoint - a manual download is required.",
+    "college": "canonical_college.parquet not found under data/processed/. Build it with "
+               "scripts/build_canonical_features.py --dataset college.",
+}
+
+
+def _load_cross_dataset_experiments() -> dict[str, Any] | None:
+    """reports/metrics/cross_dataset.json (scripts/run_cross_dataset.py) - the
+    real multi-dataset LOBO/zero-shot/calibrated/LODO comparison, with the
+    SAME Vercel-packaging inline-env-var escape hatch as the other metrics
+    reads in this module (frontend/package.json's prebuild only vendors
+    files it is explicitly told to copy)."""
+    inline = os.environ.get("CROSS_DATASET_JSON")
+    if inline:
+        try:
+            return json.loads(inline)
+        except json.JSONDecodeError:
+            logger.warning("CROSS_DATASET_JSON is set but could not be parsed - ignoring it")
+    path = METRICS_DIR / "cross_dataset.json"
+    return json.loads(path.read_text()) if path.exists() else None
+
+
 @app.get("/evaluation/cross-dataset")
 def cross_dataset_comparison() -> dict[str, Any]:
-    """FEMTO vs college comparison, pulled verbatim from the same artifacts
-    models_evaluation()/models_health_indicator_comparison() already serve.
+    """Cross-dataset comparison across every dataset actually available on
+    this machine (FEMTO, college, IMS today; XJTU-SY pending a manual
+    archive download - docs/external-datasets.md).
 
-    Structurally separated into two sections rather than merged rows: FEMTO's
-    leave-one-bearing-out ExtraTrees result is an IN_DOMAIN_TRAINED evaluation;
-    college's walk-forward result is NOT a zero-shot application of the FEMTO
-    model (ml-data.md / D11 forbids that) and uses its own chronological split
-    with a different label definition (D10's naive=0.0 oracle-identity caveat,
-    carried through verbatim). The two MAE numbers are never combined into one
-    score. IMS/XJTU-SY are listed explicitly as NOT_YET_AVAILABLE rather than
-    omitted, pending real external dataset acquisition (nightshift Phase O/P/Q,
-    blocked this run on missing RAR tooling / interactive mirror auth)."""
+    `in_domain_trained_results`/`not_zero_shot_single_dataset_results` are
+    unchanged from the original FEMTO/college-only version (pulled from
+    models_evaluation()/models_health_indicator_comparison() - same
+    artifacts, same D10/D11 caveats, same guarantee the two are never
+    combined into one score).
+
+    `cross_dataset_experiments` is new: the real within-domain / zero-shot /
+    calibrated / multi-dataset-LOBO numbers from
+    reports/metrics/cross_dataset.json (scripts/run_cross_dataset.py), the
+    same artifact dashboard_cross.py's Cross-Dataset Validation view reads -
+    so the web and Streamlit UIs can never disagree. This is where a result
+    like "FEMTO -> IMS zero-shot has negative skill" is surfaced honestly
+    (routing_skill_by_dataset) rather than hidden by omitting IMS, and
+    `not_yet_available` is now computed from what the artifact's own
+    `datasets_missing` list actually says instead of a hardcoded claim -
+    it previously claimed IMS was NOT_YET_AVAILABLE after IMS data had
+    already been obtained and scored (found while completing this endpoint,
+    nightshift Phase 7)."""
     rul = models_evaluation()
     hi = models_health_indicator_comparison()
     femto = rul["femto_lobo_overall_by_model"]
     college = rul["college_overall_by_model"]
-    return {
+    response: dict[str, Any] = {
         "in_domain_trained_results": {
             "femto": {
                 "dataset": "FEMTO/PRONOSTIA",
@@ -1494,20 +1540,6 @@ def cross_dataset_comparison() -> dict[str, Any]:
                 "overestimate_rate": college["extra_trees"]["overestimate_rate"],
             },
         },
-        "not_yet_available": {
-            "ims": {
-                "status": "NOT_YET_AVAILABLE",
-                "reason": "Real NASA/UC-Cincinnati IMS data not obtained this run: "
-                "archives are RAR-compressed and no RAR extraction tool is installed; "
-                "installing one requires sudo, unavailable non-interactively.",
-            },
-            "xjtu_sy": {
-                "status": "NOT_YET_AVAILABLE",
-                "reason": "Real XJTU-SY data not obtained this run: all distribution "
-                "mirrors (Google Drive/Dropbox/MediaFire/MEGA/Baidu) require interactive "
-                "browser/account auth with no direct-file HTTP endpoint.",
-            },
-        },
         "comparability_warning": (
             "FEMTO and college MAE values must never be averaged or displayed as "
             "directly comparable: different label definitions, different evaluation "
@@ -1515,6 +1547,37 @@ def cross_dataset_comparison() -> dict[str, Any]:
             "(MAE=0.0 by construction), not a real baseline."
         ),
     }
+
+    cde = _load_cross_dataset_experiments()
+    if cde is None:
+        response["cross_dataset_experiments"] = None
+        response["not_yet_available"] = {
+            k: {"status": "NOT_YET_AVAILABLE", "reason": reason}
+            for k, reason in _UNAVAILABLE_REASONS.items()
+        }
+        return response
+
+    missing_ids = {_CANONICAL_TO_DATASET_ID[m] for m in cde["config"].get("datasets_missing", [])
+                  if m in _CANONICAL_TO_DATASET_ID}
+    response["not_yet_available"] = {
+        k: {"status": "NOT_YET_AVAILABLE", "reason": _UNAVAILABLE_REASONS[k]}
+        for k in sorted(missing_ids)
+    }
+    summary_cols = ("experiment", "category", "model", "test_domain", "n_bearings",
+                    "mae_seconds", "naive_mae_seconds", "fraction_mae", "fraction_skill",
+                    "overestimate_pct")
+    response["cross_dataset_experiments"] = {
+        "schema_version": cde.get("schema_version"),
+        "generated_from": "reports/metrics/cross_dataset.json (scripts/run_cross_dataset.py)",
+        "summary": [{c: row.get(c) for c in summary_cols} for row in cde.get("summary", [])],
+        # Per model, per dataset: held-out skill vs. a label-free constant guess
+        # (life-fraction units; 0 = no skill, negative = worse than guessing).
+        # "unseen" is the mean zero-shot/leave-one-domain-out number - the
+        # honest answer to "how does this do on a machine it never saw".
+        "routing_skill_by_dataset": cde.get("routing_skill_by_dataset"),
+        "applicability_vs_error": cde.get("applicability_vs_error"),
+    }
+    return response
 
 
 _TRAJECTORY_CACHE: dict[str, Any] | None = None
