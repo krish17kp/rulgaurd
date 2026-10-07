@@ -66,14 +66,25 @@ def build_bundle(dataset_id: str, payload: Any, out_path: str | Path) -> Path:
     return out_path
 
 
-def load_bundle(path: str | Path) -> dict[str, Any]:
+def load_bundle(path: str | Path, with_manifest: bool = False) -> dict[str, Any]:
     """Read a `.rulguard.zip`, verify its checksums, and return `dataset.json`.
 
-    Raises `BundleValidationError` if any required member is missing or a
-    checksum does not match - never returns unverified data.
+    Raises `BundleValidationError` if any required member is missing, the
+    archive is not a valid ZIP, a checksum does not match, or the schema
+    version is unsupported - never returns unverified data.
+
+    `with_manifest=True` additionally returns the verified manifest dict
+    (`(payload, manifest)`) - callers that need `dataset_id` without
+    re-deriving it from the payload's own shape (e.g. a web upload endpoint
+    serving both FEMTO and college bundles) pass this instead of reaching
+    into the ZIP themselves.
     """
     path = Path(path)
-    with zipfile.ZipFile(path) as zf:
+    try:
+        zf = zipfile.ZipFile(path)
+    except zipfile.BadZipFile as exc:
+        raise BundleValidationError(f"{path}: not a valid ZIP archive ({exc})") from exc
+    with zf:
         names = set(zf.namelist())
         required = {"manifest.json", "dataset.json", "checksums.json"}
         if not required.issubset(names):
@@ -97,7 +108,8 @@ def load_bundle(path: str | Path) -> dict[str, Any]:
         if manifest.get("dataset_sha256") != checksums["dataset.json"]:
             raise BundleValidationError(f"{path}: manifest/checksums dataset_sha256 disagree")
 
-        return json.loads(dataset_bytes)
+        payload = json.loads(dataset_bytes)
+        return (payload, manifest) if with_manifest else payload
 
 
 def demo() -> None:

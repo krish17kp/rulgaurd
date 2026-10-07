@@ -2634,6 +2634,56 @@ async def knowledge_load(file: UploadFile) -> KnowledgeLoadResponse:
     return KnowledgeLoadResponse(status="ok", chunk_count=len(index.chunks))
 
 
+class AnalysisBundleResponse(BaseModel):
+    status: str
+    dataset_id: str | None = None
+    # "femto" | "college" | "unknown" - tells the frontend which renderer to
+    # use; derived from the manifest's dataset_id with a shape-based
+    # fallback, never guessed from file name.
+    kind: str | None = None
+    payload: dict[str, Any] | None = None
+
+
+def _analysis_bundle_kind(dataset_id: str | None, payload: dict[str, Any]) -> str:
+    if dataset_id and dataset_id.startswith("femto"):
+        return "femto"
+    if dataset_id and dataset_id.startswith("college"):
+        return "college"
+    if "bearing_run_id" in payload and "acquisition_count" in payload:
+        return "femto"
+    if any(isinstance(v, dict) and str(v.get("dataset_id", "")).startswith("college")
+           for v in payload.values()):
+        return "college"
+    return "unknown"
+
+
+@app.post("/analyze/bundle", response_model=AnalysisBundleResponse)
+async def analyze_bundle(file: UploadFile) -> AnalysisBundleResponse:
+    """Load a portable `.rulguard.zip` Analysis Bundle (Phase J) for display.
+
+    This only reads and returns a checksum/schema-verified derived result
+    that scripts/build_analysis_bundle.py already computed offline (a FEMTO
+    bearing trajectory or the college whole-run trajectory) - raw data never
+    enters, and nothing is fit, retrained, or recomputed here. A corrupt
+    checksum, missing manifest/member, unsupported schema_version, or
+    malformed ZIP all surface as analysis_bundle.BundleValidationError and
+    are returned as a 400 with that reason, never a raw traceback.
+    """
+    from bearing_pdm.analysis_bundle import BundleValidationError, load_bundle
+
+    with _temporary_upload() as tmp:
+        await _spool_upload(file, tmp, expect_text=False)
+        try:
+            payload, manifest = load_bundle(tmp.name, with_manifest=True)
+        except BundleValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid analysis bundle: {exc}") from exc
+    dataset_id = manifest.get("dataset_id")
+    return AnalysisBundleResponse(
+        status="ok", dataset_id=dataset_id, kind=_analysis_bundle_kind(dataset_id, payload),
+        payload=payload,
+    )
+
+
 @app.get("/predictions/history")
 def prediction_history() -> dict[str, Any]:
     """Bounded prediction summaries, newest first, from the configured store

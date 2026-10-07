@@ -1,6 +1,53 @@
 {
   "components": {
     "schemas": {
+      "AnalysisBundleResponse": {
+        "properties": {
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Id"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "AnalysisBundleResponse",
+        "type": "object"
+      },
       "AnalyzeFeaturesResponse": {
         "properties": {
           "channel": {
@@ -601,6 +648,20 @@
           "blob_url"
         ],
         "title": "BlobUploadRequest",
+        "type": "object"
+      },
+      "Body_analyze_bundle_analyze_bundle_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_analyze_bundle_analyze_bundle_post",
         "type": "object"
       },
       "Body_analyze_features_analyze_features_post": {
@@ -1574,6 +1635,45 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/analyze/bundle": {
+      "post": {
+        "description": "Load a portable `.rulguard.zip` Analysis Bundle (Phase J) for display.\n\nThis only reads and returns a checksum/schema-verified derived result\nthat scripts/build_analysis_bundle.py already computed offline (a FEMTO\nbearing trajectory or the college whole-run trajectory) - raw data never\nenters, and nothing is fit, retrained, or recomputed here. A corrupt\nchecksum, missing manifest/member, unsupported schema_version, or\nmalformed ZIP all surface as analysis_bundle.BundleValidationError and\nare returned as a 400 with that reason, never a raw traceback.",
+        "operationId": "analyze_bundle_analyze_bundle_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_bundle_analyze_bundle_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisBundleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Bundle"
+      }
+    },
     "/analyze/features": {
       "post": {
         "description": "Upload -> dataset detection -> validation -> preprocessing -> feature\nextraction, with a `stages` array on success and on every staged failure\n(docs/feature-analysis.md). The raw upload lives only in a temporary file\nremoved when the request ends.",
