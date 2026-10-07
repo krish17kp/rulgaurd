@@ -467,3 +467,35 @@ export interface HealthIndicatorComparisonResponse {
 export function getHealthIndicatorComparison(): Promise<HealthIndicatorComparisonResponse> {
   return request<HealthIndicatorComparisonResponse>("/models/health-indicator-comparison");
 }
+
+/** FEMTO vs college comparison, verbatim from /evaluation/cross-dataset. */
+export interface DatasetMetricSummary {
+  dataset: string;
+  sampling_rate_hz: number;
+  bearings: number;
+  channels: string[];
+  evaluation_method: string;
+  model: string;
+  extra_trees_mae_seconds: number;
+  naive_mae_seconds: number;
+  naive_caveat?: string;
+  n: number;
+  overestimate_rate?: number;
+  health_indicator_selected?: string;
+}
+
+export interface NotYetAvailableDataset {
+  status: "NOT_YET_AVAILABLE";
+  reason: string;
+}
+
+export interface CrossDatasetResponse {
+  in_domain_trained_results: { femto: DatasetMetricSummary };
+  not_zero_shot_single_dataset_results: { college: DatasetMetricSummary };
+  not_yet_available: { ims: NotYetAvailableDataset; xjtu_sy: NotYetAvailableDataset };
+  comparability_warning: string;
+}
+
+export function getCrossDatasetComparison(): Promise<CrossDatasetResponse> {
+  return request<CrossDatasetResponse>("/evaluation/cross-dataset");
+}
