@@ -562,11 +562,35 @@ export interface CrossDatasetExperiments {
   applicability_vs_error: Record<string, unknown> | null;
 }
 
+export interface FaultDiagnosisApplicability {
+  level: "HIGH" | "MEDIUM" | "LOW";
+  shift_ratio: number;
+  reasons: string[];
+  evaluated_against: string;
+}
+
+export interface FaultDiagnosisDataset {
+  dataset: string;
+  dataset_type: string;
+  source: string;
+  sampling_rate_hz: number;
+  channels: string[];
+  conditions: { file_id: string; label: string }[];
+  /** Always false here - a fault-diagnosis/condition-monitoring dataset has
+   * no degradation trajectory, so no RUL ground truth exists for it. */
+  rul_supported: false;
+  rul_unavailable_reason: string;
+  applicability: FaultDiagnosisApplicability | null;
+}
+
 export interface CrossDatasetResponse {
   in_domain_trained_results: { femto: DatasetMetricSummary };
   not_zero_shot_single_dataset_results: { college: DatasetMetricSummary };
   not_yet_available: Record<string, NotYetAvailableDataset>;
   cross_dataset_experiments: CrossDatasetExperiments | null;
+  /** Fault-diagnosis-only external datasets (CWRU) - never averaged into
+   * the RUL/MAE sections above, since they have no RUL ground truth. */
+  fault_diagnosis_datasets: Record<string, FaultDiagnosisDataset> | null;
   comparability_warning: string;
 }
 

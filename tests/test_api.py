@@ -228,6 +228,17 @@ def test_cross_dataset_comparison_matches_source_artifacts_and_separates_section
         assert body["cross_dataset_experiments"]["schema_version"] == cde["schema_version"]
     assert "never" in body["comparability_warning"].lower()
 
+    # CWRU (fault-diagnosis only, no RUL target) must live in its own field,
+    # never inside the RUL/MAE comparison sections above.
+    fault_diag = body.get("fault_diagnosis_datasets")
+    if fault_diag is not None:
+        cwru = fault_diag.get("cwru")
+        assert cwru is not None
+        assert cwru["rul_supported"] is False
+        assert "mae_seconds" not in cwru
+        assert "cwru" not in body["in_domain_trained_results"]
+        assert "cwru" not in body["not_zero_shot_single_dataset_results"]
+
 
 def test_cross_dataset_experiments_reflects_datasets_missing_not_a_hardcoded_claim(monkeypatch, tmp_path):
     """Deterministic coverage of the new cross_dataset_experiments field and the

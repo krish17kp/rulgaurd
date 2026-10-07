@@ -67,6 +67,7 @@ const DATA: CrossDatasetResponse = {
     },
     applicability_vs_error: null,
   },
+  fault_diagnosis_datasets: null,
   comparability_warning: "FEMTO and college MAE values must never be averaged.",
 };
 
@@ -93,6 +94,38 @@ describe("CrossDatasetPage", () => {
     expect(screen.getByText("-0.555")).toBeInTheDocument();
     expect(screen.getAllByText(/worse than guessing/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Zero-shot transfer/)).toBeInTheDocument();
+  });
+
+  it("shows a fault-diagnosis dataset with no RUL metric, never inside the RUL sections", async () => {
+    const withCwru: CrossDatasetResponse = {
+      ...DATA,
+      fault_diagnosis_datasets: {
+        cwru: {
+          dataset: "CWRU (Case Western Reserve University Bearing Data Center)",
+          dataset_type: "FAULT_DIAGNOSIS",
+          source: "https://engineering.case.edu/bearingdatacenter/download-data-file",
+          sampling_rate_hz: 12000,
+          channels: ["vibration_x (drive-end accelerometer)"],
+          conditions: [{ file_id: "97", label: "normal baseline" }],
+          rul_supported: false,
+          rul_unavailable_reason: "CWRU records single fixed-condition snapshots, not a trajectory.",
+          applicability: {
+            level: "LOW",
+            shift_ratio: 1.92,
+            reasons: ["feature distribution shift 1.92x the in-domain reference"],
+            evaluated_against: "artifacts/models/cross_domain_bundle.joblib (frozen FEMTO model)",
+          },
+        },
+      },
+    };
+    vi.mocked(getCrossDatasetComparison).mockResolvedValue(withCwru);
+    render(<CrossDatasetPage />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/Fault-diagnosis \/ condition-monitoring datasets/)).toBeInTheDocument()
+    );
+    expect(screen.getByText(/evaluation unavailable for this dataset/)).toBeInTheDocument();
+    expect(screen.queryByText(/mae_seconds/)).not.toBeInTheDocument();
   });
 
   it("shows an error message when the request fails", async () => {

@@ -1577,7 +1577,20 @@ def cross_dataset_comparison() -> dict[str, Any]:
         "routing_skill_by_dataset": cde.get("routing_skill_by_dataset"),
         "applicability_vs_error": cde.get("applicability_vs_error"),
     }
+    response["fault_diagnosis_datasets"] = _load_fault_diagnosis_datasets()
     return response
+
+
+def _load_fault_diagnosis_datasets() -> dict[str, Any] | None:
+    """Fault-diagnosis/condition-monitoring-only external datasets (CWRU
+    today) - kept in a field separate from in_domain_trained_results /
+    cross_dataset_experiments because they have no RUL ground truth and
+    must never be averaged into an MAE comparison (built once by
+    scripts/build_fault_diagnosis_profile.py, read here unchanged)."""
+    path = DEPLOY_DATA_DIR / "fault_diagnosis_datasets.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
 
 
 _TRAJECTORY_CACHE: dict[str, Any] | None = None

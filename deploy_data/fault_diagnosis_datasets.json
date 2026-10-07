@@ -1,0 +1,43 @@
+{
+  "cwru": {
+    "applicability": {
+      "evaluated_against": "artifacts/models/cross_domain_bundle.joblib (frozen FEMTO model)",
+      "level": "LOW",
+      "reasons": [
+        "feature distribution shift 1.92x the in-domain reference (median kNN distance 2.62 vs 1.36)",
+        "22 model feature(s) unavailable, e.g. vibration_y_mean (sensor channel not present in this dataset)",
+        "vibration_x_total_spectral_energy: median robust z = +12.1 vs training",
+        "vibration_x_spectral_entropy: median robust z = +8.2 vs training",
+        "vibration_x_spectral_centroid_hz: median robust z = -3.2 vs training"
+      ],
+      "shift_ratio": 1.9241088112325835
+    },
+    "channels": [
+      "vibration_x (drive-end accelerometer)"
+    ],
+    "conditions": [
+      {
+        "file_id": "97",
+        "label": "normal baseline"
+      },
+      {
+        "file_id": "105",
+        "label": "inner race fault 0.007in"
+      },
+      {
+        "file_id": "118",
+        "label": "ball fault 0.007in"
+      },
+      {
+        "file_id": "130",
+        "label": "outer race fault 0.007in @6:00"
+      }
+    ],
+    "dataset": "CWRU (Case Western Reserve University Bearing Data Center)",
+    "dataset_type": "FAULT_DIAGNOSIS",
+    "rul_supported": false,
+    "rul_unavailable_reason": "CWRU records single fixed-condition snapshots, not a degradation trajectory - there is no elapsed-time axis and no true RUL target.",
+    "sampling_rate_hz": 12000.0,
+    "source": "https://engineering.case.edu/bearingdatacenter/download-data-file"
+  }
+}

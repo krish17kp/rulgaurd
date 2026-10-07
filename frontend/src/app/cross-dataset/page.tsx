@@ -6,6 +6,7 @@ import {
   CrossDatasetExperiments,
   CrossDatasetResponse,
   DatasetMetricSummary,
+  FaultDiagnosisDataset,
   getCrossDatasetComparison,
 } from "@/lib/api";
 
@@ -66,6 +67,10 @@ export default function CrossDatasetPage() {
 
           {state.data.cross_dataset_experiments && (
             <CrossDatasetExperimentsSection data={state.data.cross_dataset_experiments} />
+          )}
+
+          {state.data.fault_diagnosis_datasets && (
+            <FaultDiagnosisSection datasets={state.data.fault_diagnosis_datasets} />
           )}
 
           {Object.keys(state.data.not_yet_available).length > 0 && (
@@ -168,6 +173,49 @@ function CrossDatasetExperimentsSection({ data }: { data: CrossDatasetExperiment
                 </p>
               </div>
             ))}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Fault-diagnosis/condition-monitoring-only datasets (CWRU) - no RUL
+ * ground truth exists for these, so no MAE/RUL field is ever rendered
+ * here, only the real applicability check against the frozen FEMTO
+ * model. */
+function FaultDiagnosisSection({ datasets }: { datasets: Record<string, FaultDiagnosisDataset> }) {
+  return (
+    <section>
+      <h2 className="text-lg font-semibold">Fault-diagnosis / condition-monitoring datasets</h2>
+      <p className="mt-1 text-xs text-foreground-muted">
+        These datasets record fixed fault conditions, not a degradation trajectory - there is no
+        RUL ground truth, so none is estimated or displayed for them.
+      </p>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        {Object.entries(datasets).map(([id, d]) => (
+          <div key={id} className="rounded-lg border border-surface-border p-4">
+            <h3 className="font-medium">{d.dataset}</h3>
+            <dl className="mt-2 grid grid-cols-2 gap-3 text-sm">
+              <Stat label="Sampling rate" value={`${d.sampling_rate_hz.toLocaleString()} Hz`} />
+              <Stat label="Channels" value={d.channels.join(", ")} />
+              <Stat label="Conditions" value={d.conditions.map((c) => c.label).join(", ")} />
+              <Stat label="RUL" value="evaluation unavailable for this dataset" />
+            </dl>
+            <p className="mt-2 text-xs text-foreground-muted">{d.rul_unavailable_reason}</p>
+            {d.applicability && (
+              <p className="mt-2 text-xs">
+                FEMTO-model applicability:{" "}
+                <span
+                  className={`font-semibold ${
+                    d.applicability.level === "LOW" ? "text-red-600 dark:text-red-400" : ""
+                  }`}
+                >
+                  {d.applicability.level}
+                </span>{" "}
+                ({d.applicability.shift_ratio.toFixed(2)}x in-domain feature shift)
+              </p>
+            )}
           </div>
         ))}
       </div>
