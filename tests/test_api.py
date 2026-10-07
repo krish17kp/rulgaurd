@@ -185,6 +185,37 @@ def test_models_health_indicator_comparison_prefers_the_inline_env_var(monkeypat
     assert response.json() == {"selected": "test"}
 
 
+RUL_EVAL_PRESENT = (api.METRICS_DIR / "rul_evaluation.json").exists()
+
+
+@pytest.mark.skipif(not RUL_EVAL_PRESENT, reason="reports/metrics/rul_evaluation.json not present")
+@pytest.mark.skipif(not HI_COMPARISON_PRESENT, reason="reports/metrics/health_indicator_comparison.json not present")
+def test_cross_dataset_comparison_matches_source_artifacts_and_separates_sections():
+    response = client.get("/evaluation/cross-dataset")
+    assert response.status_code == 200
+    body = response.json()
+
+    rul = json.loads((api.METRICS_DIR / "rul_evaluation.json").read_text())
+    hi = json.loads((api.METRICS_DIR / "health_indicator_comparison.json").read_text())
+
+    femto = body["in_domain_trained_results"]["femto"]
+    assert femto["extra_trees_mae_seconds"] == rul["femto_lobo_overall_by_model"]["extra_trees"]["mae_seconds"]
+    assert femto["n"] == rul["femto_lobo_overall_by_model"]["extra_trees"]["n"]
+    assert femto["health_indicator_selected"] == hi["selected"]
+
+    college = body["not_zero_shot_single_dataset_results"]["college"]
+    assert college["extra_trees_mae_seconds"] == rul["college_overall_by_model"]["extra_trees"]["mae_seconds"]
+    assert college["naive_caveat"] == rul["college_naive_caveat"]
+
+    # FEMTO and college must never land in the same section (no averaging).
+    assert "femto" not in body["not_zero_shot_single_dataset_results"]
+    assert "college" not in body["in_domain_trained_results"]
+
+    assert body["not_yet_available"]["ims"]["status"] == "NOT_YET_AVAILABLE"
+    assert body["not_yet_available"]["xjtu_sy"]["status"] == "NOT_YET_AVAILABLE"
+    assert "never" in body["comparability_warning"].lower()
+
+
 def test_predict_rul_rejects_non_femto_dataset():
     response = client.post(
         "/predict/rul", json={"dataset_id": "college", "features": {}}

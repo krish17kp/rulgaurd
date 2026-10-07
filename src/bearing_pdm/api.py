@@ -1444,6 +1444,79 @@ def models_health_indicator_comparison() -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
+@app.get("/evaluation/cross-dataset")
+def cross_dataset_comparison() -> dict[str, Any]:
+    """FEMTO vs college comparison, pulled verbatim from the same artifacts
+    models_evaluation()/models_health_indicator_comparison() already serve.
+
+    Structurally separated into two sections rather than merged rows: FEMTO's
+    leave-one-bearing-out ExtraTrees result is an IN_DOMAIN_TRAINED evaluation;
+    college's walk-forward result is NOT a zero-shot application of the FEMTO
+    model (ml-data.md / D11 forbids that) and uses its own chronological split
+    with a different label definition (D10's naive=0.0 oracle-identity caveat,
+    carried through verbatim). The two MAE numbers are never combined into one
+    score. IMS/XJTU-SY are listed explicitly as NOT_YET_AVAILABLE rather than
+    omitted, pending real external dataset acquisition (nightshift Phase O/P/Q,
+    blocked this run on missing RAR tooling / interactive mirror auth)."""
+    rul = models_evaluation()
+    hi = models_health_indicator_comparison()
+    femto = rul["femto_lobo_overall_by_model"]
+    college = rul["college_overall_by_model"]
+    return {
+        "in_domain_trained_results": {
+            "femto": {
+                "dataset": "FEMTO/PRONOSTIA",
+                "sampling_rate_hz": 25_600,
+                "bearings": 6,
+                "channels": ["vibration_x", "vibration_y"],
+                "evaluation_method": "leave-one-bearing-out",
+                "model": "ExtraTreesRegressor",
+                "extra_trees_mae_seconds": femto["extra_trees"]["mae_seconds"],
+                "naive_mae_seconds": femto["naive"]["mae_seconds"],
+                "n": femto["extra_trees"]["n"],
+                "overestimate_rate": femto["extra_trees"]["overestimate_rate"],
+                "health_indicator_selected": hi.get("selected"),
+            },
+        },
+        "not_zero_shot_single_dataset_results": {
+            "college": {
+                "dataset": "College run-to-failure (single physical bearing)",
+                "sampling_rate_hz": 25_600,
+                "bearings": 1,
+                "channels": ["vibration_x", "vibration_y", "bearing_temp", "ambient_temp"],
+                "evaluation_method": "chronological walk-forward (college's own split, "
+                "NOT a FEMTO zero-shot application per D11)",
+                "model": "ExtraTreesRegressor",
+                "extra_trees_mae_seconds": college["extra_trees"]["mae_seconds"],
+                "naive_mae_seconds": college["naive"]["mae_seconds"],
+                "naive_caveat": rul["college_naive_caveat"],
+                "n": college["extra_trees"]["n"],
+                "overestimate_rate": college["extra_trees"]["overestimate_rate"],
+            },
+        },
+        "not_yet_available": {
+            "ims": {
+                "status": "NOT_YET_AVAILABLE",
+                "reason": "Real NASA/UC-Cincinnati IMS data not obtained this run: "
+                "archives are RAR-compressed and no RAR extraction tool is installed; "
+                "installing one requires sudo, unavailable non-interactively.",
+            },
+            "xjtu_sy": {
+                "status": "NOT_YET_AVAILABLE",
+                "reason": "Real XJTU-SY data not obtained this run: all distribution "
+                "mirrors (Google Drive/Dropbox/MediaFire/MEGA/Baidu) require interactive "
+                "browser/account auth with no direct-file HTTP endpoint.",
+            },
+        },
+        "comparability_warning": (
+            "FEMTO and college MAE values must never be averaged or displayed as "
+            "directly comparable: different label definitions, different evaluation "
+            "protocols, and college's naive baseline is an algebraic oracle identity "
+            "(MAE=0.0 by construction), not a real baseline."
+        ),
+    }
+
+
 _TRAJECTORY_CACHE: dict[str, Any] | None = None
 _TRAJECTORY_CACHE_LOCK = threading.Lock()
 

@@ -1983,6 +1983,27 @@
         "summary": "Inspect Dataset Blob"
       }
     },
+    "/evaluation/cross-dataset": {
+      "get": {
+        "description": "FEMTO vs college comparison, pulled verbatim from the same artifacts\nmodels_evaluation()/models_health_indicator_comparison() already serve.\n\nStructurally separated into two sections rather than merged rows: FEMTO's\nleave-one-bearing-out ExtraTrees result is an IN_DOMAIN_TRAINED evaluation;\ncollege's walk-forward result is NOT a zero-shot application of the FEMTO\nmodel (ml-data.md / D11 forbids that) and uses its own chronological split\nwith a different label definition (D10's naive=0.0 oracle-identity caveat,\ncarried through verbatim). The two MAE numbers are never combined into one\nscore. IMS/XJTU-SY are listed explicitly as NOT_YET_AVAILABLE rather than\nomitted, pending real external dataset acquisition (nightshift Phase O/P/Q,\nblocked this run on missing RAR tooling / interactive mirror auth).",
+        "operationId": "cross_dataset_comparison_evaluation_cross_dataset_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cross Dataset Comparison Evaluation Cross Dataset Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cross Dataset Comparison"
+      }
+    },
     "/explain": {
       "post": {
         "description": "Explanation-only layer (goals.md #1, #13-14): consumes an immutable\nprediction context, never recomputes RUL/HI/stage/applicability. When\n`prediction_id` is supplied, the server's own bounded history summary\n(docs/prediction-history.md) is cross-checked against the client-supplied\ncontext so a client cannot assert a fabricated rul_hours/applicability_level\nfor a request the server actually served - a mismatch is rejected rather\nthan explained. History only stores a bounded summary (rul_hours,\napplicability_level), so only those two fields are cross-checked; the\nricher fields (reliability, HI, stage) are taken from the client body as\nthis endpoint does not currently have a fuller server-side record to\ncheck them against.",
