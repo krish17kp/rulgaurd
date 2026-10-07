@@ -295,7 +295,7 @@ def _render_raw_explorer() -> None:
 
     elif mode == "Raw FEMTO bearing ZIP":
         from bearing_pdm.archive import LOCAL_FULL_MODE
-        from bearing_pdm.bearing_archive import analyze_femto_bearing_zip
+        from bearing_pdm.bearing_archive import _analysis_to_dict, analyze_femto_bearing_zip
 
         uploaded = st.file_uploader("Bearing ZIP (e.g. Bearing2_1.zip)", type=["zip"])
         if uploaded is not None and st.button("Run Analysis"):
@@ -310,12 +310,9 @@ def _render_raw_explorer() -> None:
                     return
             st.success(f"Bearing {analysis.bearing_run_id}: {analysis.acquisition_count} acquisitions, "
                        f"{analysis.sample_rate_hz:.0f} Hz")
-            st.json({
-                "latest_stage": analysis.stage[-1] if analysis.stage else None,
-                "latest_actual_rul_seconds": analysis.actual_rul_seconds[-1] if analysis.actual_rul_seconds else None,
-                "held_out_mae_seconds": analysis.held_out_mae_seconds,
-                "held_out_unavailable_reason": analysis.held_out_unavailable_reason,
-            })
+            # Same BearingAnalysis shape the Analysis Bundle renders - reuse its
+            # chart suite rather than a JSON dump (dashboard.md: honest display).
+            _render_femto_bundle(_analysis_to_dict(analysis))
 
     else:  # RULGuard Analysis Bundle
         from bearing_pdm.analysis_bundle import BundleValidationError, bundle_kind, load_bundle
