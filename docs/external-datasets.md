@@ -287,6 +287,52 @@ feature-distribution shift (median kNN distance 2.62 vs in-domain 1.36, shift_ra
 the FEMTO model was never fit on, and the applicability layer correctly flags it rather
 than scoring it as if in-domain.
 
+### Paderborn University KAt-DataCenter (downloaded 2026-10-07)
+
+Official source: `https://mb.uni-paderborn.de/kat/forschung/kat-datacenter/bearing-datacenter`
+-> "Data Sets and Download" page -> real file server at
+`https://groups.uni-paderborn.de/kat/BearingDataCenter/` (confirmed via WebFetch directory
+listing and HTTP HEAD; the top-level `mb.uni-paderborn.de/kat/forschung/kat-datacenter/...`
+path itself 404s - the working path is `.../kat/forschung/bearing-datacenter/`). License:
+CC BY-NC 4.0 (noncommercial academic use, citation required - Lessmeier et al., KAt-DataCenter,
+Chair of Design and Drive Technology, Paderborn University).
+
+**Classification: FAULT_DIAGNOSIS / CONDITION_MONITORING, NOT run-to-failure.** Each file is a
+short (4s) fixed speed/torque/radial-force recording, named
+`N<speed>_M<torque>_F<force>_<bearing_code>_<run>.mat` - there is no elapsed-time axis across a
+degradation trajectory. This holds even for the "real damage" bearing codes produced by
+accelerated lifetime testing: each individual recording is still a condition snapshot, not a
+position on a run-to-failure curve. No RUL metric is ever reported for this dataset.
+
+Format: MATLAB v5, one top-level struct named identically to the file, fields
+`Info`/`X`/`Y`/`Description`. `Y` is an array of per-channel structs (`Name`, `Data`, `Unit`,
+...); this project reads the `vibration_1` channel - confirmed from the real extracted file
+`N15_M07_F10_KA01_1.mat`: 256,000 samples, so 64,000 Hz over the 4s recording (matches the
+published literature, Lessmeier et al. 2016).
+
+2 `.rar` archives downloaded (not the full 32-bearing-code catalog) - one healthy (K001) and
+one artificial-outer-race-fault (KA01) bearing code, each containing 80 `.mat` files across
+every operating-condition/run combination plus a `measuring_log_*.pdf`:
+
+| file | bytes | sha256 |
+|---|---|---|
+| K001.rar | 173,881,721 | 0f119ebdb28fb2f4d9fac1beb1319429f63f7ae1256c23c872f280f3560918e5 |
+| KA01.rar | 166,571,438 | 6a6be1e11132730cc6f560d51eacedcbfd5fd74b829e9d8d3728c6c8a7cd4c0e |
+
+Raw archives/extracted files kept outside both repo clones at
+`/mnt/NewVolume/capstone/data/Paderborn_KAt/` (same convention as CWRU/IMS/XJTU). Small
+excerpts (first 25,600 samples = 0.4s of the `vibration_1` channel, re-saved as a minimal
+2-channel struct so scipy's struct-array reader doesn't squeeze away the channel axis) are
+committed as test fixtures at `data/fixtures/paderborn/*.mat`, one healthy + one fault, both
+from the same N15_M07_F10 operating condition for a fair comparison.
+
+Real applicability check against the frozen FEMTO `cross_domain_bundle.joblib`
+(`tests/test_paderborn.py::test_paderborn_applicability_against_frozen_femto_model`, run
+2026-10-07): **level = LOW**, shift_ratio = 5.84x (median kNN distance 7.95 vs in-domain 1.36) -
+a substantially larger shift than CWRU's 1.92x, consistent with Paderborn's 64kHz sampling rate
+being 2.5x FEMTO's 25.6kHz. Every `vibration_y_*` column correctly reported missing
+(single-accelerometer-channel dataset). This is the correct outcome, not a failure.
+
 ### IMS (downloaded 2026-09-25)
 
 Official NASA route `https://phm-datasets.s3.amazonaws.com/NASA/4.+Bearings.zip`, downloaded with
