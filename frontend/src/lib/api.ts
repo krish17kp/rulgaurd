@@ -410,6 +410,49 @@ export function getTrajectory(bearingRunId: string): Promise<TrajectoryResponse>
   return request<TrajectoryResponse>(`/trajectory/femto/${encodeURIComponent(bearingRunId)}`);
 }
 
+/** A FEMTO bearing ZIP's analysis, repackaged as a `.rulguard.zip` Analysis
+ * Bundle dataset.json payload (bearing_archive.BearingAnalysis, asdict'd -
+ * see scripts/build_analysis_bundle.py). Same shape as the direct-upload
+ * BearingZipAnalysisResponse minus its status/message envelope fields, so
+ * BearingZipResult (analyze-bearing-zip/page.tsx) renders either one. */
+export type FemtoBundlePayload = Omit<BearingZipAnalysisResponse, "status" | "message">;
+
+/** The college whole-run trajectory bundle's single entry (keyed by
+ * "college:nsk6205" in the payload - see build_college_trajectory.py). */
+export interface CollegeBundleEntry {
+  dataset_id: string;
+  n_source_files_in_cache: number;
+  n_raw_college_files_on_disk: number | null;
+  coverage_note: string;
+  n_acquisitions: number;
+  sample_rate_hz: number;
+  sequence_index: number[];
+  event_timestamp: string[];
+  temp_available_fraction: number;
+  feature_trends: Record<string, Array<number | null>>;
+  actual_rul_seconds: Array<number | null>;
+  held_out_predicted_rul_seconds: { sequence_index: number[]; predicted_rul_seconds: number[] };
+  walk_forward_overall: Record<string, Record<string, number>>;
+  naive_caveat: string;
+  domain_shift_note: string;
+}
+
+export interface AnalysisBundleResponse {
+  status: string;
+  dataset_id: string | null;
+  kind: "femto" | "college" | "unknown" | null;
+  payload: FemtoBundlePayload | Record<string, CollegeBundleEntry> | Record<string, unknown> | null;
+}
+
+/** Upload a `.rulguard.zip` Analysis Bundle for display. Checksum/schema
+ * verified server-side (bearing_pdm.analysis_bundle.load_bundle); never
+ * retrains or recomputes anything - purely a read of a derived artifact. */
+export function analyzeBundle(file: File): Promise<AnalysisBundleResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  return requestForm<AnalysisBundleResponse>("/analyze/bundle", form);
+}
+
 /** FEMTO Full_Test_Set (hidden/frozen) PHM2012 challenge results, verbatim
  * from deploy_data/hidden_set_evaluation.json (src/bearing_pdm/api.py's
  * /models/hidden-set-evaluation) - scored once post-freeze (M4b), never

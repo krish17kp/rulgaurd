@@ -81,7 +81,9 @@ export default function AnalyzeBearingZipPage() {
   );
 }
 
-function BearingZipResult({ data }: { data: BearingZipAnalysisResponse }) {
+/** Exported for reuse by /analyze-bundle (an Analysis Bundle's FEMTO payload
+ * is the same shape minus the status/message upload envelope). */
+export function BearingZipResult({ data }: { data: BearingZipAnalysisResponse }) {
   const hiSeries: ChartSeries[] = [];
   if (data.sequence_index && data.reference_hi) {
     hiSeries.push({
