@@ -36,7 +36,10 @@ def main(argv: list[str] | None = None) -> int:
         except BearingArchiveError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        dataset_id = args.dataset_id or f"femto:{analysis.bearing_run_id}"
+        # analysis.bearing_run_id is already "femto:<label>" (bearing_archive.py) -
+        # prefixing again here produced "femto:femto:Bearing2_1" (found by manual
+        # end-to-end testing of the /analyze/bundle endpoint, nightshift Phase 5).
+        dataset_id = args.dataset_id or analysis.bearing_run_id
         payload = asdict(analysis)
     else:
         payload = json.loads(args.college_trajectory.read_text())
