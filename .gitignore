@@ -60,3 +60,6 @@ AGENT_HANDOFF.md
 
 .vercel
 .env*
+
+# nightshift Phase V compute cache (content-addressed, regenerable)
+.cache/

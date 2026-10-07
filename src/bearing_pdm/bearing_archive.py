@@ -35,12 +35,17 @@ from bearing_pdm.archive import (
     build_manifest_from_zip,
     safe_extract_zip,
 )
+from bearing_pdm.compute_cache import cached_json_call
 from bearing_pdm.femto import FemtoBearing, list_acquisition_indices, read_acceleration
 from bearing_pdm.pipeline import build_femto_feature_rows, sha256_file
 from bearing_pdm.stages import assign_stages
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_DATA_DIR = REPO_ROOT / "deploy_data"
+
+# Bump whenever analyze_femto_bearing_zip's formulas/outputs change - changing this
+# invalidates every cached entry even if the uploaded ZIP's bytes are unchanged.
+BEARING_ANALYSIS_SCHEMA_VERSION = "bearing-analysis-v1"
 
 FEMTO_SAMPLE_RATE_HZ = 25_600.0
 _BEARING_DIR_RE = re.compile(r"^Bearing(\d+)_(\d+)$", re.IGNORECASE)
@@ -70,6 +75,48 @@ class BearingAnalysis:
     held_out_mae_seconds: float | None
     held_out_unavailable_reason: str | None = None
     warnings: tuple[str, ...] = field(default_factory=tuple)
+
+
+def _manifest_to_dict(m: DatasetArchiveManifest) -> dict:
+    from dataclasses import asdict
+
+    return asdict(m)
+
+
+def _analysis_to_dict(a: BearingAnalysis) -> dict:
+    from dataclasses import asdict
+
+    return asdict(a)
+
+
+def _analysis_from_dict(d: dict) -> BearingAnalysis:
+    d = dict(d)
+    manifest_d = dict(d["manifest"])
+    manifest_d["bearing_run_ids"] = tuple(manifest_d.get("bearing_run_ids", ()))
+    manifest_d["warnings"] = tuple(manifest_d.get("warnings", ()))
+    d["manifest"] = DatasetArchiveManifest(**manifest_d)
+    d["warnings"] = tuple(d.get("warnings", ()))
+    return BearingAnalysis(**d)
+
+
+def analyze_femto_bearing_zip_cached(
+    zip_path: str | Path, limits: ZipLimits = LOCAL_FULL_MODE
+) -> BearingAnalysis:
+    """Same result as analyze_femto_bearing_zip, served from a content-addressed cache.
+
+    Keyed on the ZIP's own bytes + BEARING_ANALYSIS_SCHEMA_VERSION, so an identical
+    re-upload is free, a changed ZIP recomputes, and bumping the version constant
+    (after a formula change) recomputes even for a byte-identical ZIP.
+    """
+    zip_path = Path(zip_path)
+    raw = zip_path.read_bytes()
+    return cached_json_call(
+        raw,
+        BEARING_ANALYSIS_SCHEMA_VERSION,
+        compute=lambda: analyze_femto_bearing_zip(zip_path, limits),
+        to_json=_analysis_to_dict,
+        from_json=_analysis_from_dict,
+    )
 
 
 def _load_joblib(path: Path):
