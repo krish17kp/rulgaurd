@@ -220,6 +220,121 @@ def _fft_plot_data(x: np.ndarray, sample_rate_hz: float) -> tuple[np.ndarray, np
     return freqs, magnitude
 
 
+def _render_raw_explorer() -> None:
+    """Phase K: raw folder / raw bearing ZIP / RULGuard Analysis Bundle modes.
+
+    Read-only browsing is free; anything that runs the scientific pipeline
+    (ZIP analysis) sits behind an explicit button, never triggered by a
+    widget interaction or page load (dashboard.md: never fit/compute on
+    page load).
+    """
+    st.caption(
+        "Local full research mode: browse raw FEMTO role directories/archives, "
+        "run the real pipeline on an uploaded bearing ZIP, or load a portable "
+        "RULGuard Analysis Bundle - all via the same cached artifacts and "
+        "formulas as the rest of this dashboard, never recomputed/refit silently."
+    )
+    mode = st.selectbox(
+        "Input mode",
+        ["Raw folder (FEMTO role / college)", "Raw FEMTO bearing ZIP", "RULGuard Analysis Bundle (.rulguard.zip)"],
+    )
+
+    if mode == "Raw folder (FEMTO role / college)":
+        from bearing_pdm.femto import (
+            discover_femto_bearings,
+            list_acquisition_indices,
+            list_temperature_indices,
+        )
+
+        # Mirrors scripts/inspect_femto_dataset.py's role inference (not a
+        # scientific formula, just a directory-name convention - kept local
+        # to avoid importing a top-level script as a package).
+        role_warning = {
+            "full_test": "FROZEN EVALUATION ONLY - never fit/calibrate/tune thresholds against this data.",
+            "test_censored": "Censored evaluation input - not for fitting.",
+            "learning": "Training/evaluation permitted.",
+        }
+
+        def _infer_role(root: Path) -> str:
+            name = root.name.lower()
+            if "full_test" in name or "validation" in name:
+                return "full_test"
+            if "test_set" in name:
+                return "test_censored"
+            return "learning"
+
+        root_str = st.text_input(
+            "Path to a FEMTO role directory (e.g. data/interim/femto/Learning_set) "
+            "or datasets/college",
+        )
+        if root_str:
+            root = Path(root_str)
+            if not root.is_dir():
+                st.error(f"Not a directory: {root}")
+                return
+            if root.name.lower() == "college":
+                files = sorted(root.glob("LogFile_*.csv"))
+                st.write(f"College run: {len(files)} LogFile_*.csv files (one continuous bearing trajectory).")
+                if files:
+                    st.caption(f"First: {files[0].name}  Last: {files[-1].name}")
+                return
+            role = _infer_role(root)
+            st.info(f"role: **{role}** - {role_warning[role]}")
+            bearings = discover_femto_bearings(root, role)
+            if not bearings:
+                st.warning("No bearings found under this path.")
+                return
+            st.dataframe(pd.DataFrame([
+                {
+                    "bearing": b.bearing_label,
+                    "acc_files": len(list_acquisition_indices(b.path)),
+                    "temp_files": len(list_temperature_indices(b.path)),
+                }
+                for b in bearings
+            ]))
+
+    elif mode == "Raw FEMTO bearing ZIP":
+        from bearing_pdm.archive import LOCAL_FULL_MODE
+        from bearing_pdm.bearing_archive import analyze_femto_bearing_zip
+
+        uploaded = st.file_uploader("Bearing ZIP (e.g. Bearing2_1.zip)", type=["zip"])
+        if uploaded is not None and st.button("Run Analysis"):
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".zip") as tmp:
+                tmp.write(uploaded.getvalue())
+                tmp.flush()
+                try:
+                    analysis = analyze_femto_bearing_zip(tmp.name, limits=LOCAL_FULL_MODE)
+                except Exception as exc:  # noqa: BLE001 - surfaced to the user, not a crash
+                    st.error(f"Analysis failed: {exc}")
+                    return
+            st.success(f"Bearing {analysis.bearing_run_id}: {analysis.acquisition_count} acquisitions, "
+                       f"{analysis.sample_rate_hz:.0f} Hz")
+            st.json({
+                "latest_stage": analysis.stage[-1] if analysis.stage else None,
+                "latest_actual_rul_seconds": analysis.actual_rul_seconds[-1] if analysis.actual_rul_seconds else None,
+                "held_out_mae_seconds": analysis.held_out_mae_seconds,
+                "held_out_unavailable_reason": analysis.held_out_unavailable_reason,
+            })
+
+    else:  # RULGuard Analysis Bundle
+        from bearing_pdm.analysis_bundle import BundleValidationError, load_bundle
+
+        uploaded = st.file_uploader("RULGuard Analysis Bundle (.rulguard.zip)", type=["zip"])
+        if uploaded is not None:
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".zip") as tmp:
+                tmp.write(uploaded.getvalue())
+                tmp.flush()
+                try:
+                    payload = load_bundle(tmp.name)
+                except BundleValidationError as exc:
+                    st.error(f"Bundle rejected: {exc}")
+                    return
+            st.success("Bundle loaded and checksum-verified.")
+            st.json(payload)
+
+
 def main() -> None:
     st.set_page_config(page_title="RULGuard - Capstone Review", layout="wide")
     st.title("RULGuard: Bearing Health Monitoring and Remaining Useful Life Prediction")
@@ -240,7 +355,8 @@ def main() -> None:
 
     VIEWS = ["Signal & FFT", "Health Indicator", "RUL Prediction",
              "Model Evaluation", "Architecture & Limitations",
-             "Universal Machine Analysis", "Cross-Dataset Validation"]
+             "Universal Machine Analysis", "Cross-Dataset Validation",
+             "Raw / ZIP / Bundle Explorer"]
     view = st.sidebar.radio("View", VIEWS)
 
     # The cross-dataset pages (dashboard_cross.py) carry their own dataset and
@@ -254,6 +370,10 @@ def main() -> None:
             dashboard_cross.render_universal()
         else:
             dashboard_cross.render_validation()
+        return
+
+    if view == "Raw / ZIP / Bundle Explorer":
+        _render_raw_explorer()
         return
 
     # Only the first three views are about one specific bearing and window.

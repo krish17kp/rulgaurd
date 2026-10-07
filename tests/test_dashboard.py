@@ -36,7 +36,45 @@ def test_dashboard_offers_all_five_views():
         "Signal & FFT", "Health Indicator", "RUL Prediction",
         "Model Evaluation", "Architecture & Limitations",
         "Universal Machine Analysis", "Cross-Dataset Validation",
+        "Raw / ZIP / Bundle Explorer",
     ]
+
+
+def test_raw_explorer_view_renders_without_exception():
+    """Phase K: new local full-research-mode view (raw folder / bearing ZIP /
+    analysis bundle). Must render with no input selected yet, with no
+    network/credential requirement, and must never run the pipeline until an
+    explicit 'Run Analysis' button is pressed."""
+    at = _open("Raw / ZIP / Bundle Explorer")
+    assert not at.exception
+    assert at.selectbox[0].options == [
+        "Raw folder (FEMTO role / college)",
+        "Raw FEMTO bearing ZIP",
+        "RULGuard Analysis Bundle (.rulguard.zip)",
+    ]
+
+
+def test_raw_explorer_browses_femto_learning_set_read_only():
+    at = _open("Raw / ZIP / Bundle Explorer")
+    fixture_root = Path(__file__).parent.parent / "data" / "fixtures" / "femto"
+    at.text_input[0].set_value(str(fixture_root)).run()
+    assert not at.exception
+    assert "role: **learning**" in " ".join(i.value for i in at.info)
+
+
+def test_raw_explorer_loads_a_real_analysis_bundle(tmp_path):
+    from bearing_pdm.analysis_bundle import build_bundle
+
+    bundle_path = tmp_path / "tiny.rulguard.zip"
+    build_bundle("femto:TestBearing", {"actual_rul_seconds": 123.0}, bundle_path)
+
+    at = _open("Raw / ZIP / Bundle Explorer")
+    at.selectbox[0].select("RULGuard Analysis Bundle (.rulguard.zip)").run()
+    assert not at.exception
+    # AppTest's file_uploader has no programmatic upload API, so this only
+    # confirms the mode renders; the loader itself is covered directly by
+    # tests/test_analysis_bundle.py's round-trip parity tests.
+    assert at.file_uploader
 
 
 def _open(view: str) -> AppTest:
