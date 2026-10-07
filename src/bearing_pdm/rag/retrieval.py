@@ -26,6 +26,7 @@ from typing import Protocol
 
 import numpy as np
 
+from bearing_pdm.analysis_bundle import build_bundle, load_bundle
 from bearing_pdm.rag.corpus import ingest_corpus
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -183,20 +184,17 @@ class VectorIndex:
         ]
         return cls(embedder, indexed)
 
-    def save(self, path: Path = DEFAULT_INDEX_PATH) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
+    def _to_payload(self) -> dict:
+        return {
             "built_at": datetime.now(UTC).isoformat(),
             "embedder": self.embedder.name,
             "vocabulary": getattr(self.embedder, "vocabulary", []),
             "idf": getattr(self.embedder, "idf", np.zeros(0)).tolist(),
             "chunks": [asdict(c) for c in self.chunks],
         }
-        path.write_text(json.dumps(payload, separators=(",", ":")))
 
     @classmethod
-    def load(cls, path: Path = DEFAULT_INDEX_PATH) -> "VectorIndex":
-        payload = json.loads(path.read_text())
+    def _from_payload(cls, payload: dict) -> "VectorIndex":
         embedder = TfidfEmbedder()
         embedder.vocabulary = payload["vocabulary"]
         embedder._index = {term: i for i, term in enumerate(embedder.vocabulary)}
@@ -208,6 +206,33 @@ class VectorIndex:
         index = cls(embedder, chunks)
         index.built_at = payload["built_at"]
         return index
+
+    def save(self, path: Path = DEFAULT_INDEX_PATH) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self._to_payload(), separators=(",", ":")))
+
+    @classmethod
+    def load(cls, path: Path = DEFAULT_INDEX_PATH) -> "VectorIndex":
+        return cls._from_payload(json.loads(path.read_text()))
+
+    def save_knowledge_bundle(self, out_path: str | Path, bundle_id: str = "knowledge") -> Path:
+        """Package this index into a portable `*.rulguard-knowledge.zip`.
+
+        Ships only the derived index (vocabulary/IDF/chunk text+metadata),
+        never source PDF binaries - same principle as the FEMTO/college
+        analysis bundles shipping derived data, not raw files.
+        """
+        return build_bundle(bundle_id, self._to_payload(), out_path)
+
+    @classmethod
+    def load_knowledge_bundle(cls, path: str | Path) -> "VectorIndex":
+        """Load a `*.rulguard-knowledge.zip` built by `save_knowledge_bundle`.
+
+        Raises `BundleValidationError` (from `analysis_bundle`) if the
+        bundle is missing members or fails its checksum - never returns an
+        unverified index.
+        """
+        return cls._from_payload(load_bundle(path))
 
     def search(self, query: str, top_k: int = 4) -> list[RetrievedChunk]:
         if not query.strip() or not self.chunks:

@@ -76,6 +76,35 @@ def test_index_persists_and_reloads(built_index, tmp_path):
     assert [c.chunk_id for c in original] == [c.chunk_id for c in after_reload]
 
 
+def test_knowledge_bundle_round_trip_matches_in_memory_retrieval(built_index, tmp_path):
+    bundle_path = tmp_path / "corpus.rulguard-knowledge.zip"
+    built_index.save_knowledge_bundle(bundle_path, bundle_id="test-corpus")
+    reloaded = VectorIndex.load_knowledge_bundle(bundle_path)
+
+    query = "leave-one-bearing-out evaluation for FEMTO"
+    original = built_index.search(query, top_k=3)
+    after_bundle = reloaded.search(query, top_k=3)
+    assert [c.chunk_id for c in original] == [c.chunk_id for c in after_bundle]
+    assert [c.score for c in original] == [c.score for c in after_bundle]
+
+
+def test_knowledge_bundle_rejects_tampered_contents(built_index, tmp_path):
+    import zipfile
+
+    from bearing_pdm.analysis_bundle import BundleValidationError
+
+    bundle_path = tmp_path / "corpus.rulguard-knowledge.zip"
+    built_index.save_knowledge_bundle(bundle_path, bundle_id="test-corpus")
+    with zipfile.ZipFile(bundle_path) as zf:
+        members = {name: zf.read(name) for name in zf.namelist()}
+    members["dataset.json"] = b'{"chunks": []}'
+    with zipfile.ZipFile(bundle_path, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+    with pytest.raises(BundleValidationError):
+        VectorIndex.load_knowledge_bundle(bundle_path)
+
+
 def test_retrieval_returns_relevant_sources(built_index):
     results = built_index.search("leave-one-bearing-out evaluation for FEMTO", top_k=3)
     assert results
