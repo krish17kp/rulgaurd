@@ -2467,6 +2467,100 @@ def explain(request: ExplainRequest) -> ExplainResponse:
     )
 
 
+# Phase N: bounded cloud knowledge ingestion. A direct-body ZIP-of-documents
+# upload above this size asks for an offline-built Knowledge Bundle instead of
+# silently truncating or timing out - same philosophy as
+# MAX_DIRECT_BEARING_ZIP_BYTES for bearing ZIPs.
+MAX_DIRECT_KNOWLEDGE_ZIP_BYTES = 4 * 1024 * 1024
+
+
+class KnowledgeFileStatus(BaseModel):
+    path: str
+    status: str  # "processed" | "unchanged" | "failed" | "unsupported"
+    reason: str | None = None
+    chunk_count: int | None = None
+
+
+class KnowledgeIngestResponse(BaseModel):
+    status: str  # "ok" | "knowledge_bundle_required"
+    files: list[KnowledgeFileStatus] = Field(default_factory=list)
+    chunk_count: int = 0
+    message: str | None = None
+
+
+@app.post("/knowledge/ingest-zip", response_model=KnowledgeIngestResponse)
+async def knowledge_ingest_zip(file: UploadFile) -> KnowledgeIngestResponse:
+    """Bounded cloud "Add Knowledge" flow (Phase N): a small ZIP of
+    PDF/MD/TXT/DOCX documents -> ingest.py (Phase L, incremental, per-file
+    status) -> an in-memory VectorIndex (reported here, not persisted as the
+    live /explain index - building the live index is a separate, explicit
+    rebuild step, consistent with "no expensive work triggered implicitly").
+
+    A corpus too large for one request body returns
+    knowledge_bundle_required: build the index offline (scripts or the
+    Streamlit explorer) and upload the resulting *.rulguard-knowledge.zip via
+    /knowledge/load instead of re-uploading raw documents.
+    """
+    from bearing_pdm.archive import ZipSecurityError
+    from bearing_pdm.rag.ingest import ingest_zip_of_documents
+
+    with _temporary_upload() as tmp:
+        try:
+            await _spool_upload(
+                file, tmp, max_bytes=MAX_DIRECT_KNOWLEDGE_ZIP_BYTES, expect_text=False
+            )
+        except HTTPException as exc:
+            if exc.status_code == 413:
+                return KnowledgeIngestResponse(
+                    status="knowledge_bundle_required",
+                    message=(
+                        "This document archive is too large for direct upload. Build a "
+                        "RULGuard Knowledge Bundle offline and upload it via /knowledge/load."
+                    ),
+                )
+            raise
+        with tempfile.TemporaryDirectory() as work_dir:
+            try:
+                result = ingest_zip_of_documents(Path(tmp.name), Path(work_dir))
+            except ZipSecurityError as exc:
+                raise HTTPException(status_code=400, detail=f"unsafe archive: {exc}") from exc
+            files = [
+                KnowledgeFileStatus(
+                    path=f.path, status=f.status, reason=f.reason, chunk_count=f.chunk_count,
+                )
+                for f in result.files
+            ]
+            return KnowledgeIngestResponse(
+                status="ok", files=files, chunk_count=len(result.chunks),
+            )
+
+
+class KnowledgeLoadResponse(BaseModel):
+    status: str
+    chunk_count: int
+
+
+@app.post("/knowledge/load", response_model=KnowledgeLoadResponse)
+async def knowledge_load(file: UploadFile) -> KnowledgeLoadResponse:
+    """Load a pre-built `*.rulguard-knowledge.zip` (Phase M) and make it the
+    live /explain retrieval index. Bundles are small by construction
+    (derived chunks/index only, never source documents), so this uses the
+    default upload cap rather than a bounded-mode exception path."""
+    from bearing_pdm.analysis_bundle import BundleValidationError
+    from bearing_pdm.rag.retrieval import VectorIndex
+
+    global _rag_index_cache
+    with _temporary_upload() as tmp:
+        await _spool_upload(file, tmp, expect_text=False)
+        try:
+            index = VectorIndex.load_knowledge_bundle(tmp.name)
+        except BundleValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid knowledge bundle: {exc}") from exc
+    with _rag_index_lock:
+        _rag_index_cache = index
+    return KnowledgeLoadResponse(status="ok", chunk_count=len(index.chunks))
+
+
 @app.get("/predictions/history")
 def prediction_history() -> dict[str, Any]:
     """Bounded prediction summaries, newest first, from the configured store

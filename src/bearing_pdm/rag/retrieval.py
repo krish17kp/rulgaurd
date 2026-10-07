@@ -170,17 +170,26 @@ class VectorIndex:
 
     @classmethod
     def build(cls, embedder: Embedder | None = None) -> "VectorIndex":
-        embedder = embedder or TfidfEmbedder()
         result = ingest_corpus()
         if not result.chunks:
             raise ValueError("Ingestion produced zero chunks - nothing to index")
-        texts = [c.text for c in result.chunks]
+        return cls.build_from_chunks(result.chunks, embedder=embedder)
+
+    @classmethod
+    def build_from_chunks(cls, chunks: list, embedder: Embedder | None = None) -> "VectorIndex":
+        """Build an index from an arbitrary chunk list (Phase N: a user-supplied
+        knowledge corpus via ingest.py), same embedding path `build()` uses for
+        the curated corpus - no duplicated logic."""
+        if not chunks:
+            raise ValueError("Ingestion produced zero chunks - nothing to index")
+        embedder = embedder or TfidfEmbedder()
+        texts = [c.text for c in chunks]
         embedder.fit(texts)
         vectors = embedder.embed(texts)
         indexed = [
             IndexedChunk(c.chunk_id, c.doc_id, c.doc_title, c.source, c.kind,
                          c.text, c.checksum, cls._sparsify(vectors[i]))
-            for i, c in enumerate(result.chunks)
+            for i, c in enumerate(chunks)
         ]
         return cls(embedder, indexed)
 

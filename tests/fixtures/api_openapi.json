@@ -698,6 +698,34 @@
         "title": "Body_inspect_dataset_dataset_inspect_post",
         "type": "object"
       },
+      "Body_knowledge_ingest_zip_knowledge_ingest_zip_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_knowledge_ingest_zip_knowledge_ingest_zip_post",
+        "type": "object"
+      },
+      "Body_knowledge_load_knowledge_load_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_knowledge_load_knowledge_load_post",
+        "type": "object"
+      },
       "Body_predict_rul_from_femto_acquisition_predict_rul_femto_acquisition_post": {
         "properties": {
           "file": {
@@ -1243,6 +1271,100 @@
           "stage"
         ],
         "title": "HiRow",
+        "type": "object"
+      },
+      "KnowledgeFileStatus": {
+        "properties": {
+          "chunk_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunk Count"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "status"
+        ],
+        "title": "KnowledgeFileStatus",
+        "type": "object"
+      },
+      "KnowledgeIngestResponse": {
+        "properties": {
+          "chunk_count": {
+            "default": 0,
+            "title": "Chunk Count",
+            "type": "integer"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeFileStatus"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "KnowledgeIngestResponse",
+        "type": "object"
+      },
+      "KnowledgeLoadResponse": {
+        "properties": {
+          "chunk_count": {
+            "title": "Chunk Count",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "chunk_count"
+        ],
+        "title": "KnowledgeLoadResponse",
         "type": "object"
       },
       "PipelineStage": {
@@ -1918,6 +2040,84 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/knowledge/ingest-zip": {
+      "post": {
+        "description": "Bounded cloud \"Add Knowledge\" flow (Phase N): a small ZIP of\nPDF/MD/TXT/DOCX documents -> ingest.py (Phase L, incremental, per-file\nstatus) -> an in-memory VectorIndex (reported here, not persisted as the\nlive /explain index - building the live index is a separate, explicit\nrebuild step, consistent with \"no expensive work triggered implicitly\").\n\nA corpus too large for one request body returns\nknowledge_bundle_required: build the index offline (scripts or the\nStreamlit explorer) and upload the resulting *.rulguard-knowledge.zip via\n/knowledge/load instead of re-uploading raw documents.",
+        "operationId": "knowledge_ingest_zip_knowledge_ingest_zip_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_knowledge_ingest_zip_knowledge_ingest_zip_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeIngestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Knowledge Ingest Zip"
+      }
+    },
+    "/knowledge/load": {
+      "post": {
+        "description": "Load a pre-built `*.rulguard-knowledge.zip` (Phase M) and make it the\nlive /explain retrieval index. Bundles are small by construction\n(derived chunks/index only, never source documents), so this uses the\ndefault upload cap rather than a bounded-mode exception path.",
+        "operationId": "knowledge_load_knowledge_load_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_knowledge_load_knowledge_load_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeLoadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Knowledge Load"
       }
     },
     "/models/compatibility": {
