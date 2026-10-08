@@ -17,6 +17,13 @@ export function stripMarkdown(text: string): string {
     .replace(/^\s*[-*]\s+/gm, "")
     .replace(/^\s*\(?[a-z]\)\s*/gim, "")
     .replace(/\s*\([a-c]\):?/g, "")
+    // Some online providers inject their own inline citation markers (e.g.
+    // "【Document Title | chunk doc_x:0012:hash】") despite the system prompt
+    // asking for plain text - found live on the Vercel Preview. Citations
+    // are already shown in their own "Sources" list below the explanation,
+    // so this inline form is pure noise, never unique information.
+    .replace(/【[^】]*】/g, "")
+    .replace(/\s{2,}/g, " ")
     .trim();
 }
 
