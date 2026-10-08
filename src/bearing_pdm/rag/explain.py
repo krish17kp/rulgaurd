@@ -436,7 +436,7 @@ def build_explanation(
         if c.score >= MIN_RELEVANCE_SCORE
     ]
     citations = [
-        Citation(c.chunk_id, c.doc_title, c.source, c.score) for c in retrieved
+        Citation(c.chunk_id, c.doc_title, c.source, c.score, page=c.page) for c in retrieved
     ]
     evidence_text = _format_evidence(retrieved)
 

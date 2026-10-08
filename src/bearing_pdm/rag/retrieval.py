@@ -112,6 +112,11 @@ class IndexedChunk:
     # real term count is in the low hundreds, so sparse storage is a size
     # reduction with zero loss of precision, not an approximation.
     vector: list[tuple[int, float]]
+    # ingest.py's Chunk already computes this for PDF sources; None for the
+    # curated corpus.py path, which flattens a document's text before
+    # chunking (no per-page boundary survives that). Never invented here -
+    # just carried through from the source Chunk when it is known.
+    page: int | None = None
 
 
 @dataclass
@@ -124,6 +129,7 @@ class RetrievedChunk:
     text: str
     checksum: str
     score: float
+    page: int | None = None
 
 
 # Sibling of the bearing_pdm package under api/, not inside it, mirroring
@@ -188,7 +194,7 @@ class VectorIndex:
         vectors = embedder.embed(texts)
         indexed = [
             IndexedChunk(c.chunk_id, c.doc_id, c.doc_title, c.source, c.kind,
-                         c.text, c.checksum, cls._sparsify(vectors[i]))
+                         c.text, c.checksum, cls._sparsify(vectors[i]), page=getattr(c, "page", None))
             for i, c in enumerate(chunks)
         ]
         return cls(embedder, indexed)
@@ -260,6 +266,6 @@ class VectorIndex:
             c = self.chunks[i]
             results.append(RetrievedChunk(
                 c.chunk_id, c.doc_id, c.doc_title, c.source, c.kind, c.text,
-                c.checksum, score,
+                c.checksum, score, page=c.page,
             ))
         return results

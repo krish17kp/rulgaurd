@@ -118,8 +118,41 @@ def test_pdf_chunks_carry_page_numbers(tmp_path):
 
     # Blank pages extract no text, so this just proves the multi-page PDF is
     # readable and produces no spurious chunks (rejected as empty), not a
-    # crash - a real-text PDF's page numbers are covered by the project's
-    # existing literature corpus ingested via corpus.py.
+    # crash - a real-text PDF's page numbers are covered by the next test.
     result = ingest_paths([pdf_path])
     assert result.files[0].status == "failed"
     assert "empty" in (result.files[0].reason or "")
+
+
+def test_pdf_page_numbers_survive_to_retrieval_and_citations(tmp_path):
+    """Regression: Chunk.page is computed here but was previously dropped by
+    IndexedChunk/RetrievedChunk, so every citation's page was always None
+    even for a PDF where the real page number is known. Verifies the fix
+    end to end: ingest -> index -> search -> build_explanation."""
+    pytest.importorskip("reportlab")
+    from reportlab.pdfgen import canvas
+
+    from bearing_pdm.rag.explain import PredictionContext, build_explanation
+    from bearing_pdm.rag.retrieval import VectorIndex
+
+    pdf_path = tmp_path / "two_page.pdf"
+    c = canvas.Canvas(str(pdf_path))
+    c.drawString(100, 700, "Bearing vibration RMS content unique to page one testcase.")
+    c.showPage()
+    c.drawString(100, 700, "Remaining useful life content unique to page two testcase.")
+    c.showPage()
+    c.save()
+
+    result = ingest_paths([pdf_path])
+    assert result.files[0].status == "processed"
+    pages_seen = {c.page for c in result.chunks}
+    assert pages_seen == {1, 2}, pages_seen
+
+    index = VectorIndex.build_from_chunks(result.chunks)
+    hits = index.search("remaining useful life testcase", top_k=1)
+    assert hits and hits[0].page == 2
+
+    ctx = PredictionContext(rul_seconds=1000.0, rul_hours=0.28, applicability_level="HIGH")
+    result = build_explanation(ctx, "remaining useful life testcase", index)
+    assert result.citations
+    assert any(citation.page == 2 for citation in result.citations)

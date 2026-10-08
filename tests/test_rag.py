@@ -88,6 +88,30 @@ def test_knowledge_bundle_round_trip_matches_in_memory_retrieval(built_index, tm
     assert [c.score for c in original] == [c.score for c in after_bundle]
 
 
+def test_knowledge_bundle_retrieval_parity_over_representative_queries(built_index, tmp_path):
+    """Goal B acceptance: 5 representative queries over the real multi-
+    document corpus (project docs + literature PDFs), before and after a
+    real Knowledge Bundle round trip - exact chunk_id and score parity for
+    every one, not just a single query."""
+    bundle_path = tmp_path / "corpus.rulguard-knowledge.zip"
+    built_index.save_knowledge_bundle(bundle_path, bundle_id="test-corpus")
+    reloaded = VectorIndex.load_knowledge_bundle(bundle_path)
+
+    queries = [
+        "bearing vibration features",
+        "remaining useful life",
+        "health indicator",
+        "degradation stages",
+        "predictive maintenance",
+    ]
+    for query in queries:
+        before = built_index.search(query, top_k=5)
+        after = reloaded.search(query, top_k=5)
+        assert [c.chunk_id for c in before] == [c.chunk_id for c in after], query
+        assert [c.score for c in before] == [c.score for c in after], query
+        assert before, f"expected real evidence for {query!r}"
+
+
 def test_knowledge_bundle_rejects_tampered_contents(built_index, tmp_path):
     import zipfile
 

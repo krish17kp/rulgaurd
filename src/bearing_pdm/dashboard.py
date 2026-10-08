@@ -524,6 +524,87 @@ def _render_experiment_lab() -> None:
                                    file_name="synthetic_bearing.zip", key="lab_synth_download")
 
 
+def _render_knowledge_rag() -> None:
+    """Knowledge / RAG: upload document(s) -> ingest (rag/ingest.py, real
+    PDF/MD/TXT/DOCX parsing, never faked) -> build a real TF-IDF index
+    (rag/retrieval.py) -> query it and see retrieved evidence with
+    citations, same functions the FastAPI /knowledge endpoints and
+    /explain use - no parallel RAG implementation here."""
+    import tempfile
+
+    from bearing_pdm.rag.ingest import ingest_paths
+    from bearing_pdm.rag.retrieval import VectorIndex
+
+    st.caption(
+        "Upload PDF/Markdown/TXT/DOCX documents, build a real local index, and query it. "
+        "Large corpora should be processed incrementally here rather than forced through a "
+        "single bounded cloud request - see Architecture & Limitations for the cloud-side "
+        "KNOWLEDGE_BUNDLE_REQUIRED fallback."
+    )
+    uploaded = st.file_uploader(
+        "Documents", type=["pdf", "md", "txt", "docx"], accept_multiple_files=True,
+    )
+    if uploaded and st.button("Ingest documents", key="kb_ingest"):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for f in uploaded:
+                p = Path(tmp) / f.name
+                p.write_bytes(f.getvalue())
+                paths.append(p)
+            result = ingest_paths(paths)
+            st.session_state["kb_files"] = [
+                {"file": Path(r.path).name, "status": r.status,
+                 "chunks": r.chunk_count, "reason": r.reason or ""}
+                for r in result.files
+            ]
+            if result.chunks:
+                st.session_state["kb_index"] = VectorIndex.build_from_chunks(result.chunks)
+            else:
+                st.session_state.pop("kb_index", None)
+
+    if "kb_files" in st.session_state:
+        st.markdown("**Ingestion status**")
+        st.dataframe(pd.DataFrame(st.session_state["kb_files"]), hide_index=True)
+
+    index = st.session_state.get("kb_index")
+    if index is None:
+        st.info("No documents indexed yet in this session.")
+        return
+
+    st.success(f"Index ready: {len(index.chunks)} chunk(s) from "
+               f"{len({c.doc_id for c in index.chunks})} document(s).")
+    query = st.text_input("Query", key="kb_query")
+    if query and st.button("Search", key="kb_search"):
+        hits = index.search(query, top_k=5)
+        if not hits:
+            st.warning("No relevant evidence found for this query.")
+        else:
+            st.markdown("**Retrieved evidence**")
+            st.dataframe(pd.DataFrame([
+                {"source": Path(h.source).name, "page": h.page, "score": round(h.score, 3),
+                 "text": h.text[:200]}
+                for h in hits
+            ]), hide_index=True)
+
+        from bearing_pdm.rag.explain import PredictionContext, build_explanation
+
+        context = PredictionContext(rul_seconds=0.0, applicability_level="HIGH")
+        explanation = build_explanation(context, query, index)
+        if explanation.citations:
+            st.markdown("**Citations** (never fabricated - only chunks actually retrieved above)")
+            for c in explanation.citations:
+                page_note = f", p.{c.page}" if c.page else ""
+                st.caption(f"- {c.source}{page_note} (chunk {c.chunk_id}, relevance {c.relevance_score:.3f})")
+
+    with tempfile.NamedTemporaryFile(suffix=".rulguard-knowledge.zip", delete=False) as tmp_bundle:
+        index.save_knowledge_bundle(tmp_bundle.name)
+        st.download_button(
+            "Download Knowledge Bundle (.rulguard-knowledge.zip)",
+            data=Path(tmp_bundle.name).read_bytes(),
+            file_name="knowledge.rulguard-knowledge.zip", key="kb_download",
+        )
+
+
 def _render_femto_bundle(payload: dict) -> None:
     """A `.rulguard.zip` FEMTO bundle (bearing_archive.BearingAnalysis,
     asdict'd): Overview / Signals / FFT / Health+stage / RUL, mirroring the
@@ -649,7 +730,8 @@ def main() -> None:
     VIEWS = ["Signal & FFT", "Health Indicator", "RUL Prediction",
              "Model Evaluation", "Architecture & Limitations",
              "Universal Machine Analysis", "Cross-Dataset Validation",
-             "Raw / ZIP / Bundle Explorer", "Experiment Lab (CWRU / Paderborn / Synthetic)"]
+             "Raw / ZIP / Bundle Explorer", "Experiment Lab (CWRU / Paderborn / Synthetic)",
+             "Knowledge / RAG"]
     view = st.sidebar.radio("View", VIEWS)
 
     # The cross-dataset pages (dashboard_cross.py) carry their own dataset and
@@ -671,6 +753,10 @@ def main() -> None:
 
     if view == "Experiment Lab (CWRU / Paderborn / Synthetic)":
         _render_experiment_lab()
+        return
+
+    if view == "Knowledge / RAG":
+        _render_knowledge_rag()
         return
 
     # Only the first three views are about one specific bearing and window.

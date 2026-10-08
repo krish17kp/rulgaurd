@@ -37,6 +37,7 @@ def test_dashboard_offers_all_five_views():
         "Model Evaluation", "Architecture & Limitations",
         "Universal Machine Analysis", "Cross-Dataset Validation",
         "Raw / ZIP / Bundle Explorer", "Experiment Lab (CWRU / Paderborn / Synthetic)",
+        "Knowledge / RAG",
     ]
 
 
@@ -109,6 +110,19 @@ def test_experiment_lab_synthetic_is_clearly_labelled_and_offers_download():
     at.button(key="lab_synth_generate").click().run()
     assert not at.exception
     assert at.download_button
+
+
+def test_knowledge_rag_view_renders_without_exception_and_offers_upload():
+    """AppTest's file_uploader has no programmatic upload API (same
+    limitation noted on the Raw/ZIP explorer tests), so this confirms the
+    view renders correctly with nothing uploaded yet; the real ingest ->
+    index -> search -> citations pipeline is covered end to end by
+    tests/test_rag_ingest.py and tests/test_rag.py against the same
+    ingest.py/retrieval.py/explain.py functions this view calls directly."""
+    at = _open("Knowledge / RAG")
+    assert not at.exception
+    assert at.file_uploader
+    assert "No documents indexed yet" in " ".join(i.value for i in at.info)
 
 
 def _femto_bundle_script():
