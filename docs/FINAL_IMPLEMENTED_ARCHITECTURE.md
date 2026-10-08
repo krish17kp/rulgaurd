@@ -172,3 +172,97 @@ correctly on input or version changes. College trajectory building (already
   branch has not been promoted to production and production promotion
   remains gated on explicit human approval, as it has been for every prior
   phase of this build.
+
+## 12. IMS resolved, fault-diagnosis-only external datasets added (post-dates §1–11)
+
+The sections above predate several later additions on this branch. Current
+state as of this nightshift pass:
+
+- **IMS**: the §11 RAR-extraction blocker was resolved in an earlier session
+  (`unrar`/equivalent became available); IMS is real downloaded/extracted
+  data, scored through the same zero-shot/LOBO pipeline as every other
+  dataset. `reports/metrics/cross_dataset.json`'s `config.datasets_missing`
+  now lists only `canonical_femto_test_censored` (an intentional frozen-set
+  exclusion, not a gap) and `canonical_xjtu` (still genuinely blocked, see
+  §11). The FEMTO→IMS zero-shot result is **negative skill**
+  (`routing_skill_by_dataset`), surfaced honestly, not hidden - IMS is a real
+  external experiment showing the frozen FEMTO model does not transfer to it
+  zero-shot, which is itself the honest finding.
+- **CWRU** and **Paderborn**: real official fault-diagnosis/condition-
+  monitoring datasets (adapters `src/bearing_pdm/cwru.py`,
+  `src/bearing_pdm/paderborn.py`). Neither has a run-to-failure RUL label -
+  both are classification-style fault datasets. They are evaluated for
+  *applicability* against the frozen FEMTO model (consistently LOW - large
+  feature-distribution shift, missing `vibration_y_*` channels) and exposed
+  via `_load_fault_diagnosis_datasets()` → `GET /evaluation/cross-dataset`'s
+  `fault_diagnosis_datasets` field, structurally separate from
+  `in_domain_trained_results`/`not_zero_shot_single_dataset_results` so a
+  reader can never average a fault-diagnosis accuracy number into an MAE/RUL
+  comparison. `rul_supported: false` is explicit in the field; no
+  `mae_seconds`/RUL value is ever present for either.
+- **Synthetic**: reproducible degradation simulator (RMS/impulsiveness drift
+  over sequential acquisitions, packaged as a FEMTO-shaped ZIP). Always
+  LOW/OOD against the frozen FEMTO model (simulated signal statistics don't
+  match a real rig); unsupported FEMTO RUL is suppressed the same way as any
+  other LOW/OOD input. Every surface (Streamlit Experiment Lab, any future
+  web view) must label it **SYNTHETIC / SIMULATED DATA - NOT REAL-WORLD
+  VALIDATION**, never presented as or alongside real evidence.
+- **Streamlit Experiment Lab**: new sidebar view for CWRU/Paderborn/Synthetic
+  exploration (waveform/FFT/feature charts), separate from the
+  FEMTO/College/IMS production views - exploratory, not evaluated against
+  any held-out metric.
+- **Next.js `/datasets`**: external Dataset Explorer page listing all six
+  datasets (FEMTO, College, IMS, CWRU, Paderborn, Synthetic) with their real
+  status (RUL-supported vs. fault-diagnosis-only vs. synthetic-demo), reading
+  the same `/evaluation/cross-dataset` response the Streamlit/API already
+  serve - the web page and the backend can never disagree about which
+  dataset supports what.
+
+## 13. This nightshift pass: two real live-deployment bugs fixed
+
+Neither bug was what it first looked like; both were root-caused against the
+actual live Preview rather than guessed at.
+
+- **"ENOSPC" was actually two separate bugs, neither about `/tmp` disk
+  space.** (1) `frontend/api/requirements.txt` was unpinned; `numpy`/`scipy`/
+  `pandas` had drifted to versions with no `manylinux2014_x86_64` wheel,
+  forcing Vercel's Python builder to force-bundle an oversized fallback
+  (284.78MB, over the platform's 225MB function-size cap) - the build failed
+  outright, before any artifact download could even run. Fixed by pinning to
+  the newest versions that still publish a manylinux2014 wheel (`numpy
+  2.2.6`, `scipy 1.16.3`, `pandas 2.3.2`, `scikit-learn 1.7.2`), verified for
+  numeric parity against the real trained artifacts (137 applicability/
+  routing tests + the `4610.0s`/HIGH/FULLY_SUPPORTED regression anchor, all
+  passing under the pinned stack in an isolated Python 3.12 venv before
+  committing). (2) Once the build succeeded, the live function still failed
+  to load `cross_domain_bundle.joblib` - not from a full disk, but because
+  the Preview's `ARTIFACT_MANIFEST_JSON` environment variable still held the
+  *old* blob's sha256 from before the Blob was manually replaced with the
+  current 361MB artifact; `artifacts.py`'s checksum verification correctly
+  (and safely - never fabricating applicability) refused to use the
+  mismatched file. Fixed by regenerating the env var from the current
+  committed `manifest.json`. `frontend/vercel.json`'s function `memory` was
+  also corrected from an invalid `3009` down to `2048` (the actual Hobby-plan
+  cap, discovered from the deploy error itself, not assumed).
+- **`fault_diagnosis_datasets: null` live was a control-flow bug, not a
+  packaging/path bug.** `cross_dataset_comparison()` set that field *after*
+  an early `if cde is None: ... return response` branch; whenever
+  `cross_dataset.json`/`CROSS_DATASET_JSON` is genuinely unavailable (the
+  real Preview state - `cross_dataset.json` was never vendored into the
+  committed `frontend/reports/metrics/` deployment-snapshot location
+  `09c1d16` introduced for exactly this purpose), the whole response omitted
+  the key rather than returning it as `null`, even though the field has
+  nothing to do with `cde`. Fixed by moving the assignment above that
+  branch, and separately fixed the actual missing vendored snapshot (added
+  the missing `cp` line to `frontend/package.json`'s `prebuild` and
+  committed `frontend/reports/metrics/cross_dataset.json`), which also
+  resolved `cross_dataset_experiments` being silently null live - same root
+  cause, second symptom.
+
+Both fixes were verified against the real live Preview (not just locally):
+`POST /predict/rul/femto-acquisition` on `Bearing2_1/acc_00450.csv` returns
+`rul_seconds=4610.0`, `applicability_level=HIGH`, `compatibility=
+FULLY_SUPPORTED`; `GET /evaluation/cross-dataset` returns
+`fault_diagnosis_datasets.cwru/paderborn` with `rul_supported=false` and
+`applicability.level=LOW`, and a populated `cross_dataset_experiments`.
+Preview logs show no `ENOSPC`/`Traceback`/`Exception` after the fix.
