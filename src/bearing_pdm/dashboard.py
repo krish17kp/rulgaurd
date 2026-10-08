@@ -343,6 +343,187 @@ def _render_raw_explorer() -> None:
                 st.json(payload)
 
 
+_EXPERIMENT_LAB_ROOT = Path(__file__).resolve().parents[2]
+_CWRU_FIXTURES = {
+    "97": "normal baseline",
+    "105": "inner race fault 0.007in",
+    "118": "ball fault 0.007in",
+    "130": "outer race fault 0.007in @6:00",
+}
+_PADERBORN_FIXTURES = {
+    "N15_M07_F10_K001_1": "healthy (K001)",
+    "N15_M07_F10_KA01_1": "artificial outer-race fault (KA01)",
+}
+
+
+def _experiment_lab_applicability_model():
+    """The frozen FEMTO applicability model, or None if the cross-domain
+    bundle artifact isn't present - never fabricated, same as the rest of
+    this dashboard's degrade-gracefully pattern."""
+    from bearing_pdm.routing import candidates_from_bundle
+
+    bundle = _load_joblib(str(_EXPERIMENT_LAB_ROOT / "artifacts/models/cross_domain_bundle.joblib"))
+    if bundle is None:
+        return None
+    candidates = [c for c in candidates_from_bundle(bundle) if c.name == "raw_seconds"]
+    return candidates[0].applicability if candidates else None
+
+
+def _render_fault_diagnosis_snapshot(
+    label: str, signal, sample_rate_hz: float, features: dict[str, float]
+) -> None:
+    """Shared rendering for one CWRU/Paderborn recording: waveform, FFT,
+    feature table, applicability against the frozen FEMTO model - and
+    explicitly NO RUL number, because none exists for a fault-diagnosis
+    snapshot (dashboard.md: never fabricate a value the source can't
+    support)."""
+    import numpy as np
+
+    st.markdown(f"**{label}**")
+    st.line_chart(pd.DataFrame({"vibration_x": signal[: int(sample_rate_hz * 0.1)]}))
+    freqs = np.fft.rfftfreq(len(signal), d=1.0 / sample_rate_hz)
+    mag = np.abs(np.fft.rfft(signal - signal.mean()))
+    st.line_chart(pd.DataFrame({"magnitude": mag}, index=freqs))
+    with st.expander("Features (time + frequency domain)"):
+        st.dataframe(pd.DataFrame([features]).T.rename(columns={0: "value"}))
+
+    model = _experiment_lab_applicability_model()
+    if model is None:
+        st.caption("FEMTO applicability model unavailable (cross_domain_bundle.joblib not found).")
+    else:
+        from bearing_pdm.applicability import assess as applicability_assess
+
+        row = pd.DataFrame([{c: features.get(c, np.nan) for c in model.feature_columns}], dtype=float)
+        result = applicability_assess(row, model, single_recording=True)
+        level = result["level"]
+        color = {"HIGH": "success", "MEDIUM": "warning", "LOW": "error"}[level]
+        getattr(st, color)(f"FEMTO-model applicability: **{level}** "
+                           f"({result['shift_ratio']:.2f}x in-domain feature shift)")
+    st.info("**RUL evaluation unavailable.** This dataset records fixed-condition "
+            "snapshots, not a degradation trajectory - there is no RUL ground truth "
+            "and none is estimated here.")
+
+
+def _render_experiment_lab() -> None:
+    """Experiment Lab: CWRU and Paderborn (real, fault-diagnosis/condition-
+    monitoring only - no RUL) plus the Synthetic bearing simulator (clearly
+    labelled, never real-world evidence). FEMTO/College/IMS already have
+    their own dedicated views above (Signal & FFT, Health Indicator, RUL
+    Prediction, Universal Machine Analysis) - not duplicated here, since
+    those tools are trajectory/RUL-oriented and CWRU/Paderborn are single
+    fixed-condition snapshots, not trajectories."""
+    st.caption(
+        "FEMTO, College and IMS have dedicated trajectory-oriented views elsewhere in this "
+        "dashboard (Signal & FFT / Health Indicator / RUL Prediction / Universal Machine "
+        "Analysis). This lab covers the datasets that do NOT fit a trajectory model: "
+        "CWRU and Paderborn are fault-diagnosis snapshots with no RUL ground truth, and the "
+        "Synthetic simulator is demonstration data, never real-world validation."
+    )
+    choice = st.selectbox(
+        "Dataset", ["CWRU (real, fault diagnosis)", "Paderborn (real, fault diagnosis)",
+                    "Synthetic Bearing (simulated)"],
+    )
+
+    if choice == "CWRU (real, fault diagnosis)":
+        from bearing_pdm.cwru import extract_features, read_channel
+
+        st.error("**REAL DATA - FAULT DIAGNOSIS / CONDITION MONITORING** "
+                 "(Case Western Reserve University Bearing Data Center)")
+        file_id = st.selectbox("Condition", list(_CWRU_FIXTURES), format_func=lambda k: _CWRU_FIXTURES[k])
+        if st.button("Load example recording", key="lab_cwru_load"):
+            path = _EXPERIMENT_LAB_ROOT / "data/fixtures/cwru" / f"{file_id}.mat"
+            signal = read_channel(path, file_id, channel="DE")
+            features = extract_features(path, file_id, sample_rate_hz=12_000.0)
+            _render_fault_diagnosis_snapshot(_CWRU_FIXTURES[file_id], signal, 12_000.0, features)
+
+    elif choice == "Paderborn (real, fault diagnosis)":
+        from bearing_pdm.paderborn import VIBRATION_SAMPLE_RATE_HZ, extract_features, read_channel
+
+        st.error("**REAL DATA - FAULT DIAGNOSIS / CONDITION MONITORING** "
+                 "(Paderborn University KAt-DataCenter)")
+        file_id = st.selectbox("Condition", list(_PADERBORN_FIXTURES),
+                               format_func=lambda k: _PADERBORN_FIXTURES[k])
+        if st.button("Load example recording", key="lab_paderborn_load"):
+            path = _EXPERIMENT_LAB_ROOT / "data/fixtures/paderborn" / f"{file_id}.mat"
+            signal = read_channel(path)
+            features = extract_features(path)
+            _render_fault_diagnosis_snapshot(_PADERBORN_FIXTURES[file_id], signal,
+                                             VIBRATION_SAMPLE_RATE_HZ, features)
+
+    else:  # Synthetic Bearing
+        from bearing_pdm.synthetic import SyntheticConfig, generate_sequence, write_synthetic_zip
+
+        st.warning("**SYNTHETIC / SIMULATED DATA - NOT REAL-WORLD VALIDATION.** "
+                   "This is a controlled demonstration signal, never a model of a real bearing.")
+        c1, c2, c3 = st.columns(3)
+        seed = c1.number_input("Random seed", value=42, step=1)
+        n_acquisitions = c1.number_input("Acquisitions", value=10, min_value=2, max_value=200)
+        samples_per_acquisition = c2.number_input("Samples/acquisition", value=2560, min_value=256)
+        sample_rate_hz = c2.number_input("Sample rate (Hz)", value=25_600.0)
+        shaft_freq_hz = c3.number_input("Shaft frequency (Hz)", value=50.0)
+        baseline_noise_std = c3.number_input("Baseline noise std", value=0.05)
+
+        if st.button("Generate Synthetic Bearing", key="lab_synth_generate"):
+            cfg = SyntheticConfig(
+                seed=int(seed), n_acquisitions=int(n_acquisitions),
+                samples_per_acquisition=int(samples_per_acquisition),
+                sample_rate_hz=float(sample_rate_hz), shaft_freq_hz=float(shaft_freq_hz),
+                baseline_noise_std=float(baseline_noise_std),
+            )
+            sequence = generate_sequence(cfg)
+            x0, _ = sequence[0]
+            st.markdown("**First acquisition - vibration_x**")
+            st.line_chart(pd.DataFrame({"vibration_x": x0}))
+
+            import numpy as np
+
+            from bearing_pdm.features import time_domain_features
+
+            rms = [float(np.sqrt(np.mean(x**2))) for x, _ in sequence]
+            kurt = [time_domain_features(x, "v")["v_kurtosis"] for x, _ in sequence]
+            st.markdown("**Degradation progression**")
+            st.line_chart(pd.DataFrame({"RMS": rms, "kurtosis": kurt}))
+
+            model = _experiment_lab_applicability_model()
+            if model is not None:
+                from bearing_pdm.applicability import assess as applicability_assess
+                from bearing_pdm.features import frequency_domain_features
+                from bearing_pdm.routing import RUL_SUPPRESSED, candidates_from_bundle, decide
+
+                rows = []
+                for x, y in sequence:
+                    row = {}
+                    row.update(time_domain_features(x, "vibration_x"))
+                    row.update(frequency_domain_features(x, cfg.sample_rate_hz, "vibration_x"))
+                    row.update(time_domain_features(y, "vibration_y"))
+                    row.update(frequency_domain_features(y, cfg.sample_rate_hz, "vibration_y"))
+                    rows.append({c: row.get(c, np.nan) for c in model.feature_columns})
+                df = pd.DataFrame(rows, dtype=float)
+                result = applicability_assess(df, model, single_recording=False)
+                level = result["level"]
+                color = {"HIGH": "success", "MEDIUM": "warning", "LOW": "error"}[level]
+                getattr(st, color)(f"FEMTO-model applicability: **{level}** "
+                                   f"({result['shift_ratio']:.2f}x in-domain feature shift)")
+
+                bundle = _load_joblib(str(_EXPERIMENT_LAB_ROOT / "artifacts/models/cross_domain_bundle.joblib"))
+                candidate = next(c for c in candidates_from_bundle(bundle) if c.name == "raw_seconds")
+                decision = decide(True, [], [(candidate, result, True)])
+                if decision["status"] == RUL_SUPPRESSED:
+                    st.info("RUL: **suppressed** - this synthetic run is out-of-domain for the "
+                            "frozen FEMTO model, so no RUL estimate is shown.")
+                else:
+                    st.caption(f"RUL routing status: {decision['status']} (synthetic data - "
+                               "never evidence of real-world accuracy, even if HIGH/MEDIUM here).")
+
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                write_synthetic_zip(cfg, tmp.name)
+                tmp.seek(0)
+                st.download_button("Download synthetic_bearing.zip", data=Path(tmp.name).read_bytes(),
+                                   file_name="synthetic_bearing.zip", key="lab_synth_download")
+
+
 def _render_femto_bundle(payload: dict) -> None:
     """A `.rulguard.zip` FEMTO bundle (bearing_archive.BearingAnalysis,
     asdict'd): Overview / Signals / FFT / Health+stage / RUL, mirroring the
@@ -468,7 +649,7 @@ def main() -> None:
     VIEWS = ["Signal & FFT", "Health Indicator", "RUL Prediction",
              "Model Evaluation", "Architecture & Limitations",
              "Universal Machine Analysis", "Cross-Dataset Validation",
-             "Raw / ZIP / Bundle Explorer"]
+             "Raw / ZIP / Bundle Explorer", "Experiment Lab (CWRU / Paderborn / Synthetic)"]
     view = st.sidebar.radio("View", VIEWS)
 
     # The cross-dataset pages (dashboard_cross.py) carry their own dataset and
@@ -486,6 +667,10 @@ def main() -> None:
 
     if view == "Raw / ZIP / Bundle Explorer":
         _render_raw_explorer()
+        return
+
+    if view == "Experiment Lab (CWRU / Paderborn / Synthetic)":
+        _render_experiment_lab()
         return
 
     # Only the first three views are about one specific bearing and window.

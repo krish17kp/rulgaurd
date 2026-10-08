@@ -36,7 +36,7 @@ def test_dashboard_offers_all_five_views():
         "Signal & FFT", "Health Indicator", "RUL Prediction",
         "Model Evaluation", "Architecture & Limitations",
         "Universal Machine Analysis", "Cross-Dataset Validation",
-        "Raw / ZIP / Bundle Explorer",
+        "Raw / ZIP / Bundle Explorer", "Experiment Lab (CWRU / Paderborn / Synthetic)",
     ]
 
 
@@ -75,6 +75,40 @@ def test_raw_explorer_loads_a_real_analysis_bundle(tmp_path):
     # confirms the mode renders; the loader itself is covered directly by
     # tests/test_analysis_bundle.py's round-trip parity tests.
     assert at.file_uploader
+
+
+def test_experiment_lab_cwru_shows_fault_diagnosis_and_no_rul():
+    at = _open("Experiment Lab (CWRU / Paderborn / Synthetic)")
+    at.selectbox[0].select("CWRU (real, fault diagnosis)").run()
+    assert not at.exception
+    at.button(key="lab_cwru_load").click().run()
+    assert not at.exception
+    text = " ".join(i.value for i in at.error) + " ".join(i.value for i in at.info)
+    assert "FAULT DIAGNOSIS" in text
+    assert "RUL evaluation unavailable" in text
+
+
+def test_experiment_lab_paderborn_shows_fault_diagnosis_and_no_rul():
+    at = _open("Experiment Lab (CWRU / Paderborn / Synthetic)")
+    at.selectbox[0].select("Paderborn (real, fault diagnosis)").run()
+    assert not at.exception
+    at.button(key="lab_paderborn_load").click().run()
+    assert not at.exception
+    text = " ".join(i.value for i in at.error) + " ".join(i.value for i in at.info)
+    assert "FAULT DIAGNOSIS" in text
+    assert "RUL evaluation unavailable" in text
+
+
+def test_experiment_lab_synthetic_is_clearly_labelled_and_offers_download():
+    at = _open("Experiment Lab (CWRU / Paderborn / Synthetic)")
+    at.selectbox[0].select("Synthetic Bearing (simulated)").run()
+    assert not at.exception
+    warning_text = " ".join(i.value for i in at.warning)
+    assert "SYNTHETIC" in warning_text
+    assert "NOT REAL-WORLD VALIDATION" in warning_text
+    at.button(key="lab_synth_generate").click().run()
+    assert not at.exception
+    assert at.download_button
 
 
 def _femto_bundle_script():
