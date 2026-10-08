@@ -73,12 +73,7 @@ export function ExplainResult({ result }: { result: Partial<PredictRulResponse> 
 
       {open && (
         <div className="mt-2 rounded-lg border border-surface-border bg-surface p-3 text-xs">
-          <p className="mb-2 font-medium text-foreground-muted">
-            AI Maintenance Explanation
-            <span className="ml-1 font-normal italic">
-              (explanation layer only - does not change the RUL above)
-            </span>
-          </p>
+          <p className="mb-2 font-medium text-foreground-muted">Result explanation</p>
 
           {state.phase === "generating" && <p>Retrieving evidence and generating explanation…</p>}
 
