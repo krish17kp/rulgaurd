@@ -581,6 +581,11 @@ export interface FaultDiagnosisDataset {
   rul_supported: false;
   rul_unavailable_reason: string;
   applicability: FaultDiagnosisApplicability | null;
+  representative: {
+    condition: string;
+    signal: number[];
+    fft: { frequency_hz: number[]; magnitude: number[] };
+  } | null;
 }
 
 export interface CrossDatasetResponse {
