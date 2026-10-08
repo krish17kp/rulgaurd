@@ -3,14 +3,14 @@
 # and traversing them during `vercel deploy`'s upload step is what OOM-killed
 # the CLI on this machine - excluding them is a memory-safety fix, not a
 # deployment-architecture change.
-datasets/
-data/
-context/
+/datasets/
+/data/
+/context/
 /deploy_data/
 /reports/
-deliverables/
-md/
-docs/
+/deliverables/
+/md/
+/docs/
 *.pdf
 *.docx
 
