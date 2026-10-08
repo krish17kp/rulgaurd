@@ -53,6 +53,7 @@
 # for numpy/scipy/scikit-learn and bloats the function past the 225MB limit.
 /api/pyproject.toml
 /api/uv.lock
+/api/.python-version
 /_uv/
 
 # production

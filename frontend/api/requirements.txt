@@ -3,6 +3,18 @@ pydantic
 python-multipart
 httpx
 joblib
-scikit-learn
-numpy
-pandas
+# Pinned (docs/PRODUCTION_RELEASE.md M4 follow-up): unpinned resolution
+# recently picked numpy>=2.3 / scipy>=1.17 / pandas>=3.0, none of which
+# publish a manylinux2014_x86_64 wheel - Vercel's Python build then
+# force-bundled an unoptimized fallback, pushing the function past its
+# 225MB cap. These are the newest versions that still ship a manylinux2014
+# wheel, verified both to fit and to reproduce the real pipeline's result
+# (tests/test_api_e2e.py::test_bearing2_1_acc_00450_regression_anchor plus
+# the full test_cwru/test_paderborn/test_synthetic/test_reliability suites,
+# 137 passed) against the actual trained artifacts - scikit-learn 1.7.2 is
+# two minor versions behind the 1.9.0 the model was pickled with, so this
+# is a real, verified cross-version load, not an assumption.
+numpy==2.2.6
+scipy==1.16.3
+pandas==2.3.2
+scikit-learn==1.7.2
