@@ -26,7 +26,7 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-14 px-6 py-16 sm:py-20">
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-14 px-6 py-16 sm:py-20">
       <header className="flex flex-col gap-5">
         <span className="w-fit rounded-full bg-accent/10 px-3 py-1 text-xs font-medium tracking-wide text-accent">
           Industrial predictive maintenance

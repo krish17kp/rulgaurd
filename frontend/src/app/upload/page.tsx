@@ -198,7 +198,7 @@ export default function UploadPage() {
   const isBusy = activeState.status === "uploading" || activeState.status === "loading";
 
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-16">
       <header>
         <h1 className="text-3xl font-semibold tracking-tight">Analyze Bearing Data</h1>
         <p className="mt-2 text-sm leading-relaxed text-foreground-muted">

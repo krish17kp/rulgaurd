@@ -41,7 +41,7 @@ export default function DegradationPage() {
   const maxHi = state.status === "ready" ? Math.max(...state.data.rows.map((r) => r.health_indicator)) : 1;
 
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-16">
       <div className="rounded-lg border border-caution/30 bg-caution/10 p-3 text-xs text-caution">
         <p className="font-semibold">Advanced Tool — Health Indicator / Degradation Trend</p>
         <p className="mt-1">

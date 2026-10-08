@@ -50,10 +50,10 @@ export default function EvaluationPage() {
   }, []);
 
   return (
-    <main className="mx-auto flex max-w-4xl flex-col gap-8 px-6 py-16">
+    <main className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-16">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Model evaluation</h1>
-        <p className="mt-1 text-sm text-foreground-muted">
+        <p className="mt-1 text-sm text-foreground-muted break-words">
           Real evaluation numbers read verbatim from committed artifacts
           (<code>reports/metrics/rul_evaluation.json</code>,{" "}
           <code>deploy_data/hidden_set_evaluation.json</code>,{" "}
@@ -243,35 +243,37 @@ function HiComparisonSection({ hiComparison }: { hiComparison: HealthIndicatorCo
     <section>
       <h2 className="text-lg font-semibold">Health indicator comparison</h2>
       <p className="mt-1 text-xs text-foreground-muted">{hiComparison.selection_reason}</p>
-      <table className="mt-2 w-full text-left text-xs">
-        <thead className="text-foreground-muted">
-          <tr>
-            <th className="py-1 pr-3">Variant</th>
-            <th className="py-1 pr-3">Status</th>
-            <th className="py-1 pr-3">Mean |Spearman|</th>
-            <th className="py-1 pr-3">Mean % pinned at 1.0</th>
-          </tr>
-        </thead>
-        <tbody>
-          {variants.map(([label, v]) => {
-            // reference_hi nests its numbers under `pooled` (and `leave_one_bearing_out`)
-            // instead of the top level the legacy transparent_hi/pca_hi variants use -
-            // read whichever is present rather than assuming the flat shape.
-            const spearman = v.mean_spearman ?? v.pooled?.mean_spearman;
-            const pinning = v.pinning ?? v.pooled?.pinning;
-            return (
-              <tr key={label} className="border-t border-surface-border">
-                <td className="py-1 pr-3 font-mono">{label}</td>
-                <td className="py-1 pr-3">{v.status}</td>
-                <td className="py-1 pr-3">{spearman !== undefined ? Math.abs(spearman).toFixed(3) : "n/a"}</td>
-                <td className="py-1 pr-3">
-                  {pinning ? `${pinning.mean_pct_at_one.toFixed(1)}%` : "n/a (fixed, D18)"}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead className="text-foreground-muted">
+            <tr>
+              <th className="py-1 pr-3">Variant</th>
+              <th className="py-1 pr-3">Status</th>
+              <th className="py-1 pr-3">Mean |Spearman|</th>
+              <th className="py-1 pr-3">Mean % pinned at 1.0</th>
+            </tr>
+          </thead>
+          <tbody>
+            {variants.map(([label, v]) => {
+              // reference_hi nests its numbers under `pooled` (and `leave_one_bearing_out`)
+              // instead of the top level the legacy transparent_hi/pca_hi variants use -
+              // read whichever is present rather than assuming the flat shape.
+              const spearman = v.mean_spearman ?? v.pooled?.mean_spearman;
+              const pinning = v.pinning ?? v.pooled?.pinning;
+              return (
+                <tr key={label} className="border-t border-surface-border">
+                  <td className="py-1 pr-3 font-mono">{label}</td>
+                  <td className="py-1 pr-3">{v.status}</td>
+                  <td className="py-1 pr-3">{spearman !== undefined ? Math.abs(spearman).toFixed(3) : "n/a"}</td>
+                  <td className="py-1 pr-3">
+                    {pinning ? `${pinning.mean_pct_at_one.toFixed(1)}%` : "n/a (fixed, D18)"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       <p className="mt-2 text-xs text-foreground-muted">
         Transparent/PCA HI are retained as documented failure modes (docs/decisions.md D18), not
         deleted — the pinning and low-trend numbers above are why reference_hi was selected.
@@ -292,16 +294,18 @@ function CollegeCaseStudy({ evaluation }: { evaluation: EvaluationResponse }) {
         same discipline as FEMTO&apos;s leave-one-bearing-out, adapted to a single run.
       </p>
       <p className="mt-2 text-xs font-medium text-caution">{evaluation.college_naive_caveat}</p>
-      <table className="mt-2 w-full text-left text-sm text-caution">
-        <tbody>
-          {Object.entries(evaluation.college_mean_mae_by_model).map(([model, mae]) => (
-            <tr key={model}>
-              <td className="py-1 pr-3 font-mono">{model}</td>
-              <td className="py-1">{mae.toFixed(0)}s</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full text-left text-sm text-caution">
+          <tbody>
+            {Object.entries(evaluation.college_mean_mae_by_model).map(([model, mae]) => (
+              <tr key={model}>
+                <td className="py-1 pr-3 font-mono">{model}</td>
+                <td className="py-1">{mae.toFixed(0)}s</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {evaluation.college_overall_by_model?.extra_trees && (
         <p className="mt-2 text-xs text-caution">
           ExtraTrees over-estimated RUL on{" "}

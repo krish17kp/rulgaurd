@@ -40,7 +40,7 @@ export default function PredictPage() {
   }
 
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-16">
       <div className="rounded-lg border border-caution/30 bg-caution/10 p-3 text-xs text-caution">
         <p className="font-semibold">Advanced Tool — Direct Model Input</p>
         <p className="mt-1">

@@ -92,6 +92,61 @@ test("Evaluation page shows the college case study with the naive-oracle caveat"
   await expect(page.getByText(/domain-shift limitation/i)).toBeVisible();
 });
 
+test("Datasets explorer shows real FEMTO/College/IMS/CWRU/Paderborn cards and a separated Synthetic card, with no fabricated RUL", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (msg) => {
+    if (msg.type() === "error") consoleErrors.push(msg.text());
+  });
+
+  await page.goto("/datasets");
+  await expect(page.getByText("FEMTO/PRONOSTIA")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/College run-to-failure/)).toBeVisible();
+  await expect(page.getByText(/IMS \/ NASA/)).toBeVisible();
+  await expect(page.getByText(/CWRU \(Case Western/)).toBeVisible();
+  await expect(page.getByText(/Paderborn University/)).toBeVisible();
+  await expect(page.getByText("Synthetic bearing degradation simulator")).toBeVisible();
+
+  // CWRU/Paderborn must never show a fabricated RUL metric.
+  await expect(page.getByText("RUL evaluation unavailable.").first()).toBeVisible();
+  const bodyText = await page.locator("main").innerText();
+  expect(bodyText).not.toMatch(/RUL MAE|RUL RMSE/i);
+
+  // Synthetic must be visually/textually separated from real data.
+  await expect(page.getByText("SYNTHETIC", { exact: true })).toBeVisible();
+  await expect(page.getByText(/NOT REAL-WORLD VALIDATION/)).toBeVisible();
+
+  expect(consoleErrors, `unexpected console errors: ${consoleErrors.join("; ")}`).toEqual([]);
+});
+
+test("Cross-dataset page renders grouped sections without a 5xx or crash", async ({ page }) => {
+  const response = await page.goto("/cross-dataset");
+  expect(response?.status()).toBeLessThan(500);
+  await expect(page.getByText("Cross-dataset comparison")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/must never be averaged/i)).toBeVisible();
+});
+
+test.describe("no horizontal page overflow at mobile width", () => {
+  // Regression: <main> (a flex child of body's `flex flex-col`) was missing an
+  // explicit w-full, so on pages with a wide table or an unbroken long string
+  // (a file path, a source URL) it grew past the viewport instead of shrinking
+  // to it - real horizontal scroll on /evaluation, /cross-dataset, and
+  // /datasets, confirmed via document.documentElement.scrollWidth. Fixed by
+  // adding w-full to every page's <main>, wrapping the two bare <table>s on
+  // /evaluation in overflow-x-auto (matching the pattern /cross-dataset's
+  // table already used), and break-words/break-all on the long strings.
+  for (const path of ["/", "/upload", "/evaluation", "/datasets", "/cross-dataset", "/trajectory"]) {
+    test(path, async ({ page }) => {
+      await page.goto(path);
+      await page.waitForTimeout(1000);
+      const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+      const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+      expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 2);
+    });
+  }
+});
+
 test("Generic non-FEMTO CSV is treated as out-of-distribution, not a FEMTO prediction", async ({
   page,
 }) => {

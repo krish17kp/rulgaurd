@@ -30,7 +30,7 @@ export default function DatasetsPage() {
   }, []);
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-16">
+    <main className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-16">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Explore datasets</h1>
         <p className="mt-1 text-sm text-foreground-muted">
@@ -241,7 +241,7 @@ function FaultDiagnosisCard({ dataset: d }: { dataset: FaultDiagnosisDataset }) 
       <p className="mt-2 rounded border border-surface-border bg-surface px-2 py-1.5 text-xs">
         <strong>RUL evaluation unavailable.</strong> {d.rul_unavailable_reason}
       </p>
-      <p className="mt-1 text-xs text-foreground-muted">Source: {d.source}</p>
+      <p className="mt-1 text-xs text-foreground-muted break-all">Source: {d.source}</p>
     </div>
   );
 }
