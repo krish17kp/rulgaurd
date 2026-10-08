@@ -26,31 +26,65 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-14 px-6 py-16 sm:py-20">
-      <header className="flex flex-col gap-5">
-        <span className="w-fit rounded-full bg-accent/10 px-3 py-1 text-xs font-medium tracking-wide text-accent">
-          Industrial predictive maintenance
-        </span>
-        <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">RULGuard</h1>
-        <p className="max-w-xl text-lg leading-relaxed text-foreground-muted">
-          Predict bearing degradation before failure. RULGuard analyzes vibration data to
-          estimate Remaining Useful Life, and verifies whether the current model is even
-          applicable to your signal before it reports a number.
-        </p>
-        <div className="flex flex-wrap items-center gap-3">
-          <Link
-            href="/upload"
-            className="inline-flex w-fit items-center rounded-lg bg-accent px-5 py-3 text-sm font-semibold text-background shadow-sm transition-colors hover:bg-accent-strong"
-          >
-            Analyze Bearing Data
-          </Link>
-          <Link
-            href="/evaluation"
-            className="inline-flex w-fit items-center rounded-lg border border-surface-border px-5 py-3 text-sm font-medium text-foreground transition-colors hover:border-accent/50 hover:text-accent"
-          >
-            View Model Reliability
-          </Link>
+    <main className="mx-auto flex w-full max-w-5xl flex-col gap-14 px-6 py-16 sm:py-20">
+      <header className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="flex flex-col gap-5">
+          <span className="w-fit rounded-full bg-accent/10 px-3 py-1 text-sm font-medium tracking-wide text-accent">
+            Industrial predictive maintenance
+          </span>
+          <h1 className="text-5xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
+            Know when a bearing is running out of time.
+          </h1>
+          <p className="max-w-xl text-lg leading-relaxed text-foreground-muted">
+            RULGuard estimates Remaining Useful Life from vibration data, and checks whether
+            the model even applies to your signal before it reports a number.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/upload"
+              className="inline-flex w-fit items-center rounded-lg bg-accent px-5 py-3 text-base font-semibold text-background shadow-sm transition-colors hover:bg-accent-strong"
+            >
+              Analyze Bearing Data
+            </Link>
+            <Link
+              href="/datasets"
+              className="inline-flex w-fit items-center rounded-lg border border-surface-border px-5 py-3 text-base font-medium text-foreground transition-colors hover:border-accent/50 hover:text-accent"
+            >
+              Explore Datasets
+            </Link>
+          </div>
         </div>
+
+        <svg
+          viewBox="0 0 320 220"
+          role="img"
+          aria-label="A degrading vibration signal trending from healthy to critical"
+          className="hidden w-full max-w-sm justify-self-center text-accent lg:block"
+        >
+          <defs>
+            <linearGradient id="hiCurve" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="var(--success)" />
+              <stop offset="55%" stopColor="var(--caution)" />
+              <stop offset="100%" stopColor="var(--danger)" />
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width="320" height="220" rx="16" fill="var(--surface)" stroke="var(--surface-border)" />
+          <polyline
+            points="20,70 55,60 90,75 125,55 160,95 195,80 230,130 265,110 300,165"
+            fill="none"
+            stroke="currentColor"
+            strokeOpacity="0.35"
+            strokeWidth="2"
+          />
+          <path
+            d="M20,180 C 80,170 120,150 160,120 C 210,85 260,70 300,40"
+            fill="none"
+            stroke="url(#hiCurve)"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
+          <circle cx="300" cy="40" r="5" fill="var(--danger)" />
+        </svg>
       </header>
 
       <section aria-label="Pipeline" className="flex flex-wrap items-center gap-2 text-xs text-foreground-muted">
@@ -72,7 +106,7 @@ export default function Home() {
             key={c.title}
             className="rounded-xl border border-surface-border bg-surface p-5 shadow-sm transition-colors hover:border-accent/40"
           >
-            <h2 className="text-sm font-semibold">{c.title}</h2>
+            <h2 className="text-lg font-semibold">{c.title}</h2>
             <p className="mt-1.5 text-sm leading-relaxed text-foreground-muted">{c.body}</p>
           </div>
         ))}
