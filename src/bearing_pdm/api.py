@@ -1548,6 +1548,14 @@ def cross_dataset_comparison() -> dict[str, Any]:
         ),
     }
 
+    # Independent of cde below (fault-diagnosis datasets have no RUL ground
+    # truth and are never part of the LOBO/zero-shot comparison) - set
+    # before cde's early-return branch so a missing/unvendored
+    # cross_dataset.json never hides this unrelated field too (found live:
+    # a missing cross_dataset.json made the whole response omit this key
+    # entirely rather than include it as null).
+    response["fault_diagnosis_datasets"] = _load_fault_diagnosis_datasets()
+
     cde = _load_cross_dataset_experiments()
     if cde is None:
         response["cross_dataset_experiments"] = None
@@ -1577,7 +1585,6 @@ def cross_dataset_comparison() -> dict[str, Any]:
         "routing_skill_by_dataset": cde.get("routing_skill_by_dataset"),
         "applicability_vs_error": cde.get("applicability_vs_error"),
     }
-    response["fault_diagnosis_datasets"] = _load_fault_diagnosis_datasets()
     return response
 
 

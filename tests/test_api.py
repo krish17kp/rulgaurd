@@ -286,6 +286,44 @@ def test_cross_dataset_experiments_reflects_datasets_missing_not_a_hardcoded_cla
     assert cde["routing_skill_by_dataset"]["raw_seconds"]["ims"] == -0.555
 
 
+def test_fault_diagnosis_datasets_survives_a_missing_cross_dataset_experiments(
+    monkeypatch, tmp_path
+):
+    """Regression for a live bug: cross_dataset_comparison() used to set
+    fault_diagnosis_datasets AFTER the `if cde is None: ... return response`
+    branch, so whenever cross_dataset.json/CROSS_DATASET_JSON was genuinely
+    unavailable (the real Vercel Preview state - cross_dataset.json isn't
+    vendored by frontend/package.json's prebuild and no CROSS_DATASET_JSON
+    env var is set), the response omitted fault_diagnosis_datasets entirely
+    even though it has nothing to do with cde. Forces cde to None the same
+    way (no CROSS_DATASET_JSON, no file) and asserts the field still comes
+    back as a real key (None or not, depending on whether this machine's
+    own fault_diagnosis_datasets.json exists - never silently absent)."""
+    monkeypatch.delenv("CROSS_DATASET_JSON", raising=False)
+    monkeypatch.setattr(api, "METRICS_DIR", tmp_path / "does-not-exist")
+    monkeypatch.setenv("RUL_EVALUATION_JSON", json.dumps({
+        "femto_lobo_overall_by_model": {
+            "extra_trees": {"mae_seconds": 1.0, "n": 1, "overestimate_rate": 0.5},
+            "naive": {"mae_seconds": 2.0},
+        },
+        "college_overall_by_model": {
+            "extra_trees": {"mae_seconds": 1.0, "n": 1, "overestimate_rate": 0.5},
+            "naive": {"mae_seconds": 0.0},
+        },
+        "college_naive_caveat": "caveat",
+    }))
+    monkeypatch.setenv("HEALTH_INDICATOR_COMPARISON_JSON", json.dumps({"selected": "reference_hi"}))
+
+    response = client.get("/evaluation/cross-dataset")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cross_dataset_experiments"] is None  # confirms we actually hit the early-return branch
+    assert "fault_diagnosis_datasets" in body
+    fault_diag_path = api.DEPLOY_DATA_DIR / "fault_diagnosis_datasets.json"
+    if fault_diag_path.exists():
+        assert body["fault_diagnosis_datasets"] is not None
+
+
 def test_predict_rul_rejects_non_femto_dataset():
     response = client.post(
         "/predict/rul", json={"dataset_id": "college", "features": {}}
