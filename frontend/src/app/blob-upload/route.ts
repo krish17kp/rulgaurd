@@ -22,6 +22,19 @@ const _ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000"
   .map((o) => o.trim())
   .filter(Boolean);
 
+// Preview deployments each get a unique, unpredictable subdomain
+// (rulguard-<hash>-<team>.vercel.app), so no fixed ALLOWED_ORIGINS list can
+// ever contain it. Vercel injects the deployment's own hostname into these
+// env vars at runtime - trust a request that matches the deployment serving
+// it, on top of the explicitly configured origins.
+const _DEPLOYMENT_ORIGINS = [process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL]
+  .filter((host): host is string => Boolean(host))
+  .map((host) => `https://${host}`);
+
+function isAllowedOrigin(origin: string): boolean {
+  return _ALLOWED_ORIGINS.includes(origin) || _DEPLOYMENT_ORIGINS.includes(origin);
+}
+
 /**
  * Mints a short-lived client-upload token so the browser can PUT a raw
  * dataset file straight to Vercel Blob storage, never through this (or any)
@@ -30,7 +43,7 @@ const _ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000"
  */
 export async function POST(request: Request): Promise<NextResponse> {
   const origin = request.headers.get("origin");
-  if (origin && !_ALLOWED_ORIGINS.includes(origin)) {
+  if (origin && !isAllowedOrigin(origin)) {
     return NextResponse.json({ error: "Origin not allowed." }, { status: 403 });
   }
 
