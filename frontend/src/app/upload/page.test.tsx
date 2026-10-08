@@ -29,13 +29,25 @@ import {
 } from "@/lib/api";
 import { DIRECT_UPLOAD_THRESHOLD_BYTES, uploadFileToBlob } from "@/lib/blobUpload";
 
+// 6 numeric columns, no header - FEMTO's acc_*.csv shape (hour, minute,
+// second, microsecond, accel_horizontal, accel_vertical).
+const FEMTO_ROW = "9,29,5,884410,-0.1,0.329\n";
+
 function smallFile(name = "small.csv") {
-  return new File(["a,b\n1,2\n"], name, { type: "text/csv" });
+  return new File([FEMTO_ROW], name, { type: "text/csv" });
 }
 
 function bigFile(name = "big.csv") {
-  const bytes = new Uint8Array(DIRECT_UPLOAD_THRESHOLD_BYTES + 1024);
-  return new File([bytes], name, { type: "text/csv" });
+  const repeats = Math.ceil((DIRECT_UPLOAD_THRESHOLD_BYTES + 1024) / FEMTO_ROW.length);
+  return new File([FEMTO_ROW.repeat(repeats)], name, { type: "text/csv" });
+}
+
+// College's LogFile_*.csv: 4 numeric columns, no header - a different,
+// real dataset shape that must never reach the FEMTO prediction path.
+function collegeFile(name = "LogFile_2022-06-20-17-00-31.csv") {
+  return new File(["0.0485752270259481,-0.0638247022912424,41.6149124793233,24.8173535597786\n"], name, {
+    type: "text/csv",
+  });
 }
 
 const genericProfile = (compatibility: Compatibility, reasons: string[] = []): DatasetProfileResponse => ({
@@ -195,6 +207,19 @@ describe("UploadPage", () => {
     await waitFor(() => expect(screen.getByText(/not a failed request/i)).toBeInTheDocument());
     expect(screen.getByText(/shift ratio 9\.10x/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^retry$/i })).not.toBeInTheDocument();
+  });
+
+  it("detects a college LogFile and refuses to send it to FEMTO prediction", async () => {
+    render(<UploadPage />);
+
+    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, collegeFile());
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+
+    await waitFor(() => expect(screen.getByText(/doesn't look like a FEMTO/)).toBeInTheDocument());
+    expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
+    expect(predictRulFromFemtoAcquisitionBlob).not.toHaveBeenCalled();
+    expect(uploadFileToBlob).not.toHaveBeenCalled();
+    expect(screen.getByText(/inspect another dataset/i)).toBeInTheDocument();
   });
 
   it("the Advanced section provides generic dataset inspection, off by default", async () => {

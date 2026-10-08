@@ -16,6 +16,7 @@ import { ExplainResult } from "@/components/ExplainResult";
 import { SignalAndFeatures } from "@/components/SignalAndFeatures";
 import { SuppressedResultNotice, isSuppressedApplicability } from "@/components/SuppressedResultNotice";
 import { BlobUploadError, DIRECT_UPLOAD_THRESHOLD_BYTES, uploadFileToBlob } from "@/lib/blobUpload";
+import { looksLikeFemtoAcquisition } from "@/lib/datasetSniff";
 
 type DatasetType = "femto" | "generic";
 
@@ -140,6 +141,23 @@ export default function UploadPage() {
   async function handleFemtoFile(file: File) {
     const seq = ++requestSeq.current;
     const retry = () => handleFemtoFile(file);
+    // A file that isn't shaped like a FEMTO acc_*.csv (e.g. a college
+    // LogFile_*.csv, which uses a different 4-column layout) must never be
+    // sent to the FEMTO-only prediction path - checked here, before any
+    // upload, so a large non-FEMTO file isn't uploaded only to be rejected
+    // by the backend afterwards.
+    if (!(await looksLikeFemtoAcquisition(file))) {
+      setPredictState({
+        status: "error",
+        error:
+          'This file doesn\'t look like a FEMTO acc_*.csv acquisition (expected 6 numeric ' +
+          'columns, no header). Use "Advanced: inspect another dataset" below instead.',
+        retryable: false,
+        retry,
+        suppressed: false,
+      });
+      return;
+    }
     try {
       let data: PredictRulResponse;
       if (file.size >= DIRECT_UPLOAD_THRESHOLD_BYTES) {
