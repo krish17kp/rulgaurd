@@ -32,15 +32,13 @@ export default function DatasetsPage() {
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-16">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Explore datasets</h1>
-        <p className="mt-1 text-sm text-foreground-muted">
-          Every card below is built from real data this project has actually processed. Real and
-          synthetic datasets are visually separated, and RUL is shown only where a true
-          run-to-failure target exists. See{" "}
+        <h1 className="text-3xl font-semibold tracking-tight">Datasets</h1>
+        <p className="mt-1 text-base text-foreground-muted">
+          Real and synthetic data this project has actually processed. See{" "}
           <Link href="/cross-dataset" className="text-accent underline">
-            Cross-dataset comparison
+            cross-dataset comparison
           </Link>{" "}
-          for the full numeric breakdown.
+          for the numeric breakdown.
         </p>
       </header>
 
@@ -257,16 +255,9 @@ function SyntheticCard() {
         SYNTHETIC DEMONSTRATION — NOT REAL-WORLD VALIDATION
       </p>
       <p className="mt-2 text-xs text-foreground-muted">
-        A reproducible, seeded generator (rising amplitude, rising impulsiveness, configurable
-        shaft frequency/noise) used to demonstrate the pipeline end to end without real data.
-        Every synthetic run is still routed through the real applicability/OOD check against the
-        frozen FEMTO model - an out-of-domain result correctly suppresses RUL, even for synthetic
-        signals engineered to look bearing-shaped. Synthetic results are never combined with
-        real-world model performance.
-      </p>
-      <p className="mt-2 text-xs text-foreground-muted">
-        Run it locally: Streamlit dashboard &rarr; <strong>Experiment Lab</strong> &rarr;{" "}
-        <strong>Synthetic Bearing (simulated)</strong>.
+        A seeded signal generator for exercising the pipeline end to end. Still routed through
+        the real applicability check — out-of-domain results correctly suppress RUL. Never
+        combined with real-world model performance.
       </p>
     </div>
   );

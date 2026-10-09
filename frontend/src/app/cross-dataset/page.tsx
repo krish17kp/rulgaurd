@@ -32,11 +32,9 @@ export default function CrossDatasetPage() {
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-16">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Cross-dataset comparison</h1>
-        <p className="mt-1 text-sm text-foreground-muted">
-          Real numbers read verbatim from <code>/evaluation/cross-dataset</code>, which assembles
-          from the same committed artifacts as the Reliability page. Nothing here is recomputed
-          in the browser.
+        <h1 className="text-3xl font-semibold tracking-tight">Cross-dataset</h1>
+        <p className="mt-1 text-base text-foreground-muted">
+          How the model performs across datasets it wasn&apos;t trained on.
         </p>
       </header>
 
