@@ -94,7 +94,7 @@ test("Explore Bearing Trajectory shows HI, stage, and held-out RUL for Bearing2_
 test("Evaluation page shows the college case study with the naive-oracle caveat", async ({ page }) => {
   await page.goto("/evaluation");
   await expect(page.getByText(/College case study/i)).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(/domain-shift limitation/i)).toBeVisible();
+  await expect(page.getByText(/never applied to college data as if validated/i)).toBeVisible();
 });
 
 test("Datasets explorer shows real FEMTO/College/IMS/CWRU/Paderborn cards and a separated Synthetic card, with no fabricated RUL", async ({
@@ -128,7 +128,7 @@ test("Datasets explorer shows real FEMTO/College/IMS/CWRU/Paderborn cards and a 
 test("Cross-dataset page renders grouped sections without a 5xx or crash", async ({ page }) => {
   const response = await page.goto("/cross-dataset");
   expect(response?.status()).toBeLessThan(500);
-  await expect(page.getByText("Cross-dataset comparison")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "Cross-dataset" })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(/must never be averaged/i)).toBeVisible();
 });
 
