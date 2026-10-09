@@ -7,7 +7,7 @@ import {
   CollegeBundleEntry,
   analyzeBundle,
 } from "@/lib/api";
-import { BearingZipResult } from "@/app/analyze-bearing-zip/page";
+import { BearingZipResult } from "@/components/BearingZipResult";
 import { MultiSeriesChart, ChartSeries } from "@/components/MultiSeriesChart";
 
 type State =
