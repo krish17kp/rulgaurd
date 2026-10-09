@@ -55,12 +55,9 @@ export default function DegradationPage() {
         </p>
       </div>
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Advanced: degradation / health indicator trend</h1>
-        <p className="mt-1 text-sm text-foreground-muted">
-          Paste an ordered list of feature rows for one bearing run (each needs{" "}
-          <code>sequence_index</code> plus the HI model&apos;s feature columns — see{" "}
-          <code>GET /models/info</code>). The health indicator and stage are a severity
-          band on the signal, never a physical fault-type diagnosis.
+        <h1 className="text-3xl font-semibold tracking-tight">Degradation</h1>
+        <p className="mt-1 text-base text-foreground-muted">
+          Paste an ordered list of feature rows for one bearing run.
         </p>
       </header>
 

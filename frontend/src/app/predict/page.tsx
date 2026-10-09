@@ -53,11 +53,9 @@ export default function PredictPage() {
         </p>
       </div>
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Advanced: manual feature-row prediction</h1>
-        <p className="mt-1 text-sm text-foreground-muted">
-          Paste an already-extracted FEMTO feature row (column name → value). This does not
-          accept raw sensor CSVs — for that, use the normal Analyze workflow. Missing columns
-          fall back to the model&apos;s training median and are disclosed below, not hidden.
+        <h1 className="text-3xl font-semibold tracking-tight">Predict</h1>
+        <p className="mt-1 text-base text-foreground-muted">
+          Paste an already-extracted FEMTO feature row (column name → value).
         </p>
       </header>
 
