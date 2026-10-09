@@ -1,5 +1,10 @@
 {
   "artifacts": {
+    "applicability_bundle.joblib": {
+      "sha256": "5d6705128b31da4e28b7e28794607149969514d0065aa81828ae98ea1cb904c2",
+      "size_bytes": 110171456,
+      "source_url": "https://ctu3kekak2ukxspd.public.blob.vercel-storage.com/models/applicability_bundle.joblib"
+    },
     "cross_domain_bundle.joblib": {
       "sha256": "04262433e7450855cf526c42006d0d70d8454318929a34696482bec88030dbe5",
       "size_bytes": 361632809,

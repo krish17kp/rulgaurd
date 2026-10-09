@@ -1045,13 +1045,23 @@ def test_load_bundle_drops_the_unused_sn_fraction_multi_entry_to_save_memory():
     (routing.candidates_from_bundle / reliability.BUNDLE_ENTRY); the other
     entry's full fitted model+calibrators must not stay resident in
     _MODEL_CACHE for the rest of the process's life (Hobby-tier /tmp+memory
-    budget - see docs/PRODUCTION_RELEASE.md)."""
+    budget - see docs/PRODUCTION_RELEASE.md).
+
+    _load_bundle prefers APPLICABILITY_BUNDLE_NAME (the derived, already-
+    trimmed-to-raw_seconds artifact) when present locally, falling back to
+    CROSS_DOMAIN_BUNDLE_NAME otherwise - cache under whichever name was
+    actually used, not a hardcoded one."""
     api._MODEL_CACHE.clear()
     bundle = api._load_bundle()
     assert bundle is not None
     assert set(bundle) == {"raw_seconds"}
+    loaded_name = (
+        api.APPLICABILITY_BUNDLE_NAME
+        if (api.MODELS_DIR / api.APPLICABILITY_BUNDLE_NAME).exists()
+        else api.CROSS_DOMAIN_BUNDLE_NAME
+    )
     # Cached value is the same trimmed dict, not the original.
-    assert set(api._MODEL_CACHE[api.CROSS_DOMAIN_BUNDLE_NAME]) == {"raw_seconds"}
+    assert set(api._MODEL_CACHE[loaded_name]) == {"raw_seconds"}
     # Idempotent on a second call (cache already trimmed).
     assert api._load_bundle() is bundle
     api._MODEL_CACHE.clear()

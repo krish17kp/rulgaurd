@@ -58,6 +58,9 @@ from bearing_pdm.routing import MAX_NAN_FRACTION, candidates_from_bundle
 from bearing_pdm.stages import assign_stages
 
 CROSS_DOMAIN_BUNDLE_NAME = "cross_domain_bundle.joblib"
+# Derived from CROSS_DOMAIN_BUNDLE_NAME by scripts/build_applicability_bundle.py -
+# same raw_seconds fitted objects, ~110MB instead of ~361MB. See _load_bundle.
+APPLICABILITY_BUNDLE_NAME = "applicability_bundle.joblib"
 
 # FEMTO's acc_*.csv is a fixed, headerless, positional 6-column layout at a
 # known sampling rate (femto.py's own docstring) - this is a *known adapter*
@@ -1112,23 +1115,34 @@ def _load_joblib_locked(name: str) -> Any | None:
 
 
 def _load_bundle() -> Any | None:
-    """The cross-domain bundle (~200MB): supplies only the cached applicability
-    model and conformal calibrator; its models are never used for the served
+    """The cross-domain bundle: supplies only the cached applicability model
+    and conformal calibrator; its models are never used for the served
     prediction. Loaded once per process through the same verified loader.
 
     Only bundle["raw_seconds"] is ever read anywhere this is called from
     (routing.candidates_from_bundle filters to "raw_seconds"; reliability.py's
-    BUNDLE_ENTRY is "raw_seconds") - the bundle's other entry,
-    "sn_fraction_multi", carries its own full fitted RUL model + calibrators
-    and is dead weight here. Dropping it immediately after load (rather than
-    holding the whole dict in _MODEL_CACHE for a warm instance's lifetime)
-    roughly halves this artifact's resident memory - the suspected cause of
-    the applicability/OOD gate failing to load on the Hobby tier's /tmp+memory
-    budget alongside rul_extra_trees.joblib (docs/PRODUCTION_RELEASE.md)."""
-    bundle = _load_joblib(CROSS_DOMAIN_BUNDLE_NAME)
+    BUNDLE_ENTRY is "raw_seconds") - the full research bundle's other entry,
+    "sn_fraction_multi" (~251MB of its ~361MB total), carries its own fully
+    fitted RUL model + calibrators and is dead weight here. On a deployment
+    this app does not control the disk budget of (Vercel's Hobby-tier /tmp),
+    downloading the full 361MB artifact just to discard 70% of it after load
+    was the direct cause of a live "No space left on device" failure -
+    disk pressure happens during download, before this function ever runs.
+
+    APPLICABILITY_BUNDLE_NAME is a derived artifact - scripts/build_applicability_bundle.py
+    extracts cross_domain_bundle["raw_seconds"] unchanged (no refit, no
+    recomputation, byte-identical fitted objects) into its own ~110MB
+    joblib file. Preferred when present; falls back to the full research
+    bundle (then trims it the same way) so an environment that only has
+    the original artifact keeps working unchanged."""
+    name = APPLICABILITY_BUNDLE_NAME
+    bundle = _load_joblib(name)
+    if bundle is None:
+        name = CROSS_DOMAIN_BUNDLE_NAME
+        bundle = _load_joblib(name)
     if isinstance(bundle, dict) and set(bundle) - {"raw_seconds"}:
         bundle = {"raw_seconds": bundle["raw_seconds"]}
-        _MODEL_CACHE[CROSS_DOMAIN_BUNDLE_NAME] = bundle
+        _MODEL_CACHE[name] = bundle
     return bundle
 
 

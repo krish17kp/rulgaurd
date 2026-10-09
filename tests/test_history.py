@@ -78,7 +78,11 @@ def test_api_success_failure_and_no_input_persistence(monkeypatch, tmp_path):
                             model=SimpleNamespace(predict=lambda x: [3600]))
     # No cross-domain bundle: the synthetic two-feature model has no fitted
     # applicability reference, so the gate degrades honestly (not assessed).
+    # Seed both names _load_bundle tries (it prefers APPLICABILITY_BUNDLE_NAME,
+    # falling back to CROSS_DOMAIN_BUNDLE_NAME) so neither hits the real
+    # on-disk artifact.
     monkeypatch.setattr(api, "_MODEL_CACHE", {"rul_extra_trees.joblib": model,
+                                              api.APPLICABILITY_BUNDLE_NAME: None,
                                               api.CROSS_DOMAIN_BUNDLE_NAME: None})
     monkeypatch.setattr(api, "_MODEL_VERSIONS", {"rul_extra_trees.joblib": "sha256:test"})
     with TestClient(api.app) as client:

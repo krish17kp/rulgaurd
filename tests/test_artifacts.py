@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -293,3 +294,46 @@ def test_concurrent_requests_for_the_same_artifact_download_only_once(isolated_d
     assert all(r is not None for r in results), results
     assert all(r.read_bytes() == content for r in results)
     assert call_count == 1, "the lock should have prevented a duplicate download"
+
+
+def test_minimal_applicability_bundle_is_scientifically_identical_to_full_bundle(monkeypatch):
+    """Regression for the live Vercel ENOSPC fix: applicability_bundle.joblib
+    (derived by scripts/build_applicability_bundle.py, no refit) must produce
+    byte-identical API output to the full cross_domain_bundle.joblib it was
+    derived from - proves the artifact-packaging change changed nothing
+    scientific. Uses the real repo artifacts (not the isolated_dirs fixture)
+    and the real FEMTO fixture, same pattern as test_analyze_rul.py."""
+    from fastapi.testclient import TestClient
+
+    from bearing_pdm import api
+
+    full_path = api.artifacts.MODELS_DIR / api.CROSS_DOMAIN_BUNDLE_NAME
+    minimal_path = api.artifacts.MODELS_DIR / api.APPLICABILITY_BUNDLE_NAME
+    if not full_path.exists() or not minimal_path.exists():
+        pytest.skip("real artifacts/models/*.joblib not present in this environment")
+
+    client = TestClient(api.app)
+    fixture = Path(__file__).resolve().parents[1] / "data/interim/femto/Learning_set/Bearing2_1/acc_00450.csv"
+    with fixture.open("rb") as fh:
+        files = {"file": ("acc_00450.csv", fh.read(), "text/csv")}
+
+    # Run 1: force the fallback path (minimal artifact "missing") so
+    # _load_bundle loads the full research bundle, same as before this fix.
+    monkeypatch.setattr(api, "APPLICABILITY_BUNDLE_NAME", "__does_not_exist__.joblib")
+    api._MODEL_CACHE.clear()
+    full_bundle_response = client.post("/predict/rul/femto-acquisition", files=files)
+
+    # Run 2: restore the real name so _load_bundle prefers the minimal artifact.
+    monkeypatch.undo()
+    api._MODEL_CACHE.clear()
+    minimal_bundle_response = client.post("/predict/rul/femto-acquisition", files=files)
+
+    assert full_bundle_response.status_code == minimal_bundle_response.status_code == 200
+    assert full_bundle_response.json() == minimal_bundle_response.json()
+
+    # The specific acceptance criterion this fix exists to restore on a
+    # memory/disk-constrained deployment.
+    body = minimal_bundle_response.json()
+    assert body["rul_seconds"] == 4610.0
+    assert body["applicability_level"] == "HIGH"
+    assert body["compatibility"] == "FULLY_SUPPORTED"
