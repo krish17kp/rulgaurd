@@ -46,11 +46,9 @@ export default function TrajectoryPage() {
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-16">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Explore bearing trajectory</h1>
-        <p className="mt-1 text-sm text-foreground-muted">
-          Whole-run Health Indicator and leave-one-bearing-out RUL evidence for the six FEMTO
-          learning bearings, read from the same fitted models and held-out evaluation artifacts
-          as the project&apos;s Streamlit dashboard — nothing here is fit or retrained on demand.
+        <h1 className="text-3xl font-semibold tracking-tight">Trajectory</h1>
+        <p className="mt-1 text-base text-foreground-muted">
+          Health indicator and RUL evidence across a bearing&apos;s full run.
         </p>
       </header>
 
@@ -121,14 +119,8 @@ function HealthSection({ data }: { data: TrajectoryResponse }) {
       <MultiSeriesChart series={series} xLabel="acquisition index (life progression)" yLabel="health indicator" />
       <p className="text-xs text-foreground-muted">
         Warn below {data.stage_thresholds.hi_warn.toFixed(3)}, critical below{" "}
-        {data.stage_thresholds.hi_critical.toFixed(3)} (fitted on the other five bearings),
-        committed after {data.stage_thresholds.persistence} consecutive acquisitions agree. The two
-        legacy curves are shown only for comparison — neither is used for staging (see
-        docs/decisions.md D18).
-      </p>
-      <p className="rounded-md bg-surface px-3 py-2 text-xs font-medium text-foreground-muted">
-        Degradation stage is a severity band on the health indicator, not a physical fault
-        diagnosis.
+        {data.stage_thresholds.hi_critical.toFixed(3)} — a severity band on the health
+        indicator, not a physical fault diagnosis.
       </p>
     </section>
   );
@@ -183,10 +175,8 @@ function RulSection({ data }: { data: TrajectoryResponse }) {
         </div>
       </dl>
       <p className="text-xs text-foreground-muted">
-        Predicted values are from the leave-one-bearing-out evaluation: a model fit on the other
-        five learning bearings, never on this one. A predicted point above the actual RUL curve is
-        an unsafe over-prediction (more remaining life claimed than the bearing actually had); a
-        point below is conservative.
+        Predicted values: leave-one-bearing-out, never fit on this bearing. A point above the
+        actual curve is an over-prediction; below is conservative.
       </p>
     </section>
   );
