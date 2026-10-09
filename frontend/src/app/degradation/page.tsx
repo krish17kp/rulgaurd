@@ -63,6 +63,7 @@ export default function DegradationPage() {
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <textarea
+          aria-label="Ordered feature rows as JSON"
           className="h-40 rounded-lg border border-surface-border bg-surface p-3 font-mono text-xs"
           value={rowsJson}
           onChange={(e) => setRowsJson(e.target.value)}
