@@ -215,7 +215,7 @@ describe("UploadPage", () => {
     await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, collegeFile());
     await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
 
-    await waitFor(() => expect(screen.getByText(/doesn't look like a FEMTO/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/not recognized for RUL prediction/)).toBeInTheDocument());
     expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
     expect(predictRulFromFemtoAcquisitionBlob).not.toHaveBeenCalled();
     expect(uploadFileToBlob).not.toHaveBeenCalled();
@@ -231,7 +231,7 @@ describe("UploadPage", () => {
     await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, smallFile());
     await userEvent.click(screen.getByRole("button", { name: /inspect dataset/i }));
 
-    await waitFor(() => expect(screen.getByText("UNSUPPORTED")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Unsupported")).toBeInTheDocument());
     expect(screen.getByText(/no vibration channel recognised/)).toBeInTheDocument();
     expect(inspectDataset).toHaveBeenCalledTimes(1);
   });

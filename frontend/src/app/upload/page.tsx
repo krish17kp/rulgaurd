@@ -46,6 +46,17 @@ const BADGE: Record<Compatibility, string> = {
   INVALID_INPUT: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
 };
 
+// Plain-language labels for the primary UI - the raw enum (e.g.
+// RETRAIN_REQUIRED) stays available to anyone who reads the API directly,
+// but a first-time visitor shouldn't have to decode SNAKE_CASE.
+const COMPATIBILITY_LABEL: Record<Compatibility, string> = {
+  FULLY_SUPPORTED: "Supported",
+  RETRAIN_REQUIRED: "Outside supported domain",
+  ADAPTER_REQUIRED: "Needs adaptation",
+  UNSUPPORTED: "Unsupported",
+  INVALID_INPUT: "Invalid input",
+};
+
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -150,8 +161,9 @@ export default function UploadPage() {
       setPredictState({
         status: "error",
         error:
-          'This file doesn\'t look like a FEMTO acc_*.csv acquisition (expected 6 numeric ' +
-          'columns, no header). Use "Advanced: inspect another dataset" below instead.',
+          'Dataset not recognized for RUL prediction. This doesn\'t match the FEMTO ' +
+          'acquisition format RULGuard predicts from - use "Advanced: inspect another ' +
+          'dataset" below (college raw data uses the offline Analysis Bundle workflow).',
         retryable: false,
         retry,
         suppressed: false,
@@ -218,11 +230,9 @@ export default function UploadPage() {
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-16">
       <header>
-        <h1 className="text-3xl font-semibold tracking-tight">Analyze Bearing Data</h1>
-        <p className="mt-2 text-sm leading-relaxed text-foreground-muted">
-          Upload a raw vibration acquisition from a supported bearing (FEMTO, headerless
-          <code className="mx-1 rounded bg-surface px-1 py-0.5 text-xs">acc_*.csv</code>,
-          6 columns, 25.6kHz) to get a Remaining Useful Life estimate.
+        <h1 className="text-4xl font-semibold tracking-tight">Analyze Bearing Data</h1>
+        <p className="mt-2 text-base leading-relaxed text-foreground-muted">
+          Upload vibration data and RULGuard will identify the supported workflow.
         </p>
       </header>
 
@@ -344,7 +354,7 @@ export default function UploadPage() {
               }`}
             >
               <div>
-                <p className="text-sm text-foreground-muted">Predicted Remaining Useful Life</p>
+                <p className="text-base text-foreground-muted">Remaining useful life</p>
                 <p className="text-4xl font-semibold tracking-tight">
                   {predictState.data.rul_hours.toFixed(2)} hours
                 </p>
@@ -353,13 +363,13 @@ export default function UploadPage() {
                 </p>
               </div>
               <ApplicabilityNote result={predictState.data} />
-              <p className="text-xs leading-relaxed text-foreground-muted">
+              <p className="text-sm leading-relaxed text-foreground-muted">
                 {applicabilityInterpretation(predictState.data.applicability_level)}
               </p>
+              <ExplainResult result={predictState.data} />
               {selectedFile && (
                 <SignalAndFeatures key={`${selectedFile.name}-${selectedFile.size}`} file={selectedFile} />
               )}
-              <ExplainResult result={predictState.data} />
               <button
                 type="button"
                 onClick={resetForNewFile}
@@ -403,7 +413,7 @@ export default function UploadPage() {
             <div className="flex flex-col gap-4">
               <div className="flex items-center gap-3">
                 <span className={`rounded-full px-3 py-1 text-xs font-medium ${BADGE[inspectState.data.compatibility]}`}>
-                  {inspectState.data.compatibility.replace(/_/g, " ")}
+                  {COMPATIBILITY_LABEL[inspectState.data.compatibility]}
                 </span>
                 <span className="text-sm text-foreground-muted">{inspectState.data.profile.file}</span>
               </div>
@@ -470,11 +480,7 @@ export default function UploadPage() {
           Advanced: inspect another (non-FEMTO) dataset
         </summary>
         <div className="mt-3 flex flex-col gap-3 text-sm text-foreground-muted">
-          <p>
-            Inspects a file&apos;s structure (delimiter, header, column meanings) and reports
-            compatibility — it does not run a prediction. Switching here clears any in-progress
-            FEMTO analysis.
-          </p>
+          <p>Inspects a file&apos;s structure and reports compatibility — no prediction is run.</p>
           <label className="flex items-center gap-2">
             <input
               type="radio"

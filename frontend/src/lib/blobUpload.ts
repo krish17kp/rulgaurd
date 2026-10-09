@@ -31,6 +31,12 @@ export async function uploadFileToBlob(
     });
     return result.url;
   } catch (err) {
-    throw new BlobUploadError(err instanceof Error ? err.message : "Upload to storage failed");
+    // The @vercel/blob SDK's own error text ("Vercel Blob: Failed to
+    // retrieve the client token") is an infrastructure detail, not
+    // something a visitor can act on - log it for debugging and show a
+    // plain, retryable message instead (found live: this exact string was
+    // shown directly to a user).
+    if (err instanceof Error) console.error("Blob upload failed:", err.message);
+    throw new BlobUploadError("Upload could not start. Please try again.");
   }
 }
