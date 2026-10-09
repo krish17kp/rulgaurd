@@ -379,6 +379,43 @@ export function inspectDatasetBlob(
   });
 }
 
+/**
+ * Response shape for `/analyze/mat` (src/bearing_pdm/api.py's MatAnalysisResponse):
+ * a real CWRU or Paderborn .mat fault-diagnosis recording, read by the
+ * existing cwru.py/paderborn.py adapters. RUL is never computed for these -
+ * they're short fixed-condition snapshots, not run-to-failure trajectories
+ * (ml-data.md) - so `rul_supported` is always false and `rul_seconds` always
+ * null.
+ */
+export interface AnalyzeMatResponse {
+  dataset_id: "cwru" | "paderborn";
+  dataset_type: string;
+  dataset_label: string;
+  file_name: string;
+  sample_rate_hz: number;
+  channel: string;
+  n_samples: number;
+  features: Record<string, number>;
+  waveform_preview: number[];
+  waveform_preview_points: number;
+  fft_frequency_hz_preview: number[];
+  fft_magnitude_preview: number[];
+  applicability_level: "HIGH" | "MEDIUM" | "LOW" | null;
+  compatibility: Compatibility;
+  applicability_reasons: string[];
+  rul_supported: false;
+  rul_seconds: null;
+  warnings: string[];
+  metadata: Record<string, string | number | string[] | null>;
+  note: string;
+}
+
+export async function analyzeMat(file: File): Promise<AnalyzeMatResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  return requestForm<AnalyzeMatResponse>("/analyze/mat", form);
+}
+
 export interface TrajectoryBearingsResponse {
   bearings: string[];
 }

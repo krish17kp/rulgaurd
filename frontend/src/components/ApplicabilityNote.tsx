@@ -12,7 +12,7 @@ const LEVEL_STYLE: Record<string, string> = {
  * sampling-rate/structural check. A HIGH-applicability prediction and a
  * MEDIUM one look identical as numbers; this is what tells them apart.
  */
-export function ApplicabilityNote({ result }: { result: PredictRulResponse }) {
+export function ApplicabilityNote({ result }: { result: Partial<PredictRulResponse> }) {
   if (!result.applicability_level) {
     return (
       <p className="mt-3 text-xs text-foreground-muted">
@@ -26,12 +26,12 @@ export function ApplicabilityNote({ result }: { result: PredictRulResponse }) {
     <div className={`mt-3 rounded-lg border p-3 text-xs ${style}`}>
       <p className="font-medium">
         Model applicability: {result.applicability_level}
-        {result.applicability_shift_ratio !== null &&
+        {result.applicability_shift_ratio != null &&
           ` (${result.applicability_shift_ratio.toFixed(2)}x the in-domain reference)`}
       </p>
-      {result.applicability_reasons.length > 0 && (
+      {(result.applicability_reasons?.length ?? 0) > 0 && (
         <ul className="mt-1 list-inside list-disc">
-          {result.applicability_reasons.map((r) => (
+          {result.applicability_reasons?.map((r) => (
             <li key={r}>{r}</li>
           ))}
         </ul>

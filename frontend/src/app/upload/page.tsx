@@ -2,10 +2,12 @@
 
 import { useRef, useState } from "react";
 import {
+  AnalyzeMatResponse,
   ApiError,
   Compatibility,
   DatasetProfileResponse,
   PredictRulResponse,
+  analyzeMat,
   inspectDataset,
   inspectDatasetBlob,
   predictRulFromFemtoAcquisition,
@@ -14,9 +16,14 @@ import {
 import { ApplicabilityNote } from "@/components/ApplicabilityNote";
 import { ExplainResult } from "@/components/ExplainResult";
 import { SignalAndFeatures } from "@/components/SignalAndFeatures";
+import { SignalChart } from "@/components/SignalChart";
 import { SuppressedResultNotice, isSuppressedApplicability } from "@/components/SuppressedResultNotice";
 import { BlobUploadError, DIRECT_UPLOAD_THRESHOLD_BYTES, uploadFileToBlob } from "@/lib/blobUpload";
 import { looksLikeFemtoAcquisition } from "@/lib/datasetSniff";
+
+const MAT_DATASET_TYPE_LABEL: Record<string, string> = {
+  FAULT_DIAGNOSIS: "Fault diagnosis / condition monitoring",
+};
 
 type DatasetType = "femto" | "generic";
 
@@ -37,6 +44,12 @@ type PredictState =
   | { status: "loading" }
   | { status: "error"; error: string; retryable: boolean; retry: () => void; suppressed: boolean }
   | { status: "ready"; data: PredictRulResponse };
+
+type MatState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; error: string; retryable: boolean; retry: () => void }
+  | { status: "ready"; data: AnalyzeMatResponse };
 
 const BADGE: Record<Compatibility, string> = {
   FULLY_SUPPORTED: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
@@ -82,6 +95,7 @@ export default function UploadPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [inspectState, setInspectState] = useState<InspectState>({ status: "idle" });
   const [predictState, setPredictState] = useState<PredictState>({ status: "idle" });
+  const [matState, setMatState] = useState<MatState>({ status: "idle" });
   const [declaredSamplingRateHz, setDeclaredSamplingRateHz] = useState("");
   const [declaredUnits, setDeclaredUnits] = useState("");
   // Bumped on every mode switch/new analysis so an in-flight request whose
@@ -194,9 +208,29 @@ export default function UploadPage() {
     }
   }
 
+  // .mat uploads (CWRU/Paderborn) are never a browser-side parse: the
+  // backend's own scipy.io structural check is authoritative (api.py's
+  // /analyze/mat) - the client only routes by extension.
+  async function handleMatFile(file: File) {
+    const seq = ++requestSeq.current;
+    const retry = () => handleMatFile(file);
+    try {
+      setMatState({ status: "loading" });
+      const data = await analyzeMat(file);
+      if (seq === requestSeq.current) setMatState({ status: "ready", data });
+    } catch (err) {
+      if (seq !== requestSeq.current) return;
+      const message = err instanceof ApiError ? err.detail : "Could not analyze this .mat file.";
+      const retryable = err instanceof ApiError ? err.retryable : true;
+      setMatState({ status: "error", error: message, retryable, retry });
+    }
+  }
+
   function analyze() {
     if (!selectedFile) return;
-    if (datasetType === "femto") {
+    if (selectedFile.name.toLowerCase().endsWith(".mat")) {
+      void handleMatFile(selectedFile);
+    } else if (datasetType === "femto") {
       void handleFemtoFile(selectedFile);
     } else {
       void handleGenericFile(selectedFile);
@@ -208,6 +242,7 @@ export default function UploadPage() {
     setSelectedFile(null);
     setInspectState({ status: "idle" });
     setPredictState({ status: "idle" });
+    setMatState({ status: "idle" });
   }
 
   function switchDatasetType(next: DatasetType) {
@@ -224,7 +259,8 @@ export default function UploadPage() {
     void handleFemtoFile(file);
   }
 
-  const activeState = datasetType === "femto" ? predictState : inspectState;
+  const isMatFile = selectedFile?.name.toLowerCase().endsWith(".mat") ?? false;
+  const activeState = isMatFile ? matState : datasetType === "femto" ? predictState : inspectState;
   const isBusy = activeState.status === "uploading" || activeState.status === "loading";
 
   return (
@@ -250,14 +286,15 @@ export default function UploadPage() {
               if (file) setSelectedFile(file);
             }}
           >
-            Drag and drop a <span className="font-medium">.csv</span> file here, or{" "}
+            Upload <span className="font-medium">.csv</span> or <span className="font-medium">.mat</span> bearing
+            data — drag and drop, or{" "}
             <span className="font-medium text-accent underline">choose a file</span>.
           </label>
           <input
             id="file-input"
             data-testid="file-input"
             type="file"
-            accept=".csv"
+            accept=".csv,.mat"
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) setSelectedFile(file);
@@ -297,14 +334,129 @@ export default function UploadPage() {
                 disabled={isBusy}
                 className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-accent/90 disabled:opacity-50"
               >
-                {isBusy ? "Analyzing…" : datasetType === "femto" ? "Analyze Bearing" : "Inspect Dataset"}
+                {isBusy
+                  ? "Analyzing…"
+                  : isMatFile
+                    ? "Analyze .mat File"
+                    : datasetType === "femto"
+                      ? "Analyze Bearing"
+                      : "Inspect Dataset"}
               </button>
             )}
           </div>
         </div>
       )}
 
-      {datasetType === "femto" && (
+      {isMatFile && (
+        <>
+          {matState.status === "loading" && <p className="text-sm">Reading and analyzing the .mat file…</p>}
+
+          {matState.status === "error" && (
+            <div className="flex flex-col gap-2 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+              <p>{matState.error}</p>
+              {matState.retryable ? (
+                <button
+                  type="button"
+                  onClick={matState.retry}
+                  className="self-start rounded border border-red-400 px-2 py-1 text-xs font-medium"
+                >
+                  Retry
+                </button>
+              ) : (
+                <p className="text-xs text-danger">
+                  This file won&apos;t succeed on retry as-is — use &quot;Remove&quot; above and choose a
+                  different file.
+                </p>
+              )}
+            </div>
+          )}
+
+          {matState.status === "ready" && (
+            <div className="flex flex-col gap-4 rounded-xl border border-surface-border bg-surface p-6 shadow-sm">
+              <div>
+                <p className="text-xs text-foreground-muted">Detected dataset</p>
+                <p className="text-xl font-semibold tracking-tight">{matState.data.dataset_label}</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Dataset type</p>
+                <p className="text-sm">
+                  {MAT_DATASET_TYPE_LABEL[matState.data.dataset_type] ?? matState.data.dataset_type}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">RUL</p>
+                <p className="text-sm">Unavailable for this dataset type</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Applicability</p>
+                <ApplicabilityNote
+                  result={{
+                    applicability_level: matState.data.applicability_level,
+                    compatibility: matState.data.compatibility,
+                    applicability_reasons: matState.data.applicability_reasons,
+                  }}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
+                {Object.entries(matState.data.metadata).map(([key, value]) => (
+                  <div key={key}>
+                    <p className="text-foreground-muted">{key.replace(/_/g, " ")}</p>
+                    <p className="font-mono">{Array.isArray(value) ? value.join(", ") : String(value ?? "—")}</p>
+                  </div>
+                ))}
+              </div>
+
+              {matState.data.warnings.map((w) => (
+                <p key={w} className="rounded-lg border border-caution/30 bg-caution/10 p-3 text-xs text-caution">
+                  {w}
+                </p>
+              ))}
+
+              <div>
+                <p className="mb-1 text-xs font-medium text-foreground-muted">Signal</p>
+                <SignalChart values={matState.data.waveform_preview} xLabel="sample" yLabel="amplitude" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-medium text-foreground-muted">FFT</p>
+                <SignalChart
+                  values={matState.data.fft_magnitude_preview}
+                  xValues={matState.data.fft_frequency_hz_preview}
+                  xLabel="Hz"
+                  yLabel="magnitude"
+                  color="#f472b6"
+                />
+              </div>
+
+              <div>
+                <p className="mb-1 text-xs font-medium text-foreground-muted">Features</p>
+                <table className="w-full text-left text-xs">
+                  <tbody>
+                    {Object.entries(matState.data.features).map(([name, value]) => (
+                      <tr key={name} className="border-t border-surface-border">
+                        <td className="py-1 pr-3 font-mono">{name}</td>
+                        <td className="py-1 text-right tabular-nums">
+                          {Number.isFinite(value) ? value.toPrecision(5) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <button
+                type="button"
+                onClick={resetForNewFile}
+                className="self-start rounded-lg border border-surface-border bg-surface px-3 py-2 text-xs font-medium transition-colors hover:bg-background"
+              >
+                Analyze another file
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {!isMatFile && datasetType === "femto" && (
         <>
           {predictState.status === "uploading" && (
             <p className="text-sm">Uploading… {Math.round(predictState.progress * 100)}%</p>
@@ -382,7 +534,7 @@ export default function UploadPage() {
         </>
       )}
 
-      {datasetType === "generic" && (
+      {!isMatFile && datasetType === "generic" && (
         <>
           {inspectState.status === "uploading" && (
             <p className="text-sm">Uploading… {Math.round(inspectState.progress * 100)}%</p>

@@ -12,6 +12,7 @@ vi.mock("@/lib/api", async () => {
     inspectDatasetBlob: vi.fn(),
     predictRulFromFemtoAcquisition: vi.fn(),
     predictRulFromFemtoAcquisitionBlob: vi.fn(),
+    analyzeMat: vi.fn(),
     analyzeFemtoSignal: vi.fn().mockRejectedValue(new actual.ApiError(0, "not mocked in this test")),
   };
 });
@@ -22,6 +23,7 @@ vi.mock("@/lib/blobUpload", async () => {
 });
 
 import {
+  analyzeMat,
   inspectDataset,
   inspectDatasetBlob,
   predictRulFromFemtoAcquisition,
@@ -66,6 +68,46 @@ const femtoResult = {
   applicability_level: "HIGH" as const,
   applicability_shift_ratio: 1.0,
   applicability_reasons: [],
+};
+
+function matFile(name: string) {
+  return new File([new Uint8Array([0, 1, 2, 3])], name, { type: "application/octet-stream" });
+}
+
+const cwruMatResult = {
+  dataset_id: "cwru" as const,
+  dataset_type: "FAULT_DIAGNOSIS",
+  dataset_label: "CWRU Bearing Data",
+  file_name: "97.mat",
+  sample_rate_hz: 12000,
+  channel: "DE",
+  n_samples: 243938,
+  features: { vibration_x_rms: 0.123 },
+  waveform_preview: [0, 1, 0, -1],
+  waveform_preview_points: 4,
+  fft_frequency_hz_preview: [0, 100],
+  fft_magnitude_preview: [0.1, 0.2],
+  applicability_level: "LOW" as const,
+  compatibility: "FULLY_SUPPORTED" as const,
+  applicability_reasons: ["feature distribution shift 3.00x the in-domain reference"],
+  rul_supported: false as const,
+  rul_seconds: null,
+  warnings: ["sample_rate_hz is assumed 12000 Hz"],
+  metadata: { file_id: "097", available_channels: ["DE"], selected_channel: "DE", rpm: null, sample_rate_hz: 12000 },
+  note: "CWRU/Paderborn note",
+};
+
+const paderbornMatResult = {
+  ...cwruMatResult,
+  dataset_id: "paderborn" as const,
+  dataset_label: "Paderborn KAt Bearing Data",
+  file_name: "N15_M07_F10_K001_1.mat",
+  sample_rate_hz: 64000,
+  channel: "vibration_1",
+  metadata: {
+    speed_code: "15", torque_code: "07", force_code: "10", bearing_code: "K001", run: "1",
+    sampling_rate_hz: 64000,
+  },
 };
 
 describe("UploadPage", () => {
@@ -234,5 +276,60 @@ describe("UploadPage", () => {
     await waitFor(() => expect(screen.getByText("Unsupported")).toBeInTheDocument());
     expect(screen.getByText(/no vibration channel recognised/)).toBeInTheDocument();
     expect(inspectDataset).toHaveBeenCalledTimes(1);
+  });
+
+  it("the file picker accepts .mat files", () => {
+    render(<UploadPage />);
+    expect(screen.getByTestId("file-input")).toHaveAttribute("accept", ".csv,.mat");
+  });
+
+  it("a selected .mat file routes to the mat analysis endpoint, not FEMTO/generic", async () => {
+    vi.mocked(analyzeMat).mockResolvedValue(cwruMatResult);
+    render(<UploadPage />);
+
+    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, matFile("97.mat"));
+    await userEvent.click(screen.getByRole("button", { name: /analyze \.mat file/i }));
+
+    await waitFor(() => expect(analyzeMat).toHaveBeenCalledTimes(1));
+    expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
+    expect(inspectDataset).not.toHaveBeenCalled();
+  });
+
+  it("renders a CWRU .mat result: detected dataset, RUL unavailable, applicability, signal/FFT/features", async () => {
+    vi.mocked(analyzeMat).mockResolvedValue(cwruMatResult);
+    render(<UploadPage />);
+
+    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, matFile("97.mat"));
+    await userEvent.click(screen.getByRole("button", { name: /analyze \.mat file/i }));
+
+    await waitFor(() => expect(screen.getByText("CWRU Bearing Data")).toBeInTheDocument());
+    expect(screen.getByText(/Fault diagnosis \/ condition monitoring/)).toBeInTheDocument();
+    expect(screen.getByText(/Unavailable for this dataset type/)).toBeInTheDocument();
+    expect(screen.getByText(/Model applicability: LOW/)).toBeInTheDocument();
+    expect(screen.getByText("vibration_x_rms")).toBeInTheDocument();
+    // Humanized labels only - no raw enum leaking into the primary view.
+    expect(screen.queryByText("FAULT_DIAGNOSIS")).not.toBeInTheDocument();
+  });
+
+  it("renders a Paderborn .mat result with its parsed metadata", async () => {
+    vi.mocked(analyzeMat).mockResolvedValue(paderbornMatResult);
+    render(<UploadPage />);
+
+    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, matFile("N15_M07_F10_K001_1.mat"));
+    await userEvent.click(screen.getByRole("button", { name: /analyze \.mat file/i }));
+
+    await waitFor(() => expect(screen.getByText("Paderborn KAt Bearing Data")).toBeInTheDocument());
+    expect(screen.getByText("K001")).toBeInTheDocument();
+    expect(screen.getByText(/Unavailable for this dataset type/)).toBeInTheDocument();
+  });
+
+  it("FEMTO .csv analysis still works unchanged alongside .mat support", async () => {
+    vi.mocked(predictRulFromFemtoAcquisition).mockResolvedValue(femtoResult);
+    render(<UploadPage />);
+
+    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, smallFile("acc_00001.csv"));
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+
+    await waitFor(() => expect(screen.getByText(/1\.00 hours/)).toBeInTheDocument());
   });
 });

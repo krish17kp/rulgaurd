@@ -22,6 +22,7 @@ import json
 import logging
 import math
 import os
+import re
 import tempfile
 import threading
 import time
@@ -37,6 +38,7 @@ import httpx
 import joblib
 import numpy as np
 import pandas as pd
+import scipy.io as sio
 from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -45,7 +47,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from bearing_pdm import artifacts, reliability
+from bearing_pdm import artifacts, cwru, paderborn, reliability
 from bearing_pdm.adapters import ADAPTERS, VIBRATION_CHANNELS
 from bearing_pdm.applicability import MEDIUM_SHIFT_RATIO
 from bearing_pdm.applicability import assess as applicability_assess
@@ -324,10 +326,17 @@ def _applicability_candidate(dataset_id: str):
     applicability.ApplicabilityModel) whose training domain this dataset_id
     is. Only 'femto' has a feature-extraction path wired up anywhere in this
     module (_extract_femto_acquisition_features / _extract_generic_vibration_features),
-    so that's the only id this resolves. None (never a guess) when the
-    cross-domain bundle artifact itself is missing - the caller degrades
-    gracefully, it does not silently claim HIGH applicability instead."""
-    if dataset_id != "femto":
+    so that's the only id this resolves. cwru/paderborn also resolve here:
+    their extract_features() (cwru.py/paderborn.py) produce the same
+    vibration_x_* feature keys this FEMTO-fit applicability model expects
+    (see _assess_applicability's caller for /analyze/mat), so scoring them
+    against it is a real out-of-distribution check, not a guess - they have
+    no vibration_y_* axis, which the model-domain check reports as missing
+    features rather than inventing a second channel. None (never a guess)
+    when the cross-domain bundle artifact itself is missing - the caller
+    degrades gracefully, it does not silently claim HIGH applicability
+    instead."""
+    if dataset_id not in ("femto", "cwru", "paderborn"):
         return None
     bundle = _load_bundle()
     if bundle is None:
@@ -2182,6 +2191,230 @@ def predict_rul_from_femto_acquisition_blob(request: BlobUploadRequest) -> Predi
             return _process_femto_acquisition_file(tmp.name, "blob")
         finally:
             _delete_blob(request.blob_url)
+
+
+_CWRU_VAR_RE = re.compile(r"^X(\d+)_(DE|FE|BA)_time$")
+_CWRU_CHANNEL_PRIORITY = ("DE", "FE", "BA")
+CWRU_DEFAULT_SAMPLE_RATE_HZ = cwru.CWRU_SAMPLE_RATE_HZ["12k"]
+
+MAT_WAVEFORM_PREVIEW_POINTS = 2000
+MAT_FFT_PREVIEW_BINS = 1000
+
+MAT_DATASET_LABELS = {
+    "cwru": "CWRU Bearing Data",
+    "paderborn": "Paderborn KAt Bearing Data",
+}
+
+
+def _bounded_preview(values: np.ndarray, max_points: int) -> list[float]:
+    """Deterministic, uniform downsampling for a browser-bound preview array -
+    feature extraction always runs on the FULL signal (dashboard.md: never
+    fabricate a plot/value, only bound how many of the real points are sent
+    to the browser)."""
+    n = len(values)
+    if n <= max_points:
+        return [float(v) for v in values]
+    idx = np.linspace(0, n - 1, max_points).round().astype(int)
+    return [float(v) for v in values[idx]]
+
+
+def _safe_mat_stem(filename: str | None) -> str:
+    """Basename only (no path separators), restricted to a safe character
+    set, capped in length - never the raw caller-supplied filename used
+    as-is on disk (security.md: no unbounded/arbitrary server path)."""
+    stem = Path(filename or "upload").stem
+    stem = re.sub(r"[^A-Za-z0-9_-]", "_", stem)
+    return stem[:128] or "upload"
+
+
+@contextmanager
+def _temporary_mat_upload(filename: str | None):
+    """Own exactly one server-created .mat file in a randomized temp
+    directory; the directory (mkdtemp) is what makes this bounded and
+    non-guessable, not the filename. The basename still has to be derived
+    from the upload's own filename (sanitized) rather than a random one,
+    because paderborn.read_channel validates the file's top-level MATLAB
+    struct name against the file's OWN stem - a randomly-renamed temp file
+    would make every genuine Paderborn upload fail that real structural
+    check for no reason."""
+    _note(upload_id=uuid.uuid4().hex, cleanup_state="not_created")
+    work_dir = Path(tempfile.mkdtemp(prefix="matupload_"))
+    path = work_dir / f"{_safe_mat_stem(filename)}.mat"
+    _note(cleanup_state="pending")
+    try:
+        yield path
+    finally:
+        try:
+            for child in work_dir.iterdir():
+                child.unlink(missing_ok=True)
+            work_dir.rmdir()
+        except OSError:
+            _note(cleanup_state="failed")
+        else:
+            _note(cleanup_state="deleted")
+
+
+class MatAnalysisResponse(BaseModel):
+    dataset_id: str
+    dataset_type: str
+    dataset_label: str
+    file_name: str
+    sample_rate_hz: float
+    channel: str
+    n_samples: int
+    features: dict[str, float]
+    waveform_preview: list[float]
+    waveform_preview_points: int
+    fft_frequency_hz_preview: list[float]
+    fft_magnitude_preview: list[float]
+    applicability_level: str | None = None
+    compatibility: str
+    applicability_reasons: list[str] = Field(default_factory=list)
+    rul_supported: bool = False
+    rul_seconds: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    note: str = (
+        "CWRU and Paderborn recordings are short fixed-condition fault-diagnosis snapshots, "
+        "not run-to-failure trajectories - there is no elapsed-time axis, so RUL is never "
+        "computed for them. Applicability compares these features against the FEMTO-trained "
+        "model's own training domain; it does not mean a RUL model is being applied to this "
+        "dataset."
+    )
+
+
+def _detect_and_read_cwru(path: Path) -> tuple[str, str, list[str]] | None:
+    """(file_id, selected_channel, available_channels) if `path` carries at
+    least one CWRU-shaped `X<id>_<DE|FE|BA>_time` variable (from
+    scipy.io.whosmat's own variable list - never a filename guess), else
+    None."""
+    try:
+        names = [name for name, _, _ in sio.whosmat(str(path))]
+    except Exception:
+        return None
+    matches = [(m.group(1), m.group(2)) for n in names if (m := _CWRU_VAR_RE.match(n))]
+    if not matches:
+        return None
+    available = sorted({ch for _, ch in matches})
+    file_id = matches[0][0]
+    channel = next((c for c in _CWRU_CHANNEL_PRIORITY if c in available), available[0])
+    return file_id, channel, available
+
+
+def _detect_paderborn(path: Path) -> dict[str, str] | None:
+    """Real Paderborn fields (parse_filename's own naming-convention check)
+    only when the file ALSO structurally contains the vibration_1 channel
+    paderborn.read_channel requires - calling the real adapter function IS
+    the structural check, never a second hand-rolled one."""
+    try:
+        parsed = paderborn.parse_filename(path)
+    except ValueError:
+        return None
+    try:
+        paderborn.read_channel(path)
+    except ValueError:
+        return None
+    return parsed
+
+
+def _mat_response(
+    *, dataset_id: str, dataset_type: str, file_name: str, sample_rate_hz: float, channel: str,
+    signal: np.ndarray, features: dict[str, float], metadata: dict[str, Any], warnings: list[str],
+) -> MatAnalysisResponse:
+    freqs = np.fft.rfftfreq(signal.size, d=1.0 / sample_rate_hz)
+    magnitude = np.abs(np.fft.rfft(signal))
+    applicability = _assess_applicability(features, dataset_id)
+    return MatAnalysisResponse(
+        dataset_id=dataset_id, dataset_type=dataset_type,
+        dataset_label=MAT_DATASET_LABELS.get(dataset_id, dataset_id),
+        file_name=file_name, sample_rate_hz=sample_rate_hz, channel=channel,
+        n_samples=int(signal.size), features=features,
+        waveform_preview=_bounded_preview(signal, MAT_WAVEFORM_PREVIEW_POINTS),
+        waveform_preview_points=min(int(signal.size), MAT_WAVEFORM_PREVIEW_POINTS),
+        fft_frequency_hz_preview=_bounded_preview(freqs, MAT_FFT_PREVIEW_BINS),
+        fft_magnitude_preview=_bounded_preview(magnitude, MAT_FFT_PREVIEW_BINS),
+        applicability_level=applicability["level"] if applicability else None,
+        compatibility=FULLY_SUPPORTED,
+        applicability_reasons=(
+            applicability["reasons"] if applicability
+            else ["Applicability model unavailable in this deployment."]
+        ),
+        rul_supported=False, rul_seconds=None, warnings=warnings, metadata=metadata,
+    )
+
+
+@app.post("/analyze/mat", response_model=MatAnalysisResponse)
+async def analyze_mat(file: UploadFile) -> MatAnalysisResponse:
+    """Upload a real CWRU or Paderborn .mat fault-diagnosis recording ->
+    detect which dataset it structurally is (scipy.io.whosmat / the
+    adapters' own naming+structure checks, never a filename guess) -> run
+    its existing adapter (cwru.py/paderborn.py, formulas never duplicated
+    here) -> return waveform/FFT previews, the SAME features.py feature
+    values the FEMTO model's feature contract uses, and an applicability.py
+    out-of-distribution check against the FEMTO-trained model.
+
+    RUL is never computed here (ml-data.md, docs/external-datasets.md):
+    these are short fixed-condition snapshots, not run-to-failure
+    trajectories, so rul_supported is always False and rul_seconds always
+    None - no fake target, no fabricated remaining-life estimate, regardless
+    of applicability level."""
+    if not (file.filename or "").lower().endswith(".mat"):
+        raise ApiError(
+            422, "UNSUPPORTED_FILE_TYPE",
+            "Only .mat files (CWRU or Paderborn recordings) are accepted on this endpoint. "
+            "Upload a .csv for FEMTO/college data instead.",
+        )
+    with _temporary_mat_upload(file.filename) as path:
+        with path.open("wb") as fh:
+            await _spool_upload(file, fh, expect_text=False)
+
+        cwru_match = _detect_and_read_cwru(path)
+        if cwru_match is not None:
+            file_id, channel, available = cwru_match
+            sample_rate_hz = CWRU_DEFAULT_SAMPLE_RATE_HZ
+            try:
+                signal = cwru.read_channel(path, file_id, channel=channel)
+                rpm = cwru.read_rpm(path, file_id)
+                features = cwru.extract_features(path, file_id, sample_rate_hz, channel=channel)
+            except ValueError as exc:
+                raise ApiError(422, "MALFORMED_FILE", f"Could not read this CWRU file: {exc}") from exc
+            return _mat_response(
+                dataset_id="cwru", dataset_type=cwru.DATASET_TYPE,
+                file_name=file.filename or path.name, sample_rate_hz=sample_rate_hz,
+                channel=channel, signal=signal, features=features,
+                metadata={
+                    "file_id": file_id, "available_channels": available, "selected_channel": channel,
+                    "rpm": rpm, "sample_rate_hz": sample_rate_hz,
+                },
+                warnings=[
+                    "sample_rate_hz is assumed 12000 Hz for CWRU_12k_DE-style files; CWRU .mat "
+                    "files carry no sampling-rate field of their own, so this is not cross-checked "
+                    "against the file's contents."
+                ],
+            )
+
+        paderborn_match = _detect_paderborn(path)
+        if paderborn_match is not None:
+            try:
+                signal = paderborn.read_channel(path)
+                features = paderborn.extract_features(path)
+            except ValueError as exc:
+                raise ApiError(422, "MALFORMED_FILE", f"Could not read this Paderborn file: {exc}") from exc
+            return _mat_response(
+                dataset_id="paderborn", dataset_type=paderborn.DATASET_TYPE,
+                file_name=file.filename or path.name,
+                sample_rate_hz=paderborn.VIBRATION_SAMPLE_RATE_HZ, channel="vibration_1",
+                signal=signal, features=features,
+                metadata={**paderborn_match, "sampling_rate_hz": paderborn.VIBRATION_SAMPLE_RATE_HZ},
+                warnings=[],
+            )
+
+        raise ApiError(
+            422, "UNSUPPORTED_MAT_STRUCTURE",
+            "This .mat file does not match the CWRU (X<id>_DE/FE/BA_time variables) or Paderborn "
+            "(a top-level struct named after the file, with a vibration_1 channel) structure this "
+            "endpoint supports. No dataset adapter exists for it.",
+        )
 
 
 class HiRequest(BaseModel):

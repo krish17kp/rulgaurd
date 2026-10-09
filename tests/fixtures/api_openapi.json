@@ -706,6 +706,20 @@
         "title": "Body_analyze_femto_signal_analyze_femto_signal_post",
         "type": "object"
       },
+      "Body_analyze_mat_analyze_mat_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_analyze_mat_analyze_mat_post",
+        "type": "object"
+      },
       "Body_analyze_rul_analyze_rul_post": {
         "properties": {
           "file": {
@@ -1428,6 +1442,142 @@
         "title": "KnowledgeLoadResponse",
         "type": "object"
       },
+      "MatAnalysisResponse": {
+        "properties": {
+          "applicability_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicability Level"
+          },
+          "applicability_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applicability Reasons",
+            "type": "array"
+          },
+          "channel": {
+            "title": "Channel",
+            "type": "string"
+          },
+          "compatibility": {
+            "title": "Compatibility",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "dataset_label": {
+            "title": "Dataset Label",
+            "type": "string"
+          },
+          "dataset_type": {
+            "title": "Dataset Type",
+            "type": "string"
+          },
+          "features": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Features",
+            "type": "object"
+          },
+          "fft_frequency_hz_preview": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Fft Frequency Hz Preview",
+            "type": "array"
+          },
+          "fft_magnitude_preview": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Fft Magnitude Preview",
+            "type": "array"
+          },
+          "file_name": {
+            "title": "File Name",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "n_samples": {
+            "title": "N Samples",
+            "type": "integer"
+          },
+          "note": {
+            "default": "CWRU and Paderborn recordings are short fixed-condition fault-diagnosis snapshots, not run-to-failure trajectories - there is no elapsed-time axis, so RUL is never computed for them. Applicability compares these features against the FEMTO-trained model's own training domain; it does not mean a RUL model is being applied to this dataset.",
+            "title": "Note",
+            "type": "string"
+          },
+          "rul_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rul Seconds"
+          },
+          "rul_supported": {
+            "default": false,
+            "title": "Rul Supported",
+            "type": "boolean"
+          },
+          "sample_rate_hz": {
+            "title": "Sample Rate Hz",
+            "type": "number"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "waveform_preview": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Waveform Preview",
+            "type": "array"
+          },
+          "waveform_preview_points": {
+            "title": "Waveform Preview Points",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "dataset_type",
+          "dataset_label",
+          "file_name",
+          "sample_rate_hz",
+          "channel",
+          "n_samples",
+          "features",
+          "waveform_preview",
+          "waveform_preview_points",
+          "fft_frequency_hz_preview",
+          "fft_magnitude_preview",
+          "compatibility"
+        ],
+        "title": "MatAnalysisResponse",
+        "type": "object"
+      },
       "PipelineStage": {
         "properties": {
           "detail": {
@@ -1887,6 +2037,45 @@
           }
         },
         "summary": "Analyze Femto Signal"
+      }
+    },
+    "/analyze/mat": {
+      "post": {
+        "description": "Upload a real CWRU or Paderborn .mat fault-diagnosis recording ->\ndetect which dataset it structurally is (scipy.io.whosmat / the\nadapters' own naming+structure checks, never a filename guess) -> run\nits existing adapter (cwru.py/paderborn.py, formulas never duplicated\nhere) -> return waveform/FFT previews, the SAME features.py feature\nvalues the FEMTO model's feature contract uses, and an applicability.py\nout-of-distribution check against the FEMTO-trained model.\n\nRUL is never computed here (ml-data.md, docs/external-datasets.md):\nthese are short fixed-condition snapshots, not run-to-failure\ntrajectories, so rul_supported is always False and rul_seconds always\nNone - no fake target, no fabricated remaining-life estimate, regardless\nof applicability level.",
+        "operationId": "analyze_mat_analyze_mat_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_mat_analyze_mat_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatAnalysisResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Mat"
       }
     },
     "/analyze/rul": {
