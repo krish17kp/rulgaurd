@@ -114,6 +114,7 @@ def render_universal() -> None:
     st.subheader("Universal Machine Analysis")
     st.caption("Offline analysis of recorded data (not a live feed): profile -> quality -> "
                "adapter -> features -> applicability -> RUL or health-only.")
+    _analyze_archive_box()
     available = sorted(p.stem.removeprefix("routing_") for p in METRICS.glob("routing_*.json"))
     if not available:
         _missing("Routing results", "scripts/analyze_dataset.py --root <dataset folder>")
@@ -283,6 +284,60 @@ def _profile_box() -> None:
         p = profile_folder(path.expanduser())
         st.json({k: p[k] for k in ("n_files", "known_datasets", "sampling_rate_hz",
                                    "sampling_rate_source", "channels_found", "warnings")})
+
+
+def _analyze_archive_box() -> None:
+    """Analyze a local archive (.rar / multipart .rar / a folder holding one) end to
+    end: extract -> detect dataset -> features -> routing -> write routing_<id>.json,
+    the same artifact render_universal() already reads. No separate pipeline: this
+    calls scripts/analyze_dataset.py's own run_analysis(), the exact function the CLI
+    workflow already uses and that was verified against the real XJTU-SY archive."""
+    with st.expander("Analyze a local archive or folder (.rar / multipart .rar / .zip / .7z / folder)",
+                     expanded=not list(METRICS.glob("routing_*.json"))):
+        st.caption(
+            "Point at a `.rar` file (part01 of a multipart set is enough -- sibling parts are "
+            "discovered automatically) or a folder. Extraction of a large archive is cached by "
+            "archive identity, so re-analyzing the same archive reuses it instead of re-extracting."
+        )
+        path_str = st.text_input("Archive file or folder path", key="ua_archive_path")
+        dataset_hint = st.text_input(
+            "Dataset id (optional - auto-detected from the data when left blank)",
+            key="ua_archive_dataset",
+        )
+        if not st.button("Analyze dataset", key="ua_archive_go") or not path_str:
+            return
+        path = Path(path_str).expanduser()
+        if not path.exists():
+            st.error(f"No such file or folder: {path}")
+            return
+        import sys as _sys
+        _sys.path.insert(0, str(Path("scripts").resolve()))
+        import analyze_dataset
+
+        log_lines: list[str] = []
+        status = st.status("Analyzing...", expanded=True)
+        try:
+            def progress(msg: str) -> None:
+                log_lines.append(msg)
+                status.write(msg)
+
+            dataset_id = analyze_dataset.run_analysis(
+                path, dataset=dataset_hint or None, progress=progress,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface any failure to the user, not a crash
+            status.update(label="Analysis failed", state="error")
+            st.error(f"Analysis failed: {exc}")
+            return
+        if dataset_id is None:
+            status.update(label="No adapter recognised this data", state="error")
+            st.warning("No adapter recognised this data; profiling only (see log above). "
+                       "Add an adapter in src/bearing_pdm/adapters.py for a new dataset type.")
+            return
+        status.update(label=f"Done - dataset '{dataset_id}' ready below", state="complete")
+        st.success(f"Analyzed as '{dataset_id}'. Select it above in Dataset / Bearing to view results.")
+        _json.clear()  # ponytail: st.cache_data on the json/parquet we just overwrote
+        _parquet.clear()
+        st.rerun()
 
 
 # ---------------------------------------------------------------------------

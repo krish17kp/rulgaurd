@@ -348,6 +348,19 @@ def test_status_banner_names_suppression_explicitly():
                           "level": "MEDIUM"})[0] == "warning"
 
 
+def test_analyze_archive_box_rejects_nonexistent_path():
+    """The archive-analysis box (Universal Machine Analysis) must show a plain
+    error for a bad path, never a traceback - this is the live entry point for
+    the RAR/multipart-RAR offline workflow."""
+    at = _open("Universal Machine Analysis")
+    expander = next(e for e in at.expander if "Analyze a local archive" in e.label)
+    expander.text_input[0].set_value("/no/such/path/at/all").run()
+    expander.button[0].click().run()
+    assert not at.exception
+    rendered = " ".join(e.value for e in at.error)
+    assert "No such file or folder" in rendered
+
+
 def test_profile_box_refuses_paths_outside_known_roots(tmp_path):
     from bearing_pdm.dashboard_cross import is_within
     assert is_within(tmp_path / "a" / "b", [tmp_path])
