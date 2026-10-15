@@ -555,3 +555,58 @@ FULLY_SUPPORTED regression (`tests/test_api_e2e.py`) still passes unchanged. No 
 performed -- `git.md`: the user pushes manually, and Preview/Production deploy is a separate,
 explicit-authorization action this pass did not request.
 
+## D30: generic-mapping CLI wiring, web routing-bundle renderer, real XJTU full-trajectory bundle (2026-10-15)
+
+Closes two of D29's three remaining gaps; the third (a unified `/analysis/[id]` dynamic
+Results Workspace covering all 9 dataset-shape capability matrices) was not attempted this
+pass -- rushing a multi-tab route across FEMTO/XJTU/IMS/CWRU/Paderborn/generic/bundle shapes
+without full Playwright coverage risks exactly the kind of untested, half-correct UI this
+project's rules warn against. Extending the already-reused `/analyze-bundle` page instead
+keeps the change bounded and fully tested.
+
+1. **Generic-mapping pipeline wiring**: `src/bearing_pdm/generic.py` (dataset-specific file
+   reading, same boundary as femto.py/ims.py) and `adapters.py::GenericAdapter` (constructed
+   per-analysis from a human mapping, never registered in the module-level `ADAPTERS` singleton
+   since its config varies per upload). `run_to_failure` is always `False`, so
+   `pipeline.build_canonical_features` never fabricates an `rul_seconds` ground-truth label for
+   a generic dataset; a *predicted* RUL can still appear only if the existing applicability/
+   validated-skill gate (routing.py) permits one. Multiple files require an explicit
+   `--recording-interval-s` (never assumed) or the adapter refuses to build a trajectory.
+   `scripts/analyze_dataset.py --mapping <file.json> --sampling-rate-hz <Hz>
+   [--recording-interval-s <s>]` wires `profiler.apply_manual_mapping()` (D29) into this.
+   Verified end-to-end on a synthetic 5-file 2-axis+temperature dataset: correctly produced
+   `RUL_SUPPRESSED` with LOW/MEDIUM applicability (random noise is correctly flagged as
+   out-of-distribution against the FEMTO-trained reference) -- not a silently-accepted number.
+2. **Web routing-bundle renderer**: `analysis_bundle.py`'s `build_routing_bundle()` (D29) now
+   also carries a `trajectories` field (per-recording health_indicator/stage/RUL, added
+   additively to `routing_<dataset>.json` by `scripts/analyze_dataset.py`) so a portable bundle
+   can chart a trajectory without shipping the raw dataset. The frontend
+   (`frontend/src/lib/api.ts`: `RoutingBundlePayload`/`RoutingDecision`/`RoutingTrajectoryPoint`;
+   `frontend/src/app/analyze-bundle/page.tsx`: `RoutingBundleResult`) renders Overview/
+   Applicability/RUL/Trajectory sections for the `"routing"` bundle kind, reusing the existing
+   `MultiSeriesChart` component the FEMTO/college renderers already use -- one renderer for
+   XJTU, IMS, a generic mapped dataset, or any future adapter, by the payload's shape, not a
+   per-dataset branch. `dashboard.py::_render_routing_bundle` is the Streamlit-side equivalent.
+3. **Real XJTU full-trajectory verification**: extracted the real XJTU-SY multipart RAR
+   download (D29) and ran `scripts/analyze_dataset.py --dataset xjtu` against the real,
+   complete 123-acquisition Bearing1_1 run. Result: real HI trajectory from 0.978 (healthy) to
+   ~0 (critical), stage HEALTHY->CRITICAL, correct `actual_rul_seconds` (7320s -> 0s, true
+   ground truth since this is a real complete run-to-failure record) -- and RUL correctly
+   suppressed (the `sn_fraction_multi` candidate's applicability was HIGH but it had no
+   positive validated skill for this bearing, so the eligibility gate withheld a number; this
+   is the gate working as designed, not a defect found here). Packaged via
+   `build_routing_bundle()` into a 4.3KB `.rulguard.zip` (no raw signal shipped), round-tripped
+   through `load_bundle()`/`bundle_kind()` -> `"routing"`. This is the real evidence for the
+   "RAR -> Offline analysis -> export bundle -> upload to web -> see results" path end to end.
+4. **Deferred**: a dedicated `/analysis/[analysisId]` dynamic Results Workspace matching
+   `/trajectory`'s visual polish across every dataset-shape capability matrix (single CSV vs.
+   full trajectory, FEMTO/XJTU/IMS/CWRU/Paderborn/generic/bundle), Playwright desktop/mobile
+   coverage for it, and Preview/Production deployment. Preview/Production deploy additionally
+   requires a `git push`, which `git.md`'s durable "the user pushes manually" policy governs;
+   that policy is not superseded by an ad-hoc prompt instruction to push anyway.
+
+Regression check: FEMTO `acc_00450.csv` -> 4610.0s / HIGH / FULLY_SUPPORTED unchanged.
+949 backend tests pass, `ruff check .` clean, 58 frontend vitest tests pass, `eslint`/
+`tsc --noEmit` clean, `next build --webpack` succeeds (Turbopack's own build hit an unrelated
+internal panic in this environment, reproduced independent of this change).
+

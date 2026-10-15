@@ -85,6 +85,51 @@ describe("AnalyzeBundlePage", () => {
     expect(screen.getByText(/Full coverage: all 129/)).toBeInTheDocument();
   });
 
+  it("renders a routing bundle (XJTU/IMS/generic) with trajectory and RUL suppression", async () => {
+    vi.mocked(analyzeBundle).mockResolvedValue({
+      status: "ok",
+      dataset_id: "xjtu:routing",
+      kind: "routing",
+      payload: {
+        dataset_id: "xjtu",
+        profile: {
+          n_files: 123,
+          sampling_rate_hz: 25600,
+          sampling_rate_source: "documented rate of the xjtu adapter",
+          known_datasets: [{ dataset_id: "xjtu" }],
+          channels_found: ["vibration_x", "vibration_y"],
+          warnings: [],
+        },
+        decisions: {
+          "xjtu:Bearing1_1": {
+            status: "RUL_SUPPRESSED",
+            scope: "whole-run retrospective summary (all recordings)",
+            applicability: {
+              raw_seconds: { level: "LOW", shift_ratio: 7.36, reasons: ["feature distribution shift 7.36x"] },
+            },
+            quality_ok: true,
+            quality_reasons: [],
+            current: { status: "RUL_SUPPRESSED", model: null, validated_skill: null, scope: "causal decision at the last recording" },
+          },
+        },
+        trajectories: {
+          "xjtu:Bearing1_1": [
+            { sequence_index: 0, elapsed_s: 0, health_indicator: 0.95, stage: "HEALTHY", rul_status: "RUL_SUPPRESSED", predicted_rul_seconds: null },
+            { sequence_index: 1, elapsed_s: 60, health_indicator: 0.91, stage: "HEALTHY", rul_status: "RUL_SUPPRESSED", predicted_rul_seconds: null },
+          ],
+        },
+      },
+    });
+
+    render(<AnalyzeBundlePage />);
+    await userEvent.upload(screen.getByTestId("file-input"), zipFile());
+
+    await waitFor(() => expect(screen.getAllByText("xjtu").length).toBeGreaterThan(0));
+    expect(screen.getByText(/RUL unavailable for this analysis/)).toBeInTheDocument();
+    expect(screen.getByText(/RUL_SUPPRESSED/)).toBeInTheDocument();
+    expect(screen.getByText("LOW")).toBeInTheDocument();
+  });
+
   it("shows the rejection message for a corrupted/invalid bundle, not a crash", async () => {
     vi.mocked(analyzeBundle).mockRejectedValue(
       new ApiError(400, "invalid analysis bundle: dataset.json checksum mismatch")

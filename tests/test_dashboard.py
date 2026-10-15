@@ -190,6 +190,43 @@ def test_render_college_bundle_shows_caveats_not_a_raw_json_dump():
     assert "D11" in " ".join(c.value for c in at.caption)
 
 
+def _routing_bundle_script():
+    import streamlit as st
+
+    from bearing_pdm.dashboard import _render_routing_bundle
+
+    _render_routing_bundle({
+        "dataset_id": "xjtu",
+        "profile": {
+            "n_files": 123, "sampling_rate_hz": 25600.0,
+            "sampling_rate_source": "documented rate of the xjtu adapter",
+            "known_datasets": [{"dataset_id": "xjtu"}], "channels_found": ["vibration_x", "vibration_y"],
+            "warnings": [],
+        },
+        "decisions": {
+            "xjtu:Bearing1_1": {
+                "status": "RUL_SUPPRESSED",
+                "current": {"status": "RUL_SUPPRESSED", "model": None, "validated_skill": None},
+                "applicability": {
+                    "raw_seconds": {"level": "LOW", "shift_ratio": 7.36, "reasons": []},
+                    "sn_fraction_multi": {"level": "HIGH", "shift_ratio": 0.09, "reasons": []},
+                },
+            },
+        },
+    })
+    st.write("DONE_ROUTING_BUNDLE")
+
+
+def test_render_routing_bundle_shows_applicability_and_suppresses_rul():
+    at = AppTest.from_function(_routing_bundle_script)
+    at.run()
+    assert not at.exception, f"_render_routing_bundle raised: {at.exception}"
+    assert at.metric  # Files profiled / Sampling rate / Recognised as
+    assert at.dataframe  # the applicability table
+    banner_text = " ".join(getattr(w, "value", "") for w in (at.warning or at.error or at.info))
+    assert "suppressed" in banner_text.lower()
+
+
 def _open(view: str) -> AppTest:
     """Select a view from the sidebar. Views are a radio rather than st.tabs so
     that the bearing/window controls can be hidden for the two views they do not

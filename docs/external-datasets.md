@@ -191,6 +191,14 @@ Citation:
   benign "There are data after the end of archive" (6,783-byte tail on part01).
 - **Local path:** `~/work/external_data/xjtu/XJTU-SY_Bearing_Datasets/`. Archives are kept in
   `~/work/external_data/xjtu/_archives/`.
+- **Automated extraction (2026-10-15):** `src/bearing_pdm/rar_archive.py` automates
+  multipart-RAR discovery/extraction for Offline Research Mode, confirming the same decoder
+  gap found above: the bundled Ubuntu `7z` 26.00 also rejects this archive's RAR5 method
+  ("Unsupported Method"), while `unrar` (already present on this machine, no separate download)
+  extracts it cleanly. `7z -slt` is still used for listing/safety-checking entries before
+  extraction (clean, checksummable fields); `unrar` is extraction-only. Verified against the
+  real download: 6/6 parts, 9,217 entries, 15 bearings, `2.csv`/`4.csv` correctly recognized as
+  XJTU acquisitions rather than FEMTO. See `docs/decisions.md` D29/D30.
 
 | Archive | Bytes | sha256 (local = MediaFire) |
 |---|---|---|

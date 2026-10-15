@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from bearing_pdm import college, femto, ims, xjtu
+from bearing_pdm import college, femto, generic, ims, xjtu
 
 VIBRATION_CHANNELS = ("vibration_x", "vibration_y")
 
@@ -297,6 +297,79 @@ class XjtuAdapter(DatasetAdapter):
                     "vibration_x": df["Horizontal_vibration_signals"].to_numpy(),
                     "vibration_y": df["Vertical_vibration_signals"].to_numpy(),
                 },
+            )
+
+
+# ---------------------------------------------------------------------------
+# Generic / unknown dataset (manually mapped - profiler.apply_manual_mapping())
+# ---------------------------------------------------------------------------
+
+
+class GenericAdapter(DatasetAdapter):
+    """Not a fixed dataset: constructed per-analysis from a human-confirmed
+    column mapping (nightshift universal-ingestion gap A), never registered
+    in the module-level ADAPTERS singleton dict the way the known datasets
+    are, since its configuration varies per upload. Conservative defaults
+    (reference_window, hi_smooth_window, stage_persistence) assume nothing
+    about an unknown dataset's acquisition cadence - see D26 on why a
+    FEMTO-tuned smoothing constant silently erases a different dataset's
+    signal.
+
+    `run_to_failure` is always False: this adapter has no evidence a mapped
+    folder's last recording is end-of-life, so canonical_feature_row() never
+    manufactures an `rul_seconds` ground-truth label for it (pipeline.py).
+    A *predicted* RUL may still appear if the existing applicability/skill
+    gate (routing.py) permits one - this only withholds a fabricated label.
+    """
+
+    dataset_id = "generic"
+    display_name = "Generic / unknown dataset (manually mapped)"
+    reference_window = (1, 5)
+    hi_smooth_window = 1
+    stage_persistence = 1
+
+    def __init__(
+        self,
+        mapping: dict[str, str],
+        sampling_rate_hz: float,
+        delimiter: str | None,
+        has_header: bool,
+        recording_interval_s: float | None = None,
+    ) -> None:
+        self.mapping = mapping
+        self.sampling_rate_hz = sampling_rate_hz
+        self.delimiter = delimiter
+        self.has_header = has_header
+        self.recording_interval_s = recording_interval_s
+
+    def discover(self, root, role=None):
+        files = generic.discover_generic_files(root)
+        if len(files) > 1 and self.recording_interval_s is None:
+            raise ValueError(
+                f"{len(files)} files found under {root} but no recording_interval_s was given - "
+                "provide the acquisition cadence to build a trajectory (never assumed as 1s), "
+                "or point --root at a single file for a signal/FFT/features-only analysis"
+            )
+        return [BearingRun(
+            dataset_id=self.dataset_id, bearing_id="custom", role="generic_run", source=Path(root),
+            sampling_rate_hz=self.sampling_rate_hz, run_to_failure=False,
+            recording_interval_s=self.recording_interval_s,
+        )]
+
+    def recordings(self, run):
+        files = generic.discover_generic_files(run.source)
+        for seq, path in enumerate(files):
+            df = generic.read_generic_file(path, self.delimiter, self.has_header)
+            signals = {
+                role: df[col].to_numpy(dtype="float64")
+                for col, role in self.mapping.items()
+                if role in (*VIBRATION_CHANNELS, "temperature_bearing", "temperature_ambient")
+                and col in df.columns
+            }
+            yield Recording(
+                run=run, recording_id=path.name, sequence_index=seq,
+                elapsed_s=seq * (self.recording_interval_s or 0.0), source_path=path,
+                signals=signals,
             )
 
 

@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from bearing_pdm.adapters import ADAPTERS, get_adapter
+from bearing_pdm.adapters import ADAPTERS, GenericAdapter, get_adapter
 from bearing_pdm.features import signal_quality
 from bearing_pdm.femto import discover_femto_bearings
 from bearing_pdm.health import candidate_feature_columns
@@ -268,6 +268,55 @@ def test_apply_manual_mapping_rejects_unmatched_column_name(tmp_path):
     profile = profile_folder(tmp_path)
     with pytest.raises(ValueError, match="matched no sampled column"):
         apply_manual_mapping(profile, {"nonexistent_column": "vibration_x"})
+
+
+def _write_generic_headered(root: Path, n_files: int = 3, n_rows: int = 500) -> None:
+    rng = np.random.default_rng(0)
+    for i in range(n_files):
+        pd.DataFrame({
+            "sensor1": rng.normal(size=n_rows),
+            "sensor2": rng.normal(size=n_rows),
+            "temp_c": np.full(n_rows, 40.0 + i),
+        }).to_csv(root / f"{i:03d}.csv", index=False)
+
+
+def test_generic_adapter_single_file_has_no_rul_ground_truth(tmp_path):
+    """One file: GenericAdapter must accept it without a recording_interval_s
+    (no trajectory claimed) and canonical_feature_row must leave rul_seconds
+    NaN - run_to_failure is always False, so no label is fabricated."""
+    _write_generic_headered(tmp_path, n_files=1)
+    mapping = {"sensor1": "vibration_x", "sensor2": "vibration_y", "temp_c": "temperature_bearing"}
+    adapter = GenericAdapter(mapping=mapping, sampling_rate_hz=2000.0, delimiter=",", has_header=True)
+    runs = adapter.discover(tmp_path)
+    assert len(runs) == 1 and runs[0].run_to_failure is False
+
+    df = build_canonical_features(adapter, runs[0])
+    assert len(df) == 1
+    assert df["rul_seconds"].isna().all()
+    assert df["life_fraction"].isna().all()
+    assert df["vibration_x_rms"].notna().all()  # mapped channel actually extracted
+
+
+def test_generic_adapter_multi_file_requires_recording_interval(tmp_path):
+    _write_generic_headered(tmp_path, n_files=3)
+    mapping = {"sensor1": "vibration_x", "sensor2": "vibration_y"}
+    adapter = GenericAdapter(mapping=mapping, sampling_rate_hz=2000.0, delimiter=",", has_header=True)
+    with pytest.raises(ValueError, match="recording_interval_s"):
+        adapter.discover(tmp_path)
+
+
+def test_generic_adapter_multi_file_with_interval_builds_trajectory(tmp_path):
+    _write_generic_headered(tmp_path, n_files=3)
+    mapping = {"sensor1": "vibration_x", "sensor2": "vibration_y", "temp_c": "temperature_bearing"}
+    adapter = GenericAdapter(
+        mapping=mapping, sampling_rate_hz=2000.0, delimiter=",", has_header=True,
+        recording_interval_s=60.0,
+    )
+    run = adapter.discover(tmp_path)[0]
+    df = build_canonical_features(adapter, run)
+    assert list(df["sequence_index"]) == [0, 1, 2]
+    assert list(df["elapsed_s"]) == [0.0, 60.0, 120.0]
+    assert df["bearing_temp_mean"].notna().all()
 
 
 def test_detect_datasets_from_a_single_bearing_folder(tmp_path):

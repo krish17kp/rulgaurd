@@ -474,11 +474,63 @@ export interface CollegeBundleEntry {
   domain_shift_note: string;
 }
 
+/** A `.rulguard.zip` built from scripts/analyze_dataset.py's routing_<dataset>.json
+ * (bearing_pdm.analysis_bundle.build_routing_bundle) - any adapter the cross-dataset
+ * pipeline supports (XJTU, IMS, a manually mapped generic dataset, or a future one).
+ * Shape is dataset-agnostic by design (bearing_pdm.analysis_bundle.bundle_kind
+ * classifies by this shape, not a hardcoded dataset name), so no per-dataset
+ * frontend branch is needed here either. */
+export interface RoutingApplicability {
+  level: "HIGH" | "MEDIUM" | "LOW";
+  shift_ratio: number;
+  reasons: string[];
+}
+
+export interface RoutingDecision {
+  status: string;
+  scope: string;
+  applicability: Record<string, RoutingApplicability>;
+  quality_ok: boolean;
+  quality_reasons: string[];
+  current: { status: string; model: string | null; validated_skill: number | null; scope: string };
+}
+
+export interface RoutingTrajectoryPoint {
+  sequence_index: number;
+  elapsed_s: number;
+  health_indicator?: number | null;
+  stage?: string | null;
+  actual_rul_seconds?: number | null;
+  rul_status?: string | null;
+  predicted_rul_seconds?: number | null;
+  rul_lo?: number | null;
+  rul_hi?: number | null;
+}
+
+export interface RoutingBundlePayload {
+  dataset_id: string;
+  profile: {
+    n_files: number;
+    sampling_rate_hz: number | null;
+    sampling_rate_source: string;
+    known_datasets: Array<{ dataset_id: string }>;
+    channels_found: string[];
+    warnings: string[];
+  };
+  decisions: Record<string, RoutingDecision>;
+  trajectories?: Record<string, RoutingTrajectoryPoint[]>;
+}
+
 export interface AnalysisBundleResponse {
   status: string;
   dataset_id: string | null;
-  kind: "femto" | "college" | "unknown" | null;
-  payload: FemtoBundlePayload | Record<string, CollegeBundleEntry> | Record<string, unknown> | null;
+  kind: "femto" | "college" | "routing" | "unknown" | null;
+  payload:
+    | FemtoBundlePayload
+    | Record<string, CollegeBundleEntry>
+    | RoutingBundlePayload
+    | Record<string, unknown>
+    | null;
 }
 
 /** Upload a `.rulguard.zip` Analysis Bundle for display. Checksum/schema

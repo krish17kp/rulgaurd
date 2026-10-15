@@ -58,6 +58,19 @@ cp config/data_paths.example.toml config/data_paths.toml
 
 `config/data_paths.toml` is gitignored (local paths only, never committed).
 
+### Universal dataset ingestion (Offline Research Mode)
+
+Beyond FEMTO/college, `scripts/analyze_dataset.py` recognises XJTU-SY, IMS, CWRU and Paderborn
+via their own adapters (`src/bearing_pdm/adapters.py`), and any other dataset via a manual
+column mapping (see `--mapping` in that script's `--help`). Supported archive formats: ZIP
+(`src/bearing_pdm/archive.py`) and RAR/multipart RAR (`src/bearing_pdm/rar_archive.py`, via the
+system `unrar`/`7z` binaries — no new Python dependency). A derived result (never the raw
+dataset) can be exported as a portable `.rulguard.zip` Analysis Bundle
+(`src/bearing_pdm/analysis_bundle.py`) and loaded either in the Streamlit dashboard's "Raw /
+ZIP / Bundle Explorer" or on the web at `/analyze-bundle`. RUL only ever appears when the
+existing applicability/validated-skill gate (`src/bearing_pdm/routing.py`) permits it — never
+guessed from a dataset's name or shape alone. See `docs/decisions.md` D29/D30.
+
 ## Run
 
 Run every command from the repository root, in this order. `PYTHONPATH=src`
