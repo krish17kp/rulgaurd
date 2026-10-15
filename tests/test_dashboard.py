@@ -33,10 +33,10 @@ def test_dashboard_offers_all_five_views():
     at = AppTest.from_file(str(DASHBOARD_PATH), default_timeout=120)
     at.run()
     assert at.sidebar.radio[0].options == [
-        "Signal & FFT", "Health Indicator", "RUL Prediction",
+        "Analyze", "Signal & FFT", "Health Indicator", "RUL Prediction",
         "Model Evaluation", "Architecture & Limitations",
-        "Universal Machine Analysis", "Cross-Dataset Validation",
-        "Raw / ZIP / Bundle Explorer", "Experiment Lab (CWRU / Paderborn / Synthetic)",
+        "Cross-Dataset Validation",
+        "Legacy FEMTO / College Raw Explorer", "Experiment Lab (CWRU / Paderborn / Synthetic)",
         "Knowledge / RAG",
     ]
 
@@ -46,7 +46,7 @@ def test_raw_explorer_view_renders_without_exception():
     analysis bundle). Must render with no input selected yet, with no
     network/credential requirement, and must never run the pipeline until an
     explicit 'Run Analysis' button is pressed."""
-    at = _open("Raw / ZIP / Bundle Explorer")
+    at = _open("Legacy FEMTO / College Raw Explorer")
     assert not at.exception
     assert at.selectbox[0].options == [
         "Raw folder (FEMTO role / college)",
@@ -56,11 +56,35 @@ def test_raw_explorer_view_renders_without_exception():
 
 
 def test_raw_explorer_browses_femto_learning_set_read_only():
-    at = _open("Raw / ZIP / Bundle Explorer")
+    at = _open("Legacy FEMTO / College Raw Explorer")
     fixture_root = Path(__file__).parent.parent / "data" / "fixtures" / "femto"
     at.text_input[0].set_value(str(fixture_root)).run()
     assert not at.exception
     assert "role: **learning**" in " ".join(i.value for i in at.info)
+
+
+def test_raw_explorer_rejects_non_femto_folder_without_crashing(tmp_path):
+    """A real user pointed this mode at an extracted XJTU-shaped folder and got an
+    unhandled FileNotFoundError from discover_femto_bearings(). Any non-FEMTO folder
+    must produce a warning, never a raw traceback."""
+    not_femto = tmp_path / "not_femto"
+    not_femto.mkdir()
+    (not_femto / "some_other_file.txt").write_text("not a bearing")
+
+    at = _open("Legacy FEMTO / College Raw Explorer")
+    at.text_input[0].set_value(str(not_femto)).run()
+    assert not at.exception
+    assert any("No FEMTO bearings" in w.value or "Analyze" in w.value for w in at.warning)
+
+
+def test_raw_explorer_rejects_a_rar_file_without_crashing(tmp_path):
+    rar_path = tmp_path / "XJTU-SY_Bearing_Datasets.part01.rar"
+    rar_path.write_bytes(b"not a real rar")
+
+    at = _open("Legacy FEMTO / College Raw Explorer")
+    at.text_input[0].set_value(str(rar_path)).run()
+    assert not at.exception
+    assert any("Analyze" in e.value for e in at.error)
 
 
 def test_raw_explorer_loads_a_real_analysis_bundle(tmp_path):
@@ -69,7 +93,7 @@ def test_raw_explorer_loads_a_real_analysis_bundle(tmp_path):
     bundle_path = tmp_path / "tiny.rulguard.zip"
     build_bundle("femto:TestBearing", {"actual_rul_seconds": 123.0}, bundle_path)
 
-    at = _open("Raw / ZIP / Bundle Explorer")
+    at = _open("Legacy FEMTO / College Raw Explorer")
     at.selectbox[0].select("RULGuard Analysis Bundle (.rulguard.zip)").run()
     assert not at.exception
     # AppTest's file_uploader has no programmatic upload API, so this only
@@ -332,7 +356,7 @@ def test_model_evaluation_tab_keeps_the_college_naive_oracle_caveat():
 def test_cross_dataset_pages_render_without_exception():
     """Both pages degrade to an explanatory message when their artifacts are
     missing and render real tables when present - never a traceback."""
-    for view in ["Universal Machine Analysis", "Cross-Dataset Validation"]:
+    for view in ["Analyze", "Cross-Dataset Validation"]:
         at = _open(view)
         assert not at.exception
 
@@ -366,7 +390,7 @@ def test_universal_analysis_tabs_render_real_xjtu_without_fabricating_rul():
     if routing["decisions"][bearing]["current"]["status"] != "RUL_SUPPRESSED":
         pytest.skip(f"{bearing} is not RUL_SUPPRESSED in the current artifact; nothing to assert")
 
-    at = _open("Universal Machine Analysis")
+    at = _open("Analyze")
     assert at.tabs, "results must be organised into tabs, not a flat scroll"
     tab_labels = [t.label for t in at.tabs]
     assert tab_labels == ["Overview", "Signal", "FFT", "Features", "Health", "Trajectory",
@@ -387,7 +411,7 @@ def test_analyze_archive_box_rejects_nonexistent_path():
     """The archive-analysis box (Universal Machine Analysis) must show a plain
     error for a bad path, never a traceback - this is the live entry point for
     the RAR/multipart-RAR offline workflow."""
-    at = _open("Universal Machine Analysis")
+    at = _open("Analyze")
     expander = next(e for e in at.expander if "Analyze a local archive" in e.label)
     expander.text_input[0].set_value("/no/such/path/at/all").run()
     expander.button[0].click().run()

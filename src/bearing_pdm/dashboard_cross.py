@@ -159,6 +159,18 @@ def render_universal() -> None:
 
     with st.expander("Advanced / raw data"):
         st.json(decision)
+
+    import tempfile
+
+    from bearing_pdm.analysis_bundle import build_routing_bundle
+
+    with tempfile.NamedTemporaryFile(suffix=".rulguard.zip", delete=False) as tmp_bundle:
+        build_routing_bundle(dataset, routing, tmp_bundle.name)
+        st.download_button(
+            "Export .rulguard.zip (for the web Analysis Bundle viewer)",
+            data=Path(tmp_bundle.name).read_bytes(),
+            file_name=f"{dataset}.rulguard.zip", key="ua_bundle_download",
+        )
     _profile_box()
 
 

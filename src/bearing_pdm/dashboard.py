@@ -270,7 +270,11 @@ def _render_raw_explorer() -> None:
         if root_str:
             root = Path(root_str)
             if not root.is_dir():
-                st.error(f"Not a directory: {root}")
+                if root.suffix.lower() == ".rar" or (root.exists() and root.is_file()):
+                    st.error(f"Not a directory: {root}. This is the FEMTO/college-specific "
+                             "explorer - use the **Analyze** view for an archive or other file.")
+                else:
+                    st.error(f"Not a directory: {root}")
                 return
             if root.name.lower() == "college":
                 files = sorted(root.glob("LogFile_*.csv"))
@@ -278,9 +282,40 @@ def _render_raw_explorer() -> None:
                 if files:
                     st.caption(f"First: {files[0].name}  Last: {files[-1].name}")
                 return
+            # This mode is FEMTO-specific; a folder that isn't FEMTO-shaped (e.g. an
+            # extracted XJTU dataset, or one holding multipart .rar parts) must never
+            # reach discover_femto_bearings() - it only recognises BearingC_N layouts
+            # and raises FileNotFoundError on anything else. Detect that first and
+            # point the user at the real generic workflow instead of crashing.
+            from bearing_pdm.profiler import profile_folder
+
+            if not list(root.glob("Bearing*_*")):
+                archive_parts = list(root.glob("*.rar")) + list(root.glob("*.zip")) + \
+                    list(root.glob("*.7z"))
+                if archive_parts:
+                    st.warning(f"No FEMTO bearings here, but found {archive_parts[0].name} and "
+                               "similar - this looks like an archive dataset. Use the "
+                               "**Analyze** view (point it at the archive file) instead.")
+                    return
+                profile = profile_folder(root)
+                known = [d["dataset_id"] for d in profile["known_datasets"]]
+                if known:
+                    st.warning(f"No FEMTO bearings here - this folder looks like "
+                               f"'{known[0]}' data instead. Use the **Analyze** view instead.")
+                else:
+                    st.warning("No FEMTO bearings found in this folder, and no other dataset "
+                               "recognised. Try the **Analyze** view for a different dataset "
+                               "type, or check this path.")
+                return
             role = _infer_role(root)
             st.info(f"role: **{role}** - {role_warning[role]}")
-            bearings = discover_femto_bearings(root, role)
+            try:
+                bearings = discover_femto_bearings(root, role)
+            except FileNotFoundError as exc:
+                st.error("Could not read this as a FEMTO dataset.")
+                with st.expander("Advanced diagnostics"):
+                    st.code(str(exc))
+                return
             if not bearings:
                 st.warning("No bearings found under this path.")
                 return
@@ -773,22 +808,25 @@ def main() -> None:
             "connected - see Architecture & Limitations."
         )
 
-    VIEWS = ["Signal & FFT", "Health Indicator", "RUL Prediction",
+    VIEWS = ["Analyze", "Signal & FFT", "Health Indicator", "RUL Prediction",
              "Model Evaluation", "Architecture & Limitations",
-             "Universal Machine Analysis", "Cross-Dataset Validation",
-             "Raw / ZIP / Bundle Explorer", "Experiment Lab (CWRU / Paderborn / Synthetic)",
+             "Cross-Dataset Validation",
+             "Legacy FEMTO / College Raw Explorer", "Experiment Lab (CWRU / Paderborn / Synthetic)",
              "Knowledge / RAG"]
     view = st.sidebar.radio("View", VIEWS)
     # Same primary section names as the public site's nav (SiteNav.tsx) - shown
     # alongside the existing View radio (unchanged) so the two products read as
     # the same RULGuard rather than differently-organised tools.
+    # "Analyze" is the ONE entry point for a file/archive/folder/bundle; the raw
+    # FEMTO-folder explorer is legacy/dataset-specific, not the generic workflow
+    # (a real user confused the two - see git log for this file around this comment).
     NAV_GROUP_OF = {
         "Architecture & Limitations": "Overview",
-        "Universal Machine Analysis": "Analyze", "Signal & FFT": "Analyze",
-        "Raw / ZIP / Bundle Explorer": "Analyze",
+        "Analyze": "Analyze", "Signal & FFT": "Analyze",
         "Health Indicator": "Trajectory", "RUL Prediction": "Trajectory",
         "Model Evaluation": "Evaluation",
         "Cross-Dataset Validation": "Datasets",
+        "Legacy FEMTO / College Raw Explorer": "More",
         "Experiment Lab (CWRU / Paderborn / Synthetic)": "More", "Knowledge / RAG": "More",
     }
     st.sidebar.caption(f"Section: {NAV_GROUP_OF.get(view, 'More')} "
@@ -796,18 +834,18 @@ def main() -> None:
 
     # The cross-dataset pages (dashboard_cross.py) carry their own dataset and
     # bearing selectors and read their own artifacts, not the legacy batches.
-    if view in ("Universal Machine Analysis", "Cross-Dataset Validation"):
+    if view in ("Analyze", "Cross-Dataset Validation"):
         from bearing_pdm import dashboard_cross
         if _cloud_mode():
             st.info("The cross-dataset artifacts are not part of the deployment snapshot; "
                     "run the pipeline locally (docs/cross-dataset.md).")
-        if view == "Universal Machine Analysis":
+        if view == "Analyze":
             dashboard_cross.render_universal()
         else:
             dashboard_cross.render_validation()
         return
 
-    if view == "Raw / ZIP / Bundle Explorer":
+    if view == "Legacy FEMTO / College Raw Explorer":
         _render_raw_explorer()
         return
 
@@ -822,7 +860,7 @@ def main() -> None:
     # Only the first three views are about one specific bearing and window.
     # Model Evaluation is cross-bearing and Architecture is static, so their
     # controls are not rendered at all rather than shown and silently ignored.
-    needs_selection = view in VIEWS[:3]
+    needs_selection = view in ("Signal & FFT", "Health Indicator", "RUL Prediction")
 
     batches = _list_batches()
     if batches.empty:
