@@ -19,7 +19,7 @@ import { SignalAndFeatures } from "@/components/SignalAndFeatures";
 import { SignalChart } from "@/components/SignalChart";
 import { SuppressedResultNotice, isSuppressedApplicability } from "@/components/SuppressedResultNotice";
 import { BlobUploadError, DIRECT_UPLOAD_THRESHOLD_BYTES, uploadFileToBlob } from "@/lib/blobUpload";
-import { looksLikeFemtoAcquisition } from "@/lib/datasetSniff";
+import { ArchiveKind, detectArchiveKind, looksLikeFemtoAcquisition } from "@/lib/datasetSniff";
 
 const MAT_DATASET_TYPE_LABEL: Record<string, string> = {
   FAULT_DIAGNOSIS: "Fault diagnosis / condition monitoring",
@@ -70,6 +70,17 @@ const COMPATIBILITY_LABEL: Record<Compatibility, string> = {
   INVALID_INPUT: "Invalid input",
 };
 
+// Human-readable guidance for an archive filename analyze() intercepted
+// before any FEMTO/MAT routing (datasetSniff.ts's detectArchiveKind).
+function archiveGuidance(kind: ArchiveKind): string {
+  const base =
+    "Archive detected. RAR/7Z and large archives are processed in RULGuard Offline Research Mode.";
+  if (kind === "multipart_rar") {
+    return `${base} Keep all archive parts together and start with part01.rar.`;
+  }
+  return base;
+}
+
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -96,6 +107,7 @@ export default function UploadPage() {
   const [inspectState, setInspectState] = useState<InspectState>({ status: "idle" });
   const [predictState, setPredictState] = useState<PredictState>({ status: "idle" });
   const [matState, setMatState] = useState<MatState>({ status: "idle" });
+  const [archiveKind, setArchiveKind] = useState<ArchiveKind | null>(null);
   const [declaredSamplingRateHz, setDeclaredSamplingRateHz] = useState("");
   const [declaredUnits, setDeclaredUnits] = useState("");
   // Bumped on every mode switch/new analysis so an in-flight request whose
@@ -228,6 +240,17 @@ export default function UploadPage() {
 
   function analyze() {
     if (!selectedFile) return;
+    // Archive containers (.rar, multipart .partNN.rar, .7z, .tar/.tar.gz/.tgz) and
+    // RULGuard's own .rulguard.zip Analysis Bundle are checked by FILENAME before
+    // any FEMTO content-sniffing or MAT routing - sending either into
+    // looksLikeFemtoAcquisition/handleFemtoFile produced the misleading "Dataset
+    // not recognized for RUL prediction" message for what is actually an
+    // unsupported-container case, not a content-shape rejection.
+    const kind = detectArchiveKind(selectedFile.name);
+    if (kind) {
+      setArchiveKind(kind);
+      return;
+    }
     if (selectedFile.name.toLowerCase().endsWith(".mat")) {
       void handleMatFile(selectedFile);
     } else if (datasetType === "femto") {
@@ -243,6 +266,7 @@ export default function UploadPage() {
     setInspectState({ status: "idle" });
     setPredictState({ status: "idle" });
     setMatState({ status: "idle" });
+    setArchiveKind(null);
   }
 
   function switchDatasetType(next: DatasetType) {
@@ -294,7 +318,7 @@ export default function UploadPage() {
             id="file-input"
             data-testid="file-input"
             type="file"
-            accept=".csv,.mat"
+            accept=".csv,.mat,.rar,.7z,.tar,.tar.gz,.tgz"
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) setSelectedFile(file);
@@ -347,7 +371,18 @@ export default function UploadPage() {
         </div>
       )}
 
-      {isMatFile && (
+      {archiveKind && (
+        <div className="flex flex-col gap-2 rounded-lg border border-caution/30 bg-caution/10 p-4 text-sm text-caution">
+          <p>{archiveGuidance(archiveKind)}</p>
+          {archiveKind === "rulguard_bundle" && (
+            <a href="/analyze-bundle" className="self-start underline">
+              Go to Analysis Bundle upload →
+            </a>
+          )}
+        </div>
+      )}
+
+      {!archiveKind && isMatFile && (
         <>
           {matState.status === "loading" && <p className="text-sm">Reading and analyzing the .mat file…</p>}
 
@@ -456,7 +491,7 @@ export default function UploadPage() {
         </>
       )}
 
-      {!isMatFile && datasetType === "femto" && (
+      {!archiveKind && !isMatFile && datasetType === "femto" && (
         <>
           {predictState.status === "uploading" && (
             <p className="text-sm">Uploading… {Math.round(predictState.progress * 100)}%</p>
@@ -534,7 +569,7 @@ export default function UploadPage() {
         </>
       )}
 
-      {!isMatFile && datasetType === "generic" && (
+      {!archiveKind && !isMatFile && datasetType === "generic" && (
         <>
           {inspectState.status === "uploading" && (
             <p className="text-sm">Uploading… {Math.round(inspectState.progress * 100)}%</p>

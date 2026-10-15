@@ -25,3 +25,34 @@ export async function looksLikeFemtoAcquisition(file: File): Promise<boolean> {
   if (fields.length !== FEMTO_COLUMN_COUNT) return false;
   return fields.every((f) => f !== "" && Number.isFinite(Number(f)));
 }
+
+/**
+ * Filename-only archive detection, checked BEFORE any FEMTO/MAT routing so a
+ * RAR/7z/TAR upload never reaches `looksLikeFemtoAcquisition` or the FEMTO
+ * predictor and gets misreported as "Dataset not recognized for RUL
+ * prediction" (that message is about CONTENT shape, not about an unsupported
+ * container format - a materially different, and misleading, failure mode).
+ *
+ * `.rulguard.zip` is RULGuard's own portable Analysis Bundle format (see
+ * bearing_pdm.analysis_bundle) and is NOT a plain archive the cloud can't
+ * read - it routes to /analyze-bundle, not to offline-mode guidance. It is
+ * checked first since it also ends in ".zip".
+ *
+ * This cloud upload page intentionally never attempts server-side RAR/7z/TAR
+ * extraction (that belongs in Offline Research Mode,
+ * src/bearing_pdm/rar_archive.py) - this is filename routing only, never a
+ * parser.
+ */
+export type ArchiveKind = "rulguard_bundle" | "multipart_rar" | "rar" | "7z" | "tar";
+
+const MULTIPART_RAR_RE = /\.part\d+\.rar$/i;
+
+export function detectArchiveKind(filename: string): ArchiveKind | null {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".rulguard.zip")) return "rulguard_bundle";
+  if (MULTIPART_RAR_RE.test(lower)) return "multipart_rar";
+  if (lower.endsWith(".rar")) return "rar";
+  if (lower.endsWith(".7z")) return "7z";
+  if (lower.endsWith(".tar") || lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) return "tar";
+  return null;
+}

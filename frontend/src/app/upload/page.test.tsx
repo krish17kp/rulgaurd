@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import UploadPage from "./page";
@@ -264,6 +264,96 @@ describe("UploadPage", () => {
     expect(screen.getByText(/inspect another dataset/i)).toBeInTheDocument();
   });
 
+  it("a .rar file never reaches FEMTO prediction and shows offline-mode guidance", async () => {
+    render(<UploadPage />);
+
+    await userEvent.upload(
+      screen.getByTestId("file-input") as HTMLInputElement,
+      new File(["fake rar bytes"], "XJTU-SY_Bearing_Datasets.rar"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Offline Research Mode/)).toBeInTheDocument()
+    );
+    expect(screen.queryByText(/not recognized for RUL prediction/)).not.toBeInTheDocument();
+    expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
+    expect(predictRulFromFemtoAcquisitionBlob).not.toHaveBeenCalled();
+    expect(uploadFileToBlob).not.toHaveBeenCalled();
+  });
+
+  it(".part01.rar of a multipart set shows offline-mode guidance, never FEMTO prediction", async () => {
+    render(<UploadPage />);
+
+    await userEvent.upload(
+      screen.getByTestId("file-input") as HTMLInputElement,
+      new File(["fake rar bytes"], "XJTU-SY_Bearing_Datasets.part01.rar"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Offline Research Mode/)).toBeInTheDocument()
+    );
+    expect(screen.getByText(/start with part01\.rar/i)).toBeInTheDocument();
+    expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
+  });
+
+  it(".part02.rar explains multipart extraction starts from part01, never FEMTO prediction", async () => {
+    render(<UploadPage />);
+
+    await userEvent.upload(
+      screen.getByTestId("file-input") as HTMLInputElement,
+      new File(["fake rar bytes"], "XJTU-SY_Bearing_Datasets.part02.rar"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Offline Research Mode/)).toBeInTheDocument()
+    );
+    expect(screen.getByText(/start with part01\.rar/i)).toBeInTheDocument();
+    expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
+  });
+
+  it(".7z and .tar.gz archives show offline-mode guidance, never FEMTO prediction", async () => {
+    render(<UploadPage />);
+
+    await userEvent.upload(
+      screen.getByTestId("file-input") as HTMLInputElement,
+      new File(["fake 7z bytes"], "dataset.7z"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+    await waitFor(() => expect(screen.getByText(/Offline Research Mode/)).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: /remove/i }));
+    await userEvent.upload(
+      screen.getByTestId("file-input") as HTMLInputElement,
+      new File(["fake tar bytes"], "dataset.tar.gz"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+    await waitFor(() => expect(screen.getByText(/Offline Research Mode/)).toBeInTheDocument());
+    expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
+  });
+
+  it("a .rulguard.zip routes to the Analysis Bundle workflow, never FEMTO prediction", async () => {
+    render(<UploadPage />);
+
+    // .rulguard.zip isn't in the picker's `accept` (that's .csv/.mat/archive
+    // formats only) - dropped files bypass `accept` entirely, same as a real
+    // browser, so this exercises the actual path a user hits.
+    const file = new File(["fake bundle bytes"], "xjtu_real.rulguard.zip");
+    const dropzone = screen.getByText(/drag and drop/i);
+    fireEvent.drop(dropzone, { dataTransfer: { files: [file] } });
+
+    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Go to Analysis Bundle upload/)).toBeInTheDocument()
+    );
+    expect(screen.queryByText(/not recognized for RUL prediction/)).not.toBeInTheDocument();
+    expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
+    expect(predictRulFromFemtoAcquisitionBlob).not.toHaveBeenCalled();
+  });
+
   it("the Advanced section provides generic dataset inspection, off by default", async () => {
     vi.mocked(inspectDataset).mockResolvedValue(genericProfile("UNSUPPORTED", ["no vibration channel recognised in the header"]));
     render(<UploadPage />);
@@ -278,9 +368,12 @@ describe("UploadPage", () => {
     expect(inspectDataset).toHaveBeenCalledTimes(1);
   });
 
-  it("the file picker accepts .mat files", () => {
+  it("the file picker accepts .mat and archive files", () => {
     render(<UploadPage />);
-    expect(screen.getByTestId("file-input")).toHaveAttribute("accept", ".csv,.mat");
+    expect(screen.getByTestId("file-input")).toHaveAttribute(
+      "accept",
+      ".csv,.mat,.rar,.7z,.tar,.tar.gz,.tgz",
+    );
   });
 
   it("a selected .mat file routes to the mat analysis endpoint, not FEMTO/generic", async () => {

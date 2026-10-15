@@ -176,6 +176,19 @@ test("Generic non-FEMTO CSV is treated as out-of-distribution, not a FEMTO predi
   ).toBeVisible({ timeout: 20_000 });
 });
 
+test("a .rar upload shows Offline Research Mode guidance, never the FEMTO error", async ({ page }) => {
+  await page.goto("/upload");
+  await page.setInputFiles('[data-testid="file-input"]', {
+    name: "XJTU-SY_Bearing_Datasets.part01.rar",
+    mimeType: "application/x-rar-compressed",
+    buffer: Buffer.from("fake rar bytes"),
+  });
+  await page.getByRole("button", { name: /analyze bearing/i }).click();
+  await expect(page.getByText(/Offline Research Mode/)).toBeVisible();
+  await expect(page.getByText(/start with part01\.rar/i)).toBeVisible();
+  await expect(page.getByText(/Dataset not recognized for RUL prediction/)).not.toBeVisible();
+});
+
 test("XJTU routing Analysis Bundle (real full-bearing trajectory) renders with RUL suppressed", async ({
   page,
 }) => {
