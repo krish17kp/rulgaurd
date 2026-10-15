@@ -10,6 +10,8 @@ import pytest
 from bearing_pdm.analysis_bundle import (
     BundleValidationError,
     build_bundle,
+    build_routing_bundle,
+    bundle_kind,
     load_bundle,
 )
 
@@ -66,6 +68,30 @@ def test_tampered_dataset_checksum_is_rejected(tmp_path):
 
     with pytest.raises(BundleValidationError):
         load_bundle(tampered)
+
+
+def test_bundle_kind_recognises_routing_shape_for_any_dataset():
+    xjtu_payload = {"dataset_id": "xjtu", "profile": {"n_files": 123}, "decisions": {"Bearing1_1": {}}}
+    ims_payload = {"dataset_id": "ims", "profile": {"n_files": 10}, "decisions": {"test1_bearing3": {}}}
+    assert bundle_kind("xjtu", xjtu_payload) == "routing"
+    assert bundle_kind("ims", ims_payload) == "routing"
+    assert bundle_kind(None, xjtu_payload) == "routing"  # shape alone is enough
+
+
+def test_build_routing_bundle_round_trips_and_strips_local_path(tmp_path):
+    routing_result = {
+        "dataset_id": "xjtu",
+        "profile": {"n_files": 15, "sampling_rate_hz": 25600.0},
+        "decisions": {"Bearing1_1": {"current": {"status": "ok"}, "applicability": {}}},
+        "canonical_path": "/home/krish/private/canonical_xjtu.parquet",
+    }
+    bundle_path = build_routing_bundle("xjtu", routing_result, tmp_path / "xjtu.rulguard.zip")
+    loaded, manifest = load_bundle(bundle_path, with_manifest=True)
+
+    assert manifest["dataset_id"] == "xjtu:routing"
+    assert "canonical_path" not in loaded
+    assert loaded["decisions"]["Bearing1_1"]["current"]["status"] == "ok"
+    assert bundle_kind(manifest["dataset_id"], loaded) == "routing"
 
 
 def test_missing_member_is_rejected(tmp_path):

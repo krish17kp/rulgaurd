@@ -334,11 +334,13 @@ def _render_raw_explorer() -> None:
                 _render_femto_bundle(payload)
             elif kind == "college":
                 _render_college_bundle(next(iter(payload.values())))
+            elif kind == "routing":
+                _render_routing_bundle(payload)
             else:
                 st.warning(
                     f"Bundle loaded (dataset_id={manifest.get('dataset_id')!r}) but its shape "
-                    "does not match a known FEMTO or college Analysis Bundle - showing raw "
-                    "fields instead of guessing a chart."
+                    "does not match a known FEMTO, college, or routing Analysis Bundle - showing "
+                    "raw fields instead of guessing a chart."
                 )
                 st.json(payload)
 
@@ -603,6 +605,45 @@ def _render_knowledge_rag() -> None:
             data=Path(tmp_bundle.name).read_bytes(),
             file_name="knowledge.rulguard-knowledge.zip", key="kb_download",
         )
+
+
+def _render_routing_bundle(payload: dict) -> None:
+    """A `.rulguard.zip` built from scripts/analyze_dataset.py's
+    routing_<dataset>.json (build_routing_bundle) -- any adapter the
+    cross-dataset pipeline supports (XJTU, IMS, FEMTO, college, or a future
+    one), not a dataset-specific renderer. Mirrors dashboard_cross.py's
+    per-bearing summary but from an uploaded bundle instead of a local
+    reports/metrics/ file, since a bundle may travel without the raw dataset."""
+    dataset_id = payload.get("dataset_id", "unknown")
+    profile = payload.get("profile", {})
+    decisions = payload.get("decisions", {})
+    st.caption(f"Routing bundle for dataset `{dataset_id}` - {len(decisions)} bearing(s).")
+
+    k = st.columns(3)
+    k[0].metric("Files profiled", f"{profile.get('n_files', 0):,}")
+    k[1].metric("Sampling rate", f"{profile.get('sampling_rate_hz') or 0:,.0f} Hz")
+    k[2].metric("Recognised as",
+                ", ".join(d["dataset_id"] for d in profile.get("known_datasets", [])) or "unknown")
+    for w in profile.get("warnings", []):
+        st.caption(f"- {w}")
+
+    bearing = st.selectbox("Bearing", sorted(decisions), key="routing_bundle_bearing")
+    decision = decisions[bearing]
+    current = decision.get("current", decision)
+    from bearing_pdm.dashboard_cross import status_banner
+
+    level, title, body = status_banner({
+        "status": current.get("status"), "model": current.get("model"),
+        "level": decision.get("level"), "validated_skill": current.get("validated_skill"),
+    })
+    getattr(st, level)(f"**{title}**\n\n{body}")
+
+    app = pd.DataFrame([
+        {"model": m, "level": v["level"], "shift ratio": round(v["shift_ratio"], 2)}
+        for m, v in decision.get("applicability", {}).items()
+    ])
+    if not app.empty:
+        st.dataframe(app, hide_index=True)
 
 
 def _render_femto_bundle(payload: dict) -> None:

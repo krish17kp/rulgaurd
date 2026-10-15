@@ -77,6 +77,59 @@ def map_column(name: str) -> tuple[str | None, str]:
     return None, "unmapped"
 
 
+def apply_manual_mapping(
+    profile: dict, mapping: dict[str, str], sampling_rate_hz: float | None = None
+) -> dict:
+    """Override column->role mapping with a human-confirmed mapping (nightshift
+    universal-ingestion gap D: the "mapping UI" path for a headerless or
+    unrecognised dataset that profile_folder()/profile_file() correctly refused
+    to guess at).
+
+    `profile` is a profile_folder() result. `mapping` is {column name: canonical
+    role}, applied to every sampled file that has that column name (by-name
+    mapping only -- a column-name-less/positional mapping must be given a
+    synthetic name by the caller, e.g. "col_0", matching profile_file()'s
+    str(df.columns) output for a headerless read). Every mapping value must be
+    a known canonical role (ALIASES key); every key must actually appear in at
+    least one sampled file's columns -- a mapping that matches nothing is a
+    caller bug, not something to silently ignore.
+
+    Returns a new profile dict; does not mutate the input. Mapped columns get
+    confidence="manual" so downstream consumers can tell a human override from
+    an inferred one.
+    """
+    bad_roles = set(mapping.values()) - set(ALIASES)
+    if bad_roles:
+        raise ValueError(f"unknown canonical role(s) in mapping: {sorted(bad_roles)}")
+
+    new_profile = dict(profile)
+    new_files = []
+    matched_keys: set[str] = set()
+    for f in profile.get("files", []):
+        new_f = dict(f)
+        new_columns = []
+        for c in f.get("columns", []):
+            if c["name"] in mapping:
+                matched_keys.add(c["name"])
+                c = dict(c) | {"canonical": mapping[c["name"]], "confidence": "manual"}
+            new_columns.append(c)
+        new_f["columns"] = new_columns
+        new_files.append(new_f)
+    new_profile["files"] = new_files
+
+    unmatched = set(mapping) - matched_keys
+    if unmatched:
+        raise ValueError(f"mapping key(s) matched no sampled column: {sorted(unmatched)}")
+
+    readable = [f for f in new_files if f.get("readable")]
+    mapped = {c["canonical"] for f in readable for c in f.get("columns", []) if c["canonical"]}
+    new_profile["channels_found"] = sorted(mapped)
+    if sampling_rate_hz is not None:
+        new_profile["sampling_rate_hz"] = float(sampling_rate_hz)
+        new_profile["sampling_rate_source"] = "manual"
+    return new_profile
+
+
 def _sniff(text: str) -> tuple[str | None, bool]:
     """(delimiter, has_header) from a text sample. None = whitespace-separated."""
     first = text.splitlines()[0] if text else ""

@@ -504,3 +504,54 @@ seconds unit explicitly; its rate, provenance, and warning assertions remain.
 The upload endpoint accepts explicit user rates without claiming that they
 repair irregular timing or validate any trained model for the dataset.
 
+## D29: RAR/multipart-RAR ingestion, routing-bundle bridge, manual schema mapping (2026-10-15)
+
+Universal-ingestion audit found most of the requested system already built across prior
+nightshift passes (archive.py's secure ZIP extraction, femto/college/cwru/paderborn/xjtu/ims
+adapters, the profiler/routing/dashboard_cross.py cross-dataset pipeline, analysis_bundle.py).
+Three real gaps were closed; a fourth was scoped down rather than rushed.
+
+1. **RAR/multipart-RAR (Offline Research Mode only)**: `src/bearing_pdm/rar_archive.py`. Lists
+   via the system `7z` binary (`-slt`, gives clean checksummable fields) but extracts via
+   `unrar`, not `7z x` -- the bundled 7z 26.00 RAR decoder rejected the real XJTU-SY download's
+   RAR5 compression method ("Unsupported Method"); `unrar` reads it correctly. No new Python
+   dependency (`requirements.txt` stays short). Mirrors archive.py's security gates: path
+   traversal/absolute/symlink/encrypted-entry rejection, file-count and uncompressed-size
+   limits, compression-ratio (archive-bomb) guard, plus a free-disk-space pre-check (found by
+   the real test: `/tmp` here is a 7.3G tmpfs with ~1.5G free, far short of the ~9GB XJTU-SY
+   set -- extraction must target a caller-chosen destination with room, never assume `/tmp`).
+   unrar's exit code 1 is a non-fatal warning (observed on this real archive's trailing bytes
+   past the last volume's logical end) and is treated as success; >=2 or "Program aborted" in
+   stdout is not.
+2. **Real XJTU-SY multipart-RAR verification**: run manually against the actual download at
+   `~/Downloads/XJTU_parts/Data/XJTU-SY_Bearing_Datasets.part01..06.rar` (9,217 entries, ~9GB
+   uncompressed). All 6 parts discovered and verified complete, extracted cleanly, 15 bearings
+   recognised across all 3 XJTU operating conditions, and `2.csv`/`4.csv` confirmed as XJTU
+   acquisitions (32768x2, correct `Horizontal_vibration_signals`/`Vertical_vibration_signals`
+   header) rather than FEMTO. `tests/test_rar_archive.py::test_real_xjtu_multipart_rar_*` keeps
+   the fast (listing-only) half of this as an environment-conditional regression test; the
+   full multi-GB extraction was verified once by hand, not re-run on every `pytest` invocation.
+3. **Analysis Bundle / XJTU-IMS bridge**: `bundle_kind()` (`analysis_bundle.py`) now recognises
+   a `{"profile", "decisions"}`-shaped payload as `"routing"` by shape, not by hardcoded dataset
+   name -- so XJTU, IMS, or any future adapter's `routing_<dataset>.json`
+   (`scripts/analyze_dataset.py`) qualifies with no change to this function. `build_routing_bundle()`
+   packages that JSON into a `.rulguard.zip`, stripping `canonical_path` (a local absolute path;
+   security.md). `dashboard.py::_render_routing_bundle` renders it (profile summary, per-bearing
+   applicability/status, same `status_banner` dashboard_cross.py already uses) when a bundle's
+   kind is `"routing"`. The Next.js frontend has no renderer for this bundle kind yet -- out of
+   scope for this pass, not claimed done.
+4. **Generic/unknown-dataset manual mapping**: `profiler.py::apply_manual_mapping()` lets a
+   human override column->role assignment (by column name, confidence="manual") for a dataset
+   `profile_folder()` correctly refused to guess at (headerless file, or an unrecognised header).
+   This is the pure, testable primitive only. Wiring it into a `scripts/analyze_dataset.py
+   --mapping <file>` CLI flag or a Streamlit mapping form is deliberately deferred: the existing
+   pipeline from a mapped profile to a `BearingRun`/`Recording` (`adapters.py`'s
+   `DatasetAdapter.discover`/`.recordings`) requires a new `GenericAdapter` implementation, and
+   rushing that risks exactly what ml-data.md forbids -- a plausible-looking RUL number from an
+   under-verified mapping. Flagged as remaining scope, not fabricated as complete.
+
+No FEMTO/CWRU/Paderborn production path was touched. `acc_00450.csv` -> 4610.0s / HIGH /
+FULLY_SUPPORTED regression (`tests/test_api_e2e.py`) still passes unchanged. No deploy was
+performed -- `git.md`: the user pushes manually, and Preview/Production deploy is a separate,
+explicit-authorization action this pass did not request.
+

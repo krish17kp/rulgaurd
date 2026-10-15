@@ -22,7 +22,13 @@ from bearing_pdm.pipeline import (
     build_femto_feature_rows,
     canonical_feature_row,
 )
-from bearing_pdm.profiler import detect_datasets, map_column, profile_file, profile_folder
+from bearing_pdm.profiler import (
+    apply_manual_mapping,
+    detect_datasets,
+    map_column,
+    profile_file,
+    profile_folder,
+)
 
 FIXTURES = Path(__file__).resolve().parents[1] / "data" / "fixtures"
 
@@ -230,6 +236,38 @@ def test_profile_headerless_file_is_never_guessed(tmp_path):
     p = profile_folder(tmp_path)
     assert all(c["canonical"] is None for c in p["files"][0]["columns"])
     assert p["sampling_rate_hz"] is None
+
+
+def test_apply_manual_mapping_overrides_headerless_columns(tmp_path):
+    np.savetxt(tmp_path / "x.csv", np.random.default_rng(0).normal(size=(100, 3)), delimiter=",")
+    profile = profile_folder(tmp_path)
+    assert all(c["canonical"] is None for c in profile["files"][0]["columns"])  # never guessed
+
+    mapping = {"0": "vibration_x", "1": "vibration_y", "2": "temperature_bearing"}
+    mapped = apply_manual_mapping(profile, mapping, sampling_rate_hz=20000.0)
+    cols = {c["name"]: c for c in mapped["files"][0]["columns"]}
+    assert cols["0"]["canonical"] == "vibration_x" and cols["0"]["confidence"] == "manual"
+    assert cols["1"]["canonical"] == "vibration_y"
+    assert cols["2"]["canonical"] == "temperature_bearing"
+    assert mapped["channels_found"] == ["temperature_bearing", "vibration_x", "vibration_y"]
+    assert mapped["sampling_rate_hz"] == 20000.0
+    assert mapped["sampling_rate_source"] == "manual"
+    # original is untouched
+    assert all(c["canonical"] is None for c in profile["files"][0]["columns"])
+
+
+def test_apply_manual_mapping_rejects_unknown_role(tmp_path):
+    np.savetxt(tmp_path / "x.csv", np.zeros((10, 1)), delimiter=",")
+    profile = profile_folder(tmp_path)
+    with pytest.raises(ValueError, match="unknown canonical role"):
+        apply_manual_mapping(profile, {"0": "not_a_real_role"})
+
+
+def test_apply_manual_mapping_rejects_unmatched_column_name(tmp_path):
+    np.savetxt(tmp_path / "x.csv", np.zeros((10, 1)), delimiter=",")
+    profile = profile_folder(tmp_path)
+    with pytest.raises(ValueError, match="matched no sampled column"):
+        apply_manual_mapping(profile, {"nonexistent_column": "vibration_x"})
 
 
 def test_detect_datasets_from_a_single_bearing_folder(tmp_path):

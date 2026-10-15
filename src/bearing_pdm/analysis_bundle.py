@@ -67,11 +67,18 @@ def build_bundle(dataset_id: str, payload: Any, out_path: str | Path) -> Path:
 
 
 def bundle_kind(dataset_id: str | None, payload: dict[str, Any]) -> str:
-    """"femto" | "college" | "unknown" - which renderer a loaded bundle needs.
-    Shared by the web endpoint (api.py's /analyze/bundle) and the Streamlit
-    explorer (dashboard.py) so the two UIs can never classify the same
-    bundle differently. Prefers the manifest's dataset_id; falls back to
-    sniffing the payload shape for a bundle built without one.
+    """"femto" | "college" | "routing" | "unknown" - which renderer a loaded
+    bundle needs. Shared by the web endpoint (api.py's /analyze/bundle) and
+    the Streamlit explorer (dashboard.py) so the two UIs can never classify
+    the same bundle differently. Prefers the manifest's dataset_id; falls
+    back to sniffing the payload shape for a bundle built without one.
+
+    "routing" covers any dataset the cross-dataset pipeline (profiler.py ->
+    adapters.py -> scripts/analyze_dataset.py) already produces a
+    routing_<dataset>.json for -- XJTU, IMS, and any future adapter -- without
+    hardcoding dataset names here: a routing payload's shape (profile +
+    decisions, see build_routing_bundle()) is itself the signal, so a new
+    adapter needs no change to this function.
     """
     if dataset_id and dataset_id.startswith("femto"):
         return "femto"
@@ -82,7 +89,29 @@ def bundle_kind(dataset_id: str | None, payload: dict[str, Any]) -> str:
     if any(isinstance(v, dict) and str(v.get("dataset_id", "")).startswith("college")
            for v in payload.values()):
         return "college"
+    if "profile" in payload and "decisions" in payload:
+        return "routing"
     return "unknown"
+
+
+_SENSITIVE_PROFILE_KEYS = ("canonical_path",)
+
+
+def build_routing_bundle(dataset_id: str, routing_result: dict[str, Any], out_path: str | Path) -> Path:
+    """Package a scripts/analyze_dataset.py routing_<dataset>.json result (any
+    adapter -- FEMTO, college, XJTU, IMS, or a future one) into a
+    `.rulguard.zip`, for upload to the web when the full raw dataset is too
+    large to ship (nightshift universal-ingestion gap C).
+
+    Strips `canonical_path`, which is a local absolute filesystem path, not
+    display-safe data (security.md: never commit/ship a local absolute path).
+    Only the already-computed profile/decisions survive -- nothing is
+    recomputed and no raw sensor row is included.
+    """
+    sanitized = dict(routing_result)
+    for key in _SENSITIVE_PROFILE_KEYS:
+        sanitized.pop(key, None)
+    return build_bundle(f"{dataset_id}:routing", sanitized, out_path)
 
 
 def load_bundle(path: str | Path, with_manifest: bool = False) -> dict[str, Any]:
