@@ -281,3 +281,8 @@ The access log records the state as `compatibility` (stage
   `compatibility: RETRAIN_REQUIRED` and the experimental caveat in `warnings`.
 - Units are not a request field: they are known only through a registered
   adapter, which is why an unregistered dataset is `UNSUPPORTED`.
+- This file covers the web `/predict` and `/analyze` endpoints' compatibility gate only.
+  The offline Universal Dataset Analysis pipeline (`scripts/analyze_dataset.py`:
+  FEMTO/college/CWRU/Paderborn/XJTU-SY/IMS plus any dataset via a manual column mapping,
+  RAR/multipart-RAR/ZIP ingestion, `.rulguard.zip` Analysis Bundle export/import) is covered
+  in `docs/decisions.md` D23-D30, not here.

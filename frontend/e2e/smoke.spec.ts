@@ -1,3 +1,4 @@
+import path from "path";
 import { test, expect } from "@playwright/test";
 
 // Golden-path + key-state smoke coverage across desktop and 390px mobile
@@ -173,4 +174,35 @@ test("Generic non-FEMTO CSV is treated as out-of-distribution, not a FEMTO predi
       /RUL suppressed|outside the training distribution|RETRAIN_REQUIRED|won't succeed on retry/i,
     ),
   ).toBeVisible({ timeout: 20_000 });
+});
+
+test("XJTU routing Analysis Bundle (real full-bearing trajectory) renders with RUL suppressed", async ({
+  page,
+}) => {
+  // Built from the real XJTU-SY multipart-RAR download (docs/decisions.md D29/D30):
+  // scripts/analyze_dataset.py --dataset xjtu against the real, complete 123-acquisition
+  // Bearing1_1 run, packaged via bearing_pdm.analysis_bundle.build_routing_bundle.
+  await page.goto("/analyze-bundle");
+  await page.setInputFiles(
+    '[data-testid="file-input"]',
+    path.join(__dirname, "fixtures", "xjtu_real.rulguard.zip"),
+  );
+  await expect(page.getByText("xjtu:Bearing1_1")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/LOW/).first()).toBeVisible();
+  await expect(page.getByText(/RUL unavailable for this analysis/)).toBeVisible();
+  await expect(page.getByText(/Raw signal is not included in this Analysis Bundle/)).toBeVisible();
+  // A real 123-point trajectory, not a fake single-snapshot history.
+  await expect(page.getByText(/Health \/ trajectory/)).toBeVisible();
+});
+
+test("Generic routing Analysis Bundle (manually mapped dataset) renders without a fabricated RUL", async ({
+  page,
+}) => {
+  await page.goto("/analyze-bundle");
+  await page.setInputFiles(
+    '[data-testid="file-input"]',
+    path.join(__dirname, "fixtures", "generic.rulguard.zip"),
+  );
+  await expect(page.getByText("generic", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/RUL unavailable for this analysis/)).toBeVisible();
 });

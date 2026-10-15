@@ -315,7 +315,15 @@ function RoutingBundleResult({ data }: { data: RoutingBundlePayload }) {
         )}
       </section>
 
-      {bearingIds.length > 1 && (
+      <section className="rounded-xl border border-surface-border bg-surface p-4 text-sm text-foreground-muted">
+        <h2 className="text-sm font-semibold text-foreground">Signal / FFT</h2>
+        <p className="mt-1">
+          Raw signal is not included in this Analysis Bundle — a routing bundle carries only
+          derived results (features, health indicator, applicability), never the raw dataset.
+        </p>
+      </section>
+
+      {bearingIds.length > 1 ? (
         <label className="text-sm">
           Bearing{" "}
           <select
@@ -330,6 +338,10 @@ function RoutingBundleResult({ data }: { data: RoutingBundlePayload }) {
             ))}
           </select>
         </label>
+      ) : (
+        <p className="text-sm text-foreground-muted">
+          Bearing: <span className="font-mono text-foreground">{bearing}</span>
+        </p>
       )}
 
       <section className="rounded-xl border border-surface-border bg-surface p-4">
