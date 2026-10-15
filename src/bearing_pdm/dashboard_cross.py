@@ -123,7 +123,14 @@ def render_universal() -> None:
     dataset = c1.selectbox("Dataset", available, key="ua_dataset")
     routing = _json(str(METRICS / f"routing_{dataset}.json"))
     frame = _parquet(str(METRICS / f"routing_{dataset}.parquet"))
-    bearing = c2.selectbox("Bearing", sorted(routing["decisions"]), key="ua_bearing")
+    bearing_options = sorted(routing["decisions"])
+    # Bearing ids are dataset-namespaced (e.g. "xjtu:Bearing1_1" vs "femto:Bearing1_1"),
+    # so a bearing selected under one dataset is never valid for another - switching
+    # the Dataset dropdown (manually, or via a fresh analysis above) must reset the
+    # Bearing selection instead of handing selectbox a stale value outside its options.
+    if st.session_state.get("ua_bearing") not in bearing_options and bearing_options:
+        st.session_state["ua_bearing"] = bearing_options[0]
+    bearing = c2.selectbox("Bearing", bearing_options, key="ua_bearing")
     decision = routing["decisions"][bearing]
     rows = frame[frame["bearing_run_id"] == bearing].sort_values("sequence_index")
     profile = routing["profile"]
@@ -429,9 +436,19 @@ def _analyze_archive_box() -> None:
                        "Add an adapter in src/bearing_pdm/adapters.py for a new dataset type.")
             return
         status.update(label=f"Done - dataset '{dataset_id}' ready below", state="complete")
-        st.success(f"Analyzed as '{dataset_id}'. Select it above in Dataset / Bearing to view results.")
+        st.success(f"Analyzed as '{dataset_id}'.")
         _json.clear()  # ponytail: st.cache_data on the json/parquet we just overwrote
         _parquet.clear()
+        # Select the just-analyzed dataset automatically - a user must never see a
+        # stale dataset's results (e.g. femto) survive a successful xjtu analysis.
+        # Safe to set session_state here: the Dataset selectbox below in
+        # render_universal() has not been instantiated yet this run, and we return
+        # via st.rerun() immediately after, so the next run creates it fresh with
+        # this value already in session_state (no "modified after widget creation").
+        # The Bearing selection is reset by render_universal()'s own guard on that
+        # next run (bearing ids are dataset-namespaced, so it always needs resetting
+        # on a dataset change regardless of what triggered it).
+        st.session_state["ua_dataset"] = dataset_id
         st.rerun()
 
 

@@ -420,6 +420,82 @@ def test_analyze_archive_box_rejects_nonexistent_path():
     assert "No such file or folder" in rendered
 
 
+def test_successful_archive_analysis_auto_selects_new_dataset(monkeypatch):
+    """A real user found: after a successful XJTU analysis, the Dataset selectbox
+    could remain on whatever it was previously showing (e.g. femto), rendering a
+    stale dataset's results right after a different dataset was just analyzed.
+    run_analysis() returning a new dataset id must auto-select it - the user must
+    never manually touch the Dataset dropdown to see the dataset they just
+    analyzed, and a stale Bearing value from the old (differently-namespaced)
+    dataset must never survive either."""
+    import json
+    import sys
+    import types
+
+    import pandas as pd
+
+    from bearing_pdm.dashboard_cross import METRICS
+
+    fake_dataset = "zzz_autoselect_test"
+    bearing_id = f"{fake_dataset}:B1"
+    routing_path = METRICS / f"routing_{fake_dataset}.json"
+    parquet_path = METRICS / f"routing_{fake_dataset}.parquet"
+    try:
+        routing_path.write_text(json.dumps({
+            "dataset_id": fake_dataset,
+            "profile": {"n_files": 1, "sampling_rate_hz": 1000.0,
+                       "sampling_rate_source": "test fixture", "channels_found": ["vibration_x"],
+                       "known_datasets": [{"dataset_id": fake_dataset}], "warnings": [], "files": []},
+            "decisions": {bearing_id: {
+                "quality_ok": True, "quality_reasons": [], "status": "RUL_SUPPRESSED",
+                "current": {"status": "RUL_SUPPRESSED", "model": None},
+                "applicability": {"extra_trees": {"level": "LOW", "shift_ratio": 5.0,
+                                                   "reasons": ["synthetic test fixture"]}},
+            }},
+            "trajectories": {bearing_id: []},
+            "canonical_path": None,
+        }))
+        pd.DataFrame([{
+            "bearing_run_id": bearing_id, "sequence_index": 0, "elapsed_s": 0.0,
+            "health_indicator": 1.0, "stage": "HEALTHY", "rul_status": "RUL_SUPPRESSED",
+            "predicted_rul_seconds": None, "rul_lo": None, "rul_hi": None,
+            "actual_rul_seconds": None,
+        }]).to_parquet(parquet_path, index=False)
+
+        fake_module = types.ModuleType("analyze_dataset")
+        fake_module.run_analysis = lambda path, dataset=None, progress=print: (
+            progress("fixture: analysis complete"), fake_dataset)[1]
+        monkeypatch.setitem(sys.modules, "analyze_dataset", fake_module)
+
+        at = _open("Analyze")
+        dataset_box = next(s for s in at.selectbox if s.label == "Dataset")
+        if "femto" in dataset_box.options:
+            # Start from a different, differently-namespaced dataset selected -
+            # the real-world starting state the user hit this bug from.
+            dataset_box.select("femto").run()
+            bearing_box = next(s for s in at.selectbox if s.label == "Bearing")
+            assert bearing_box.value.startswith("femto:")
+
+        expander = next(e for e in at.expander if "Analyze a local archive" in e.label)
+        expander.text_input[0].set_value(str(METRICS)).run()  # any existing path; run_analysis is stubbed
+        expander.button[0].click().run()
+        assert not at.exception
+
+        dataset_box = next(s for s in at.selectbox if s.label == "Dataset")
+        assert dataset_box.value == fake_dataset, (
+            "Dataset selector must auto-select the dataset that was just analyzed, "
+            f"not stay on a stale previous value; got {dataset_box.value!r}"
+        )
+        bearing_box = next(s for s in at.selectbox if s.label == "Bearing")
+        assert bearing_box.value == bearing_id, (
+            "Bearing selector must reset to a bearing valid for the newly-selected "
+            f"dataset, not a stale value from a different dataset; got {bearing_box.value!r}"
+        )
+    finally:
+        routing_path.unlink(missing_ok=True)
+        parquet_path.unlink(missing_ok=True)
+
+
 def test_profile_box_refuses_paths_outside_known_roots(tmp_path):
     from bearing_pdm.dashboard_cross import is_within
     assert is_within(tmp_path / "a" / "b", [tmp_path])
