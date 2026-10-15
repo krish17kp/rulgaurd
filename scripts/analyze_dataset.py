@@ -40,9 +40,48 @@ from bearing_pdm.domain import (
 )
 from bearing_pdm.pipeline import build_canonical_features
 from bearing_pdm.profiler import apply_manual_mapping, profile_folder
+from bearing_pdm.rar_archive import safe_extract_rar
 from bearing_pdm.routing import analyze_bearing, candidates_from_bundle, oof_from_predictions
 
 METRICS = Path("reports/metrics")
+
+
+def _resolve_root(root: Path) -> Path:
+    """If --root is a (multipart) .rar or a folder holding one, extract it first.
+
+    Offline-only (rar_archive.py is never wired into the Vercel/API path).
+    The extraction dir is left under the system temp dir rather than cleaned
+    up -- this is a one-shot CLI run, not a server.
+    ponytail: temp dir not cleaned up; add cleanup if this becomes a hot loop.
+    """
+    rar_file = root if root.suffix.lower() == ".rar" else next(iter(sorted(root.glob("*.rar"))), None)
+    if rar_file is None:
+        return root
+    import tempfile
+    import time
+
+    # ponytail: /tmp is commonly a small RAM-backed tmpfs (e.g. 7GB) -- a real
+    # multi-GB dataset archive silently OOM/ENOSPC-kills the extraction there.
+    # Use the user's home dir's filesystem instead, which has real disk space.
+    scratch_root = Path.home() / ".cache" / "rulguard_rar_scratch"
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    dest = Path(tempfile.mkdtemp(prefix="rulguard_rar_", dir=str(scratch_root)))
+    size_mb = rar_file.stat().st_size / 1e6
+    print(f"Archive validation: {rar_file.name} ({size_mb:.0f} MB) -> extracting to {dest}")
+    t0 = time.monotonic()
+    safe_extract_rar(rar_file, dest)
+    n_files = sum(1 for _ in dest.rglob("*") if _.is_file())
+    total_bytes = sum(p.stat().st_size for p in dest.rglob("*") if p.is_file())
+    print(f"Extraction done in {time.monotonic() - t0:.1f}s: {n_files} files, "
+          f"{total_bytes / 1e9:.2f} GB")
+    # Archives commonly wrap everything in one top-level folder (e.g. XJTU-SY's
+    # "XJTU-SY_Bearing_Datasets/"); unwrap it so --root lands on the real data.
+    while True:
+        entries = list(dest.iterdir())
+        if len(entries) == 1 and entries[0].is_dir():
+            dest = entries[0]
+        else:
+            return dest
 
 
 def main() -> int:
@@ -63,7 +102,7 @@ def main() -> int:
                              "to build a trajectory; omit for a single-file signal/FFT/features-"
                              "only analysis")
     args = parser.parse_args()
-    root = Path(args.root).expanduser()
+    root = _resolve_root(Path(args.root).expanduser())
 
     profile = profile_folder(root)
     print(f"Profile: {profile['n_files']} files, sampling rate {profile['sampling_rate_hz']} "
