@@ -348,6 +348,41 @@ def test_status_banner_names_suppression_explicitly():
                           "level": "MEDIUM"})[0] == "warning"
 
 
+def test_universal_analysis_tabs_render_real_xjtu_without_fabricating_rul():
+    """The restructured Universal Machine Analysis result (Overview/Signal/FFT/
+    Features/Health/Trajectory/Applicability/RUL/Evaluation/Evidence tabs) must
+    render against a real routing_xjtu.json (committed-fixture-free: this reuses
+    whatever the real extraction run already wrote to reports/metrics/) and must
+    show RUL suppression text, never a fabricated hours number, for a bearing
+    the FEMTO-fit model is OOD on."""
+    import json
+    from pathlib import Path
+
+    routing_path = Path("reports/metrics/routing_xjtu.json")
+    if not routing_path.exists():
+        pytest.skip("reports/metrics/routing_xjtu.json not present in this environment")
+    routing = json.loads(routing_path.read_text())
+    bearing = sorted(routing["decisions"])[0]
+    if routing["decisions"][bearing]["current"]["status"] != "RUL_SUPPRESSED":
+        pytest.skip(f"{bearing} is not RUL_SUPPRESSED in the current artifact; nothing to assert")
+
+    at = _open("Universal Machine Analysis")
+    assert at.tabs, "results must be organised into tabs, not a flat scroll"
+    tab_labels = [t.label for t in at.tabs]
+    assert tab_labels == ["Overview", "Signal", "FFT", "Features", "Health", "Trajectory",
+                          "Applicability", "RUL", "Evaluation", "Evidence"]
+    dataset_box = next(s for s in at.selectbox if s.label == "Dataset")
+    dataset_box.select("xjtu").run()
+    assert not at.exception
+
+    rendered = " ".join(e.value for e in at.info) + " ".join(e.value for e in at.error) \
+        + " ".join(e.value for e in at.caption)
+    assert "RUL unavailable for this analysis" in rendered
+    # No fabricated hours figure anywhere a suppressed bearing's RUL metric would live.
+    assert not any("Predicted RUL at recording" in m.label for m in at.metric)
+    assert "Unavailable for this analysis" in rendered  # Evidence tab, no RAG wired here
+
+
 def test_analyze_archive_box_rejects_nonexistent_path():
     """The archive-analysis box (Universal Machine Analysis) must show a plain
     error for a bad path, never a traceback - this is the live entry point for

@@ -1,0 +1,8 @@
+# Visual parity with the production web app's dark/teal theme
+# (frontend/src/app/globals.css). Same palette, not pixel-identical CSS.
+[theme]
+base = "dark"
+backgroundColor = "#0b0f12"
+secondaryBackgroundColor = "#141a1f"
+primaryColor = "#2dd4bf"
+textColor = "#e8edf0"

@@ -127,18 +127,54 @@ def render_universal() -> None:
     decision = routing["decisions"][bearing]
     rows = frame[frame["bearing_run_id"] == bearing].sort_values("sequence_index")
     profile = routing["profile"]
+    canonical = Path(routing.get("canonical_path") or PROCESSED / f"canonical_{dataset}.parquet")
 
-    st.markdown("#### Dataset profile")
+    # Section order/names mirror the web Analysis Bundle renderer
+    # (frontend/src/app/analyze-bundle/page.tsx RoutingBundleResult) so the same
+    # routing_<id>.json produces a recognisably-the-same result in both places.
+    tabs = st.tabs(["Overview", "Signal", "FFT", "Features", "Health", "Trajectory",
+                    "Applicability", "RUL", "Evaluation", "Evidence"])
+    with tabs[0]:
+        _overview_tab(dataset, profile, rows, decision, bearing)
+    with tabs[1]:
+        _signal_tab(dataset, bearing, rows, canonical)
+    with tabs[2]:
+        _fft_tab()
+    with tabs[3]:
+        _feature_trends(dataset, bearing, canonical)
+    with tabs[4]:
+        _health_tab(rows)
+    with tabs[5]:
+        _trajectory_tab(rows)
+    with tabs[6]:
+        _applicability_tab(decision)
+    with tabs[7]:
+        _rul_tab(decision, rows)
+    with tabs[8]:
+        _evaluation_tab(rows)
+    with tabs[9]:
+        st.caption("Unavailable for this analysis: no evidence/RAG explanation is attached to "
+                   "this routing result. See the Knowledge / RAG view for the FEMTO explanation "
+                   "demo.")
+
+    with st.expander("Advanced / raw data"):
+        st.json(decision)
+    _profile_box()
+
+
+def _overview_tab(dataset: str, profile: dict, rows: pd.DataFrame, decision: dict,
+                   bearing: str) -> None:
     k = st.columns(4)
     k[0].metric("Files", f"{profile['n_files']:,}")
     k[1].metric("Sampling rate", f"{profile['sampling_rate_hz'] or 0:,.0f} Hz")
     k[2].metric("Recordings (this bearing)", f"{len(rows):,}")
     k[3].metric("Recognised as", ", ".join(d["dataset_id"] for d in profile["known_datasets"])
                 or "unknown")
-    st.caption(f"Sampling rate source: {profile['sampling_rate_source']}. "
+    st.caption(f"Dataset: {dataset} | Bearing: {bearing} | "
+               f"Sampling rate source: {profile['sampling_rate_source']}. "
                f"Channels named in headers: {profile['channels_found'] or 'none (headerless)'}.")
 
-    st.markdown("#### Data quality")
+    st.markdown("**Data quality**")
     audit = _json(str(METRICS / f"audit_{dataset}.json"))
     if decision["quality_ok"]:
         st.success("Quality gate passed.")
@@ -152,7 +188,8 @@ def render_universal() -> None:
                    f"files, samples/recording {a['samples_per_recording']}, estimated missing "
                    f"recordings {a.get('missing_recordings_estimate', 'n/a')}.")
 
-    st.markdown("#### Model applicability")
+
+def _applicability_tab(decision: dict) -> None:
     app = pd.DataFrame([{"model": m, "level": v["level"], "shift ratio": round(v["shift_ratio"], 2)}
                         for m, v in decision["applicability"].items()])
     st.dataframe(app, hide_index=True)
@@ -162,8 +199,10 @@ def render_universal() -> None:
             for r in v["reasons"]:
                 st.write("-", r)
 
+
+def _rul_tab(decision: dict, rows: pd.DataFrame) -> None:
     # The banner is the CAUSAL decision at the latest recording (what the system
-    # says now); the whole-run summary above is retrospective.
+    # says now); the whole-run summary (decision["status"]) is retrospective.
     current = decision.get("current", decision)
     model = current.get("model")
     now_level = rows[f"level_{model}"].iloc[-1] if model else decision.get("level")
@@ -174,58 +213,85 @@ def render_universal() -> None:
     if "rul_status" in rows:
         counts = rows["rul_status"].value_counts().to_dict()
         st.caption("Decision per recording (causal - each uses only that recording and earlier "
-                   f"ones): {counts}. Applicability table above: whole-run summary.")
+                   f"ones): {counts}. Applicability tab: whole-run summary.")
 
-    st.markdown("#### Health")
-    hours = rows["elapsed_s"] / 3600
-    stage_now = rows["stage"].iloc[-1]
-    st.metric("Current degradation stage (severity band, not a fault diagnosis)", stage_now)
-    st.line_chart(pd.DataFrame({"health indicator": rows["health_indicator"].to_numpy()},
-                               index=hours.round(3).to_numpy()), x_label="elapsed time (h)",
-                  y_label="HI (1 healthy -> 0 failed)")
-
-    st.markdown("#### Remaining useful life")
     has_truth = "actual_rul_seconds" in rows and rows["actual_rul_seconds"].notna().any()
     if rows["predicted_rul_seconds"].isna().all():
-        st.info("No RUL is shown for this bearing. See the applicability reasons above.")
+        st.info("RUL unavailable for this analysis. The applicability or validated-skill gate "
+                "did not permit a prediction for this bearing - see the Applicability tab.")
         if has_truth:
             st.caption("Ground truth exists (evaluation mode) but is not compared against a "
-                       "suppressed prediction.")
-    else:
-        last = rows.dropna(subset=["predicted_rul_seconds"]).iloc[-1]
-        k = st.columns(3)
-        k[0].metric(f"Predicted RUL at recording {int(last['sequence_index'])} "
-                    f"({last['rul_status']})", f"{last['predicted_rul_seconds'] / 3600:.2f} h")
-        k[1].metric("90% conformal interval",
-                    f"{last['rul_lo'] / 3600:.2f} - {last['rul_hi'] / 3600:.2f} h")
-        if has_truth and pd.notna(last["actual_rul_seconds"]):
-            err = (last["predicted_rul_seconds"] - last["actual_rul_seconds"]) / 3600
-            k[2].metric("Error vs ground truth", f"{err:+.2f} h",
-                        help="positive = over-estimate (unsafe direction)")
-        chart = pd.DataFrame({"predicted (h)": rows["predicted_rul_seconds"] / 3600,
-                              "interval low (h)": rows["rul_lo"] / 3600,
-                              "interval high (h)": rows["rul_hi"] / 3600}).set_index(hours)
-        if has_truth:
-            chart["actual (h)"] = (rows["actual_rul_seconds"] / 3600).to_numpy()
-        st.line_chart(chart, x_label="elapsed time (h)", y_label="RUL (h)")
-
-    canonical = Path(routing.get("canonical_path") or PROCESSED / f"canonical_{dataset}.parquet")
-    _raw_panel(dataset, bearing, rows, canonical)
-    _feature_trends(dataset, bearing, canonical)
-    _profile_box()
+                       "suppressed prediction - see the Evaluation tab.")
+        return
+    hours = rows["elapsed_s"] / 3600
+    last = rows.dropna(subset=["predicted_rul_seconds"]).iloc[-1]
+    k = st.columns(2)
+    k[0].metric(f"Predicted RUL at recording {int(last['sequence_index'])} "
+                f"({last['rul_status']})", f"{last['predicted_rul_seconds'] / 3600:.2f} h")
+    k[1].metric("90% conformal interval",
+                f"{last['rul_lo'] / 3600:.2f} - {last['rul_hi'] / 3600:.2f} h")
+    chart = pd.DataFrame({"predicted (h)": rows["predicted_rul_seconds"] / 3600,
+                          "interval low (h)": rows["rul_lo"] / 3600,
+                          "interval high (h)": rows["rul_hi"] / 3600}).set_index(hours)
+    if has_truth:
+        chart["actual (h)"] = (rows["actual_rul_seconds"] / 3600).to_numpy()
+    st.line_chart(chart, x_label="elapsed time (h)", y_label="RUL (h)")
 
 
-def _raw_panel(dataset: str, bearing: str, rows: pd.DataFrame, canonical: Path) -> None:
-    st.markdown("#### Measured signal and spectrum")
+def _health_tab(rows: pd.DataFrame) -> None:
+    stage_now = rows["stage"].iloc[-1]
+    hi_now = rows["health_indicator"].iloc[-1]
+    k = st.columns(2)
+    k[0].metric("Current degradation stage (severity band, not a fault diagnosis)", stage_now)
+    k[1].metric("Current health indicator", f"{hi_now:.3f}", help="1 healthy -> 0 failed")
+
+
+def _trajectory_tab(rows: pd.DataFrame) -> None:
+    hours = rows["elapsed_s"] / 3600
+    st.line_chart(pd.DataFrame({"health indicator": rows["health_indicator"].to_numpy(),
+                               }, index=hours.round(3).to_numpy()),
+                  x_label="elapsed time (h)", y_label="HI (1 healthy -> 0 failed)")
+    st.caption("Stage over the same run: " + " -> ".join(
+        f"{s} (×{n})" for s, n in rows["stage"].value_counts().loc[
+            rows["stage"].drop_duplicates()].items()))
+
+
+def _evaluation_tab(rows: pd.DataFrame) -> None:
+    """Current-bearing evaluation only (ground truth vs. prediction for THIS run) -
+    never the project-wide model benchmark, which lives in the Model Evaluation view."""
+    has_truth = "actual_rul_seconds" in rows and "predicted_rul_seconds" in rows and \
+        rows["actual_rul_seconds"].notna().any() and rows["predicted_rul_seconds"].notna().any()
+    if not has_truth:
+        st.caption("Unavailable for this analysis: no ground-truth RUL and a suppressed/predicted "
+                   "RUL both exist for this bearing to compare. For the project-wide model "
+                   "benchmark against held-out bearings, see the Model Evaluation view.")
+        return
+    both = rows.dropna(subset=["actual_rul_seconds", "predicted_rul_seconds"])
+    if both.empty:
+        st.caption("Unavailable for this analysis: ground truth and prediction never overlap "
+                   "for this bearing (e.g. RUL was suppressed for every recording that has a "
+                   "ground-truth label).")
+        return
+    err_h = (both["predicted_rul_seconds"] - both["actual_rul_seconds"]) / 3600
+    k = st.columns(2)
+    k[0].metric("Mean absolute error (this run)", f"{err_h.abs().mean():.2f} h")
+    k[1].metric("Mean error (this run)", f"{err_h.mean():+.2f} h",
+                help="positive = over-estimate (unsafe direction)")
+    st.caption("This-run evaluation only, not the project's leave-one-bearing-out benchmark.")
+
+
+def _signal_tab(dataset: str, bearing: str, rows: pd.DataFrame, canonical: Path) -> None:
     manifest = _json(str(canonical.with_suffix(".json")))
     if manifest is None:
-        st.caption("No canonical manifest - raw source location unknown.")
+        st.caption("Unavailable for this analysis: no canonical manifest, so the raw source "
+                   "location is unknown.")
         return
     seq = st.slider("Recording (sequence index)", int(rows["sequence_index"].min()),
                     int(rows["sequence_index"].max()), int(rows["sequence_index"].max()),
                     key="ua_seq")
     if not st.button("Load this recording from the source file", key="ua_load"):
-        st.caption("Raw panels re-read the real file on request (a college file is 2M samples).")
+        st.caption("Raw panels re-read the real file on request (a college file is 2M samples). "
+                   "The loaded signal is also used by the FFT tab.")
         return
     from bearing_pdm.adapters import get_adapter
     adapter = get_adapter(dataset)
@@ -235,28 +301,43 @@ def _raw_panel(dataset: str, bearing: str, rows: pd.DataFrame, canonical: Path) 
         rec = next(r for r in adapter.recordings(run) if r.sequence_index == seq)
     except (FileNotFoundError, IndexError, StopIteration, OSError) as e:
         st.warning(f"Source data unreachable ({type(e).__name__}) - showing cached features only.")
+        st.session_state["ua_loaded_signals"] = None
         return
     fs = run.sampling_rate_hz
+    loaded = {}
     for ch, x in rec.signals.items():
         if not ch.startswith("vibration"):
             continue
         x = np.nan_to_num(np.asarray(x, dtype=float)[: int(fs)])
+        loaded[ch] = x
         st.caption(f"{ch} - {rec.recording_id}, first {len(x) / fs:.2f} s, measured at "
                    f"{fs:,.0f} Hz (amplitude in the source's recorded unit)")
         st.line_chart(pd.DataFrame({ch: x[: int(0.1 * fs)]},
                                    index=np.arange(int(0.1 * fs)) / fs * 1000),
                       x_label="time (ms)", y_label="amplitude")
+    st.session_state["ua_loaded_signals"] = {"fs": fs, "channels": loaded}
+
+
+def _fft_tab() -> None:
+    loaded = st.session_state.get("ua_loaded_signals")
+    if not loaded or not loaded["channels"]:
+        st.caption("Load a recording in the Signal tab first - the FFT is computed from the "
+                   "same loaded window, not re-read separately.")
+        return
+    fs = loaded["fs"]
+    for ch, x in loaded["channels"].items():
         freqs = np.fft.rfftfreq(len(x), 1 / fs)
         mag = np.abs(np.fft.rfft(x - x.mean())) / len(x)
+        st.caption(f"{ch} spectrum")
         st.line_chart(pd.DataFrame({"magnitude": mag}, index=freqs), x_label="frequency (Hz)",
                       y_label="|FFT|")
 
 
 def _feature_trends(dataset: str, bearing: str, canonical: Path) -> None:
-    st.markdown("#### Feature trends (cached canonical features)")
     df = _parquet(str(canonical))
     if df is None:
-        _missing("Canonical features", f"scripts/build_canonical_features.py --dataset {dataset}")
+        st.caption(f"Unavailable for this analysis: no cached canonical features. Generate with "
+                   f"`scripts/build_canonical_features.py --dataset {dataset}`.")
         return
     g = df[df["bearing_run_id"] == bearing].sort_values("sequence_index")
     feats = st.multiselect("Features", ["vibration_x_rms", "vibration_x_kurtosis",
@@ -266,6 +347,8 @@ def _feature_trends(dataset: str, bearing: str, canonical: Path) -> None:
     feats = [f for f in feats if f in g and g[f].notna().any()]
     if feats:
         st.line_chart(g.set_index(g["elapsed_s"] / 3600)[feats], x_label="elapsed time (h)")
+    else:
+        st.caption("Select at least one feature with data for this bearing.")
 
 
 def _profile_box() -> None:

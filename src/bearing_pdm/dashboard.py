@@ -752,6 +752,11 @@ def _render_college_bundle(entry: dict) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="RULGuard - Capstone Review", layout="wide")
+    st.markdown(
+        '<span style="color:#2dd4bf;">●</span> **RULGuard**'
+        ' &mdash; Offline Research Mode (full-capability superset of the public site)',
+        unsafe_allow_html=True,
+    )
     st.title("RULGuard: Bearing Health Monitoring and Remaining Useful Life Prediction")
     st.caption(
         "Research prototype capstone, not production. Cached artifacts only "
@@ -774,6 +779,20 @@ def main() -> None:
              "Raw / ZIP / Bundle Explorer", "Experiment Lab (CWRU / Paderborn / Synthetic)",
              "Knowledge / RAG"]
     view = st.sidebar.radio("View", VIEWS)
+    # Same primary section names as the public site's nav (SiteNav.tsx) - shown
+    # alongside the existing View radio (unchanged) so the two products read as
+    # the same RULGuard rather than differently-organised tools.
+    NAV_GROUP_OF = {
+        "Architecture & Limitations": "Overview",
+        "Universal Machine Analysis": "Analyze", "Signal & FFT": "Analyze",
+        "Raw / ZIP / Bundle Explorer": "Analyze",
+        "Health Indicator": "Trajectory", "RUL Prediction": "Trajectory",
+        "Model Evaluation": "Evaluation",
+        "Cross-Dataset Validation": "Datasets",
+        "Experiment Lab (CWRU / Paderborn / Synthetic)": "More", "Knowledge / RAG": "More",
+    }
+    st.sidebar.caption(f"Section: {NAV_GROUP_OF.get(view, 'More')} "
+                       "(same top-level sections as the public site)")
 
     # The cross-dataset pages (dashboard_cross.py) carry their own dataset and
     # bearing selectors and read their own artifacts, not the legacy batches.
