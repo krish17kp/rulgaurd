@@ -404,7 +404,12 @@ def test_universal_analysis_tabs_render_real_xjtu_without_fabricating_rul():
     assert "RUL unavailable for this analysis" in rendered
     # No fabricated hours figure anywhere a suppressed bearing's RUL metric would live.
     assert not any("Predicted RUL at recording" in m.label for m in at.metric)
-    assert "Unavailable for this analysis" in rendered  # Evidence tab, no RAG wired here
+    # Evaluation: honest suppressed-state summary (ground truth present, every
+    # prediction suppressed) - never a fabricated MAE.
+    assert "cannot be computed" in rendered
+    assert not any("Mean absolute error" in m.label for m in at.metric)
+    # Evidence: RAG wired to the default corpus, explains the real routing decision.
+    assert any("Provider:" in c.value for c in at.caption)
 
 
 def test_analyze_archive_box_rejects_nonexistent_path():

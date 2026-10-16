@@ -160,9 +160,7 @@ def render_universal() -> None:
     with tabs[8]:
         _evaluation_tab(rows)
     with tabs[9]:
-        st.caption("Unavailable for this analysis: no evidence/RAG explanation is attached to "
-                   "this routing result. See the Knowledge / RAG view for the FEMTO explanation "
-                   "demo.")
+        _evidence_tab(dataset, decision, rows)
 
     with st.expander("Advanced / raw data"):
         st.json(decision)
@@ -278,12 +276,29 @@ def _trajectory_tab(rows: pd.DataFrame) -> None:
 def _evaluation_tab(rows: pd.DataFrame) -> None:
     """Current-bearing evaluation only (ground truth vs. prediction for THIS run) -
     never the project-wide model benchmark, which lives in the Model Evaluation view."""
-    has_truth = "actual_rul_seconds" in rows and "predicted_rul_seconds" in rows and \
-        rows["actual_rul_seconds"].notna().any() and rows["predicted_rul_seconds"].notna().any()
-    if not has_truth:
-        st.caption("Unavailable for this analysis: no ground-truth RUL and a suppressed/predicted "
-                   "RUL both exist for this bearing to compare. For the project-wide model "
-                   "benchmark against held-out bearings, see the Model Evaluation view.")
+    has_actual = "actual_rul_seconds" in rows and rows["actual_rul_seconds"].notna().any()
+    has_predicted = "predicted_rul_seconds" in rows and rows["predicted_rul_seconds"].notna().any()
+    if not (has_actual and has_predicted):
+        n = len(rows)
+        status_counts = rows["rul_status"].value_counts().to_dict() if "rul_status" in rows else {}
+        n_suppressed = status_counts.get("RUL_SUPPRESSED", 0)
+        n_experimental = status_counts.get("RUL_EXPERIMENTAL", 0)
+        n_accepted = status_counts.get("RUL_AVAILABLE", 0)
+        k = st.columns(4)
+        k[0].metric("Ground truth RUL available", "yes" if has_actual else "no")
+        k[1].metric("Recordings", f"{n:,}")
+        k[2].metric("Suppressed predictions", f"{n_suppressed:,} ({n_suppressed / n:.0%})" if n else "0")
+        k[3].metric("Accepted / experimental", f"{n_accepted:,} / {n_experimental:,}")
+        if has_actual and not has_predicted:
+            st.caption("A numeric MAE cannot be computed: every recording's RUL prediction was "
+                       "suppressed by the applicability gate (see the Applicability tab for why), "
+                       "so there is nothing to compare ground truth against. This is the model "
+                       "correctly declining to predict outside its validated domain, not missing "
+                       "data.")
+        else:
+            st.caption("Unavailable for this analysis: no ground-truth RUL exists for this bearing "
+                       "to compare against. For the project-wide model benchmark against held-out "
+                       "bearings, see the Model Evaluation view.")
         return
     both = rows.dropna(subset=["actual_rul_seconds", "predicted_rul_seconds"])
     if both.empty:
@@ -297,6 +312,50 @@ def _evaluation_tab(rows: pd.DataFrame) -> None:
     k[1].metric("Mean error (this run)", f"{err_h.mean():+.2f} h",
                 help="positive = over-estimate (unsafe direction)")
     st.caption("This-run evaluation only, not the project's leave-one-bearing-out benchmark.")
+
+
+@st.cache_resource
+def _default_rag_index():
+    from bearing_pdm.rag.corpus import ingest_corpus
+    from bearing_pdm.rag.retrieval import VectorIndex
+    result = ingest_corpus()
+    return VectorIndex.build_from_chunks(result.chunks) if result.chunks else None
+
+
+def _evidence_tab(dataset: str, decision: dict, rows: pd.DataFrame) -> None:
+    """Explains the already-computed routing decision; never recomputes RUL/HI/stage/
+    applicability (goals.md #9 - the LLM only explains, it does not decide)."""
+    from bearing_pdm.rag.explain import PredictionContext, build_explanation
+
+    index = _default_rag_index()
+    if index is None:
+        st.caption("Unavailable: the project's reference knowledge base has no ingestible "
+                   "documents in this environment.")
+        return
+    current = decision.get("current", decision)
+    last = rows.dropna(subset=["predicted_rul_seconds"])
+    rul_seconds = float(last["predicted_rul_seconds"].iloc[-1]) if not last.empty else None
+    reasons = [r for v in decision.get("applicability", {}).values() for r in v.get("reasons", [])]
+    context = PredictionContext(
+        dataset_id=dataset, model_name=current.get("model"),
+        rul_seconds=rul_seconds, rul_hours=rul_seconds / 3600 if rul_seconds else None,
+        applicability_level=current.get("level"), applicability_reasons=reasons,
+        compatibility="RETRAIN_REQUIRED" if current["status"] == "RUL_SUPPRESSED" else None,
+        health_indicator=float(rows["health_indicator"].iloc[-1]),
+        degradation_stage=rows["stage"].iloc[-1],
+    )
+    question = st.text_input(
+        "Ask about this result (optional - leave blank for a summary)", key="ua_evidence_q")
+    result = build_explanation(context, question, index)
+    st.write(result.explanation)
+    st.caption(f"Provider: {result.provider} | status: {result.status}")
+    if result.citations:
+        st.markdown("**Citations** (only chunks actually retrieved)")
+        for c in result.citations:
+            page_note = f", p.{c.page}" if c.page else ""
+            st.caption(f"- {c.document_title}{page_note} (relevance {c.relevance_score:.3f})")
+    else:
+        st.caption("No retrieved evidence met the relevance threshold for this question.")
 
 
 def _signal_tab(dataset: str, bearing: str, rows: pd.DataFrame, canonical: Path) -> None:

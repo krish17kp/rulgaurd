@@ -25,9 +25,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
@@ -40,7 +42,11 @@ from bearing_pdm.domain import (
     reference_window,
     stage_persistence,
 )
-from bearing_pdm.pipeline import build_canonical_features
+from bearing_pdm.pipeline import (
+    CANONICAL_SCHEMA_VERSION,
+    CANONICAL_WINDOW_S,
+    build_canonical_features,
+)
 from bearing_pdm.profiler import apply_manual_mapping, profile_folder
 from bearing_pdm.rar_archive import discover_rar_parts, safe_extract_rar
 from bearing_pdm.routing import analyze_bearing, candidates_from_bundle, oof_from_predictions
@@ -161,6 +167,20 @@ def run_analysis(
         progress(f"Using cached canonical features {cached} ({len(df)} recordings)")
     else:
         df = pd.concat([build_canonical_features(adapter, r) for r in runs], ignore_index=True)
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(cached, index=False)
+        code_version = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                                      capture_output=True, text=True).stdout.strip() or "unknown"
+        manifest = {
+            "dataset_id": dataset, "display_name": adapter.display_name, "role": role,
+            "source_root": str(root), "n_rows": len(df),
+            "bearings": sorted(df["bearing_run_id"].unique()),
+            "window_s": CANONICAL_WINDOW_S, "schema_version": CANONICAL_SCHEMA_VERSION,
+            "reference_window": list(adapter.reference_window), "code_version": code_version,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        cached.with_suffix(".json").write_text(json.dumps(manifest, indent=2))
+        progress(f"Wrote canonical features {cached} and manifest {cached.with_suffix('.json')}")
     df = add_self_normalized_features(df)
 
     bundle = joblib.load("artifacts/models/cross_domain_bundle.joblib")
