@@ -3,15 +3,18 @@ fallback, both consuming the SAME immutable prediction context and the SAME
 retrieved citations.
 
 Provider chain (goals.md), tried in order by `build_explanation`: (1)
-`OnlineLLM` (Vercel AI Gateway - a real credential is present and
-authenticates, but generation is blocked at the account level by
-customer_verification_required; see docs/rag.md), (2) `OpenAIProvider`
-(direct OpenAI Chat Completions via OPENAI_API_KEY, tries a short list of
-candidate cheap models and classifies any billing/quota failure instead of
-retrying it), (3) `OpenRouterProvider` (direct OpenRouter Chat Completions
-via OPENROUTER_API_KEY, defaults to a verified $0/$0 model so it never
-incurs cost), (4) `DeterministicFallbackLLM`. Each provider is a drop-in
-behind the same (question, context, citations, evidence_text) -> str
+`GroqProvider` (the primary supported online provider - direct Groq Chat
+Completions via GROQ_API_KEY, OpenAI-compatible API at
+https://api.groq.com/openai/v1; model is GROQ_MODEL if set, else resolved
+once from Groq's /models endpoint), (2) `OnlineLLM` (Vercel AI Gateway - a
+real credential is present and authenticates, but generation is blocked at
+the account level by customer_verification_required; see docs/rag.md), (3)
+`OpenAIProvider` (direct OpenAI Chat Completions via OPENAI_API_KEY, tries a
+short list of candidate cheap models and classifies any billing/quota
+failure instead of retrying it), (4) `OpenRouterProvider` (direct OpenRouter
+Chat Completions via OPENROUTER_API_KEY, defaults to a verified $0/$0 model
+so it never incurs cost), (5) `DeterministicFallbackLLM`. Each provider is a
+drop-in behind the same (question, context, citations, evidence_text) -> str
 interface; adding another provider later means writing one more class, not
 touching build_explanation's control flow beyond the tuple it iterates.
 
@@ -32,7 +35,7 @@ from typing import Any
 
 import httpx
 
-from bearing_pdm.rag.retrieval import RetrievedChunk, VectorIndex
+from bearing_pdm.rag.retrieval import RetrievedChunk, VectorIndex, tokenize
 
 SYSTEM_PROMPT = """You are a maintenance-explanation assistant for a bearing \
 Remaining Useful Life (RUL) prediction system.
@@ -141,14 +144,14 @@ class OnlineLLM:
     def __init__(self, model: str = "anthropic/claude-haiku-4.5", timeout: float = 20.0):
         self.model = model
         self.timeout = timeout
-        # Lookup order: the standard variable name first, then this
-        # project's existing Vercel env var `api_key` (already provisioned
-        # for Production/Preview/Development) - never logged, never
-        # returned in any response.
+        # Explicitly named gateway credentials only - no bare/generic
+        # "api_key" fallback (that name is common enough to collide with
+        # an unrelated secret in a shared environment and silently send it
+        # to this endpoint; see docs/decisions.md and the session that
+        # removed it). Never logged, never returned in any response.
         self.api_key = (
             os.environ.get("AI_GATEWAY_API_KEY")
             or os.environ.get("VERCEL_AI_GATEWAY_API_KEY")
-            or os.environ.get("api_key")
         )
 
     def available(self) -> bool:
@@ -277,6 +280,125 @@ class OpenAIProvider:
             f"No candidate OpenAI model was accessible to this account "
             f"({last_category})."
         )
+
+
+_GROQ_FALLBACK_MODEL = "llama-3.3-70b-versatile"
+# Ordered allowlist of known general-purpose chat/text models to prefer when
+# GROQ_MODEL isn't set and the fallback id above isn't in the account's
+# catalog. Preferring a known-good id over "first remaining after blocklist"
+# is the fix for the prior heuristic: a substring blocklist alone let
+# "openai/gpt-oss-safeguard-20b" (a safety/policy classifier, not a chat
+# model) through because "safeguard" wasn't in the list at the time.
+_GROQ_PREFERRED_CHAT_MODELS = (
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "mixtral-8x7b-32768",
+)
+# Groq's catalog mixes chat models with speech/safety/embedding models that
+# 400 (or silently misbehave) on /chat/completions: whisper (transcription),
+# prompt-guard/safeguard/guard (safety/policy classifiers, not explanatory
+# chat models), orpheus/tts (text-to-speech), moderation, audio/speech,
+# embedding/rerank. Matched as whole words against hyphen/underscore/slash
+# -split tokens, not a bare substring, so "guard" doesn't also reject a
+# hypothetical "vanguard-chat" model while still catching "prompt-guard" and
+# "gpt-oss-safeguard".
+_GROQ_NON_CHAT_MARKERS = frozenset((
+    "whisper", "guard", "safeguard", "moderation", "safety",
+    "orpheus", "tts", "audio", "speech", "transcribe", "transcription",
+    "embedding", "embed", "rerank", "reranker",
+))
+
+
+def _groq_model_tokens(model_id: str) -> set[str]:
+    return set(re.split(r"[-_/.]", model_id.lower()))
+
+
+def is_groq_chat_model(model_id: str) -> bool:
+    """True if model_id is not a known non-chat (safety/speech/embedding) model."""
+    return not (_groq_model_tokens(model_id) & _GROQ_NON_CHAT_MARKERS)
+
+
+class GroqProvider:
+    """Direct Groq Chat Completions client (OpenAI-compatible API) - the
+    primary online provider when GROQ_API_KEY is configured. Model is
+    GROQ_MODEL if set, else resolved once from Groq's /models endpoint
+    (preferring the known-good fallback id if it is listed, else the first
+    chat-capable model) so a stale hardcoded id doesn't silently 404."""
+
+    name = "online:groq"
+
+    def __init__(self, timeout: float = 20.0):
+        self.timeout = timeout
+        self.api_key = os.environ.get("GROQ_API_KEY")
+        self.model = os.environ.get("GROQ_MODEL")
+        self.model_used: str | None = None
+
+    def available(self) -> bool:
+        return bool(self.api_key)
+
+    def _resolve_model(self) -> str:
+        if self.model:
+            if not is_groq_chat_model(self.model):
+                raise ProviderUnavailable(
+                    f"GROQ_MODEL={self.model!r} is a non-chat (safety/speech/"
+                    "embedding) model and cannot be used for explanation "
+                    "generation. Set GROQ_MODEL to a general-purpose chat "
+                    "model or unset it to auto-select one."
+                )
+            return self.model
+        try:
+            response = httpx.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            ids = [m["id"] for m in response.json().get("data", [])]
+        except (httpx.HTTPError, KeyError, ValueError):
+            return _GROQ_FALLBACK_MODEL
+        chat_capable = [i for i in ids if is_groq_chat_model(i)]
+        for preferred in _GROQ_PREFERRED_CHAT_MODELS:
+            if preferred in chat_capable:
+                return preferred
+        return chat_capable[0] if chat_capable else _GROQ_FALLBACK_MODEL
+
+    def generate(self, question: str, context: PredictionContext,
+                 citations: list[Citation], evidence_text: str) -> str:
+        if not self.api_key:
+            raise ProviderUnavailable("No GROQ_API_KEY configured.")
+        model = self._resolve_model()
+        user_message = (
+            f"Prediction context:\n{context}\n\n"
+            f"Retrieved evidence:\n{_sanitize_retrieved_text(evidence_text)}\n\n"
+            f"Question: {question or '(no question supplied - summarise the result)'}"
+        )
+        response = httpx.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message},
+                ],
+                "max_tokens": 500,
+            },
+            timeout=self.timeout,
+        )
+        body = response.json() if response.headers.get("content-type", "").startswith(
+            "application/json") else {}
+        if response.status_code != 200 or "choices" not in body:
+            category = _classify_openai_error(response.status_code, body)
+            if category is not None:
+                raise ProviderBillingBlocked(category, f"Groq request failed ({category}).")
+            raise ProviderUnavailable(f"Groq http_{response.status_code}: {body.get('error')}")
+        content = body["choices"][0]["message"]["content"]
+        if not content:
+            raise ProviderUnavailable("Groq returned an empty/null message content.")
+        self.model_used = model
+        return content
 
 
 class OpenRouterProvider:
@@ -420,6 +542,39 @@ def _format_evidence(chunks: list[RetrievedChunk]) -> str:
 # question as having no supporting evidence rather than citing a weak match.
 MIN_RELEVANCE_SCORE = 0.15
 
+# Words that cause a TF-IDF cosine match purely by coincidence rather than
+# real topical overlap - verified empirically against an abstention
+# regression set (e.g. "Recommend a good recipe" matched an ML paper only
+# on "good"; "weather forecast" matched maintenance literature only on
+# "forecast", which is also common RUL-forecast vocabulary). A narrow
+# blocklist of specific confirmed offenders, not a broad generic-English
+# stopword list (retrieval.py's `tokenize()` already strips those). A
+# corpus-idf-based approach was tried first and rejected: on this small
+# (~14-document) corpus, idf is too noisy to separate "generic English
+# word" from "narrow domain term" - legitimately topical words like
+# "naive"/"baseline" appear in only 1-2 docs and so score as "rare" by
+# idf despite being exactly the right match, while generic words like
+# "forecast" also score as "rare" purely because the corpus is small.
+_GENERIC_NON_GROUNDING_WORDS = frozenset((
+    "good", "bad", "best", "better", "worse", "nice", "great", "forecast",
+    "random", "query", "recommend", "please", "thanks", "help",
+))
+
+
+def _is_topically_grounded(question: str, chunk_text: str) -> bool:
+    """A cosine score above MIN_RELEVANCE_SCORE alone isn't enough: it can be
+    driven entirely by generic high-frequency words shared with an unrelated
+    query. Require at least one non-generic word shared between the
+    question and the retrieved text. This only gates whether retrieval
+    counts as *supporting evidence* for a corpus-dependent claim - it never
+    touches the model-result fields (RUL/HI/stage/applicability), always
+    drawn from the immutable PredictionContext regardless."""
+    q_words = set(tokenize(question)) - _GENERIC_NON_GROUNDING_WORDS
+    if not q_words:
+        return True  # empty/no-question case: nothing to ground against
+    chunk_words = set(tokenize(chunk_text))
+    return bool(q_words & chunk_words)
+
 
 def build_explanation(
     context: PredictionContext,
@@ -434,18 +589,20 @@ def build_explanation(
     retrieved = [
         c for c in index.search(retrieval_query, top_k=top_k)
         if c.score >= MIN_RELEVANCE_SCORE
+        and (not question.strip() or _is_topically_grounded(question, c.text))
     ]
     citations = [
         Citation(c.chunk_id, c.doc_title, c.source, c.score, page=c.page) for c in retrieved
     ]
     evidence_text = _format_evidence(retrieved)
 
-    # Provider chain, in order (goals.md): Vercel AI Gateway -> OpenAI ->
+    # Provider chain, in order: Groq (primary supported online provider when
+    # GROQ_API_KEY is set) -> Vercel AI Gateway -> OpenAI -> OpenRouter ->
     # deterministic fallback. A billing/quota failure stops that provider
     # immediately (no retry) and moves to the next; it is never silently
     # swallowed - the reason is available via the raised exception for
     # whoever calls build_explanation to log if they choose to.
-    for provider in (OnlineLLM(), OpenAIProvider(), OpenRouterProvider()):
+    for provider in (GroqProvider(), OnlineLLM(), OpenAIProvider(), OpenRouterProvider()):
         if not provider.available():
             continue
         try:

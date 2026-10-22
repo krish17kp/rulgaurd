@@ -80,6 +80,13 @@ def bundle_kind(dataset_id: str | None, payload: dict[str, Any]) -> str:
     decisions, see build_routing_bundle()) is itself the signal, so a new
     adapter needs no change to this function.
     """
+    # A routing bundle's dataset_id is "<dataset>:routing" (build_routing_bundle)
+    # which starts with "femto"/"college" too when dataset=="femto"/"college" -
+    # check that suffix first so those collide into "routing", not the wrong
+    # renderer (regression: exporting femto via the universal Analyze tab and
+    # re-importing showed "unknown"/0 acquisitions/0 Hz instead of real data).
+    if dataset_id and dataset_id.endswith(":routing"):
+        return "routing"
     if dataset_id and dataset_id.startswith("femto"):
         return "femto"
     if dataset_id and dataset_id.startswith("college"):

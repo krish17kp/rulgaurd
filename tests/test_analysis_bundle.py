@@ -78,6 +78,27 @@ def test_bundle_kind_recognises_routing_shape_for_any_dataset():
     assert bundle_kind(None, xjtu_payload) == "routing"  # shape alone is enough
 
 
+def test_bundle_kind_routing_wins_over_femto_college_prefix_collision():
+    # Regression: build_routing_bundle("femto", ...) stores dataset_id
+    # "femto:routing", which .startswith("femto") too - the real UI
+    # round-trip (export femto via the universal Analyze tab, re-import
+    # via the Legacy Raw Explorer) showed "unknown"/0 acquisitions/0 Hz
+    # because this collision picked kind="femto" and rendered a
+    # routing-shaped payload with the wrong renderer.
+    femto_routing_payload = {
+        "dataset_id": "femto:routing",
+        "profile": {"n_files": 8384, "sampling_rate_hz": 25600.0},
+        "decisions": {"femto:Bearing1_1": {}},
+    }
+    college_routing_payload = {
+        "dataset_id": "college:routing",
+        "profile": {"n_files": 129},
+        "decisions": {"college:run1": {}},
+    }
+    assert bundle_kind("femto:routing", femto_routing_payload) == "routing"
+    assert bundle_kind("college:routing", college_routing_payload) == "routing"
+
+
 def test_build_routing_bundle_round_trips_and_strips_local_path(tmp_path):
     routing_result = {
         "dataset_id": "xjtu",

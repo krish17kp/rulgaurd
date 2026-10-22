@@ -1,0 +1,364 @@
+{
+  "_comment": "Frozen RAG evaluation set (audit Phase 21, expanded session 4 to 40 questions). 'expected_doc_substr' matches Citation.document_title for retrieval scoring where a real gold document was confirmed by direct retrieval inspection against the live corpus (src/bearing_pdm/rag/corpus.py SOURCE_DOCUMENTS as of 2026-10-21: RULGuard Architecture, Product Requirements - bearing_pdm, Canonical Feature-Row Data Contract, Decisions and Conflict Resolutions, Dataset Compatibility, Dataset Audit, Milestones (M0-M9), Prediction Reliability, plus literature). 'should_abstain'=true means no citation should clear MIN_RELEVANCE_SCORE and the system should decline rather than answer. 'forbidden_claims' are substrings that must never appear.",
+  "questions": [
+    {
+      "id": "q01",
+      "category": "rul_methodology",
+      "question": "What RUL methodology does this project use - naive baseline or a trained model?",
+      "expected_doc_substr": "Decisions and Conflict Resolutions",
+      "should_abstain": false,
+      "forbidden_claims": [
+        "LSTM",
+        "guaranteed accurate"
+      ]
+    },
+    {
+      "id": "q02",
+      "category": "rul_methodology",
+      "question": "Why is ExtraTreesRegressor used instead of a deep learning model?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": [
+        "LSTM is used"
+      ]
+    },
+    {
+      "id": "q03",
+      "category": "rul_methodology",
+      "question": "What evaluation split strategy is used for FEMTO leave-one-bearing-out RUL evaluation?",
+      "expected_doc_substr": "Milestones",
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q04",
+      "category": "rul_methodology",
+      "question": "Is RUL reported in seconds or hours in the raw data contract?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q05",
+      "category": "rul_methodology",
+      "question": "What is the naive baseline formula for RUL prediction?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q06",
+      "category": "hi",
+      "question": "What does the Health Indicator mean for this bearing?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": [
+        "probability of failure"
+      ]
+    },
+    {
+      "id": "q07",
+      "category": "hi",
+      "question": "How is the Health Indicator computed - PCA, transparent baseline, or reference model?",
+      "expected_doc_substr": "Decisions and Conflict Resolutions",
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q08",
+      "category": "hi",
+      "question": "Why did the HI pin at 1.0 for a large fraction of learning acquisitions before being fixed?",
+      "expected_doc_substr": "Decisions and Conflict Resolutions",
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q09",
+      "category": "hi",
+      "question": "What range does the Health Indicator fall within - open or closed interval?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q10",
+      "category": "hi",
+      "question": "Is the Health Indicator fit per-dataset or per-bearing reference window?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q11",
+      "category": "stages",
+      "question": "What does the CRITICAL degradation stage mean, and is it a fault diagnosis?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": [
+        "inner race fault",
+        "outer race fault",
+        "ball fault",
+        "cage fault",
+        "BPFO",
+        "BPFI"
+      ]
+    },
+    {
+      "id": "q12",
+      "category": "stages",
+      "question": "Can the degradation stage reverse from DEGRADING back to HEALTHY, and why?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q13",
+      "category": "stages",
+      "question": "What milestone added degradation-stage classification to this project?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q14",
+      "category": "stages",
+      "question": "Does a stage classification use persistence/hysteresis to avoid flickering?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q15",
+      "category": "applicability",
+      "question": "What does LOW applicability mean here?",
+      "expected_doc_substr": "Dataset Compatibility",
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q16",
+      "category": "applicability",
+      "question": "Why was RUL suppressed for this XJTU bearing even though degradation was detected?",
+      "expected_doc_substr": "Dataset Compatibility",
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q17",
+      "category": "applicability",
+      "question": "Does high applicability guarantee a validated RUL prediction?",
+      "expected_doc_substr": "Dataset Compatibility",
+      "should_abstain": false,
+      "forbidden_claims": [
+        "yes, applicability guarantees"
+      ]
+    },
+    {
+      "id": "q18",
+      "category": "applicability",
+      "question": "Can a FEMTO-trained scaler be applied directly to college feature data?",
+      "expected_doc_substr": "Dataset Compatibility",
+      "should_abstain": false,
+      "forbidden_claims": [
+        "yes, directly applicable"
+      ]
+    },
+    {
+      "id": "q19",
+      "category": "applicability",
+      "question": "What makes a dataset out-of-distribution relative to the training population?",
+      "expected_doc_substr": "Dataset Compatibility",
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q20",
+      "category": "femto",
+      "question": "How many bearings are in the FEMTO learning set and what is the sampling rate?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q21",
+      "category": "femto",
+      "question": "Is FEMTO the training domain or an external validation set?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q22",
+      "category": "femto",
+      "question": "What is the FEMTO Full_Test_Set and when was it scored?",
+      "expected_doc_substr": "Milestones",
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q23",
+      "category": "femto",
+      "question": "How is FEMTO's record cadence described in the dataset audit?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q24",
+      "category": "xjtu",
+      "question": "What is XJTU-SY used for in this project - training or zero-shot external validation?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q25",
+      "category": "xjtu",
+      "question": "Was any model refit against XJTU data?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": [
+        "yes, refit"
+      ]
+    },
+    {
+      "id": "q26",
+      "category": "xjtu",
+      "question": "How many bearings does the XJTU-SY dataset contain?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q27",
+      "category": "xjtu",
+      "question": "Is the cross-dataset framework for FEMTO, college, IMS and XJTU complete?",
+      "expected_doc_substr": "Milestones",
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q28",
+      "category": "evaluation_methodology",
+      "question": "How is leakage prevented for FEMTO - random split or leave-one-bearing-out?",
+      "expected_doc_substr": "Milestones",
+      "should_abstain": false,
+      "forbidden_claims": [
+        "random split is used"
+      ]
+    },
+    {
+      "id": "q29",
+      "category": "evaluation_methodology",
+      "question": "How is leakage prevented for the college dataset?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q30",
+      "category": "evaluation_methodology",
+      "question": "Why does the college naive baseline score MAE=0.0?",
+      "expected_doc_substr": "Decisions and Conflict Resolutions",
+      "should_abstain": false,
+      "forbidden_claims": [
+        "genuine predictive skill"
+      ]
+    },
+    {
+      "id": "q31",
+      "category": "uncertainty",
+      "question": "What do the reported prediction intervals represent - a calibrated confidence probability or an empirical descriptive range?",
+      "expected_doc_substr": "Prediction Reliability",
+      "should_abstain": false,
+      "forbidden_claims": [
+        "guaranteed confidence",
+        "certain probability"
+      ]
+    },
+    {
+      "id": "q32",
+      "category": "uncertainty",
+      "question": "What method is used to compute residual-calibrated prediction intervals?",
+      "expected_doc_substr": "Milestones",
+      "should_abstain": false,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q33",
+      "category": "uncertainty",
+      "question": "Are the prediction intervals per-prediction confidence probabilities?",
+      "expected_doc_substr": "Prediction Reliability",
+      "should_abstain": false,
+      "forbidden_claims": [
+        "yes they are confidence probabilities"
+      ]
+    },
+    {
+      "id": "q34",
+      "category": "rag_limitations_non_claims",
+      "question": "Can this explanation layer change the numeric RUL prediction if it disagrees with the model?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": [
+        "can adjust the RUL",
+        "can override the model"
+      ]
+    },
+    {
+      "id": "q35",
+      "category": "rag_limitations_non_claims",
+      "question": "Is this a real-time monitoring system reading a live sensor feed?",
+      "expected_doc_substr": "Maintenance Strategies",
+      "should_abstain": false,
+      "forbidden_claims": [
+        "real-time deployment",
+        "live sensor feed"
+      ]
+    },
+    {
+      "id": "q36",
+      "category": "rag_limitations_non_claims",
+      "question": "Can this system identify whether the fault is in the inner race, outer race, or a ball?",
+      "expected_doc_substr": null,
+      "should_abstain": false,
+      "forbidden_claims": [
+        "yes, it is an inner race fault",
+        "yes, it is an outer race fault",
+        "confirmed ball fault"
+      ]
+    },
+    {
+      "id": "q37",
+      "category": "negative_should_abstain",
+      "question": "What is the current weather forecast for the test rig's city?",
+      "expected_doc_substr": null,
+      "should_abstain": true,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q38",
+      "category": "negative_should_abstain",
+      "question": "What was the stock price of the company that manufactured this bearing last Tuesday?",
+      "expected_doc_substr": null,
+      "should_abstain": true,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q39",
+      "category": "negative_should_abstain",
+      "question": "Recommend a good recipe for pasta carbonara.",
+      "expected_doc_substr": null,
+      "should_abstain": true,
+      "forbidden_claims": []
+    },
+    {
+      "id": "q40",
+      "category": "negative_should_abstain",
+      "question": "What is the CEO's personal phone number?",
+      "expected_doc_substr": null,
+      "should_abstain": true,
+      "forbidden_claims": []
+    }
+  ]
+}

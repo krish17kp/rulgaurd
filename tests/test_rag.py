@@ -14,13 +14,17 @@ from fastapi.testclient import TestClient
 from bearing_pdm import api
 from bearing_pdm.rag.corpus import SOURCE_DOCUMENTS, chunk_document, clean_text, ingest_corpus
 from bearing_pdm.rag.explain import (
+    _GROQ_FALLBACK_MODEL,
     DeterministicFallbackLLM,
+    GroqProvider,
+    OnlineLLM,
     OpenAIProvider,
     OpenRouterProvider,
     PredictionContext,
     ProviderBillingBlocked,
     ProviderUnavailable,
     build_explanation,
+    is_groq_chat_model,
 )
 from bearing_pdm.rag.retrieval import VectorIndex
 
@@ -318,9 +322,304 @@ def test_openrouter_provider_treats_null_content_as_unavailable(monkeypatch):
         OpenRouterProvider().generate("q", PredictionContext(), [], "")
 
 
+def test_groq_provider_unavailable_without_key(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    assert GroqProvider().available() is False
+
+
+def _clear_all_credential_env(monkeypatch):
+    for var in ("GROQ_API_KEY", "GROQ_MODEL", "OPENAI_API_KEY",
+                "OPENROUTER_API_KEY", "AI_GATEWAY_API_KEY",
+                "VERCEL_AI_GATEWAY_API_KEY", "api_key", "API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_only_groq_api_key_enables_groq_provider(monkeypatch):
+    _clear_all_credential_env(monkeypatch)
+    assert GroqProvider().available() is False
+    monkeypatch.setenv("GROQ_API_KEY", "dummy-groq-key")
+    assert GroqProvider().available() is True
+
+
+def test_only_openai_api_key_enables_openai_provider(monkeypatch):
+    _clear_all_credential_env(monkeypatch)
+    assert OpenAIProvider().available() is False
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-openai-key")
+    assert OpenAIProvider().available() is True
+
+
+def test_only_openrouter_api_key_enables_openrouter_provider(monkeypatch):
+    _clear_all_credential_env(monkeypatch)
+    assert OpenRouterProvider().available() is False
+    monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-openrouter-key")
+    assert OpenRouterProvider().available() is True
+
+
+def test_generic_api_key_env_var_enables_no_provider(monkeypatch):
+    # Regression: OnlineLLM (Vercel AI Gateway) previously fell back to a
+    # bare os.environ.get("api_key"), which could silently pick up an
+    # unrelated secret exported under that common name. No provider may
+    # be enabled by a generic/ambiguous credential name.
+    _clear_all_credential_env(monkeypatch)
+    monkeypatch.setenv("api_key", "dummy-generic-key")
+    monkeypatch.setenv("API_KEY", "dummy-generic-key-upper")
+    assert GroqProvider().available() is False
+    assert OpenAIProvider().available() is False
+    assert OpenRouterProvider().available() is False
+    assert OnlineLLM().available() is False
+
+
+def test_cross_provider_key_cannot_enable_wrong_provider(monkeypatch):
+    # A key set under one provider's explicit variable must not leak into
+    # another provider's availability check.
+    _clear_all_credential_env(monkeypatch)
+    monkeypatch.setenv("GROQ_API_KEY", "dummy-groq-key")
+    assert OpenAIProvider().available() is False
+    assert OpenRouterProvider().available() is False
+    assert OnlineLLM().available() is False
+
+    _clear_all_credential_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-openai-key")
+    assert GroqProvider().available() is False
+    assert OpenRouterProvider().available() is False
+    assert OnlineLLM().available() is False
+
+    _clear_all_credential_env(monkeypatch)
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "dummy-gateway-key")
+    assert GroqProvider().available() is False
+    assert OpenAIProvider().available() is False
+    assert OpenRouterProvider().available() is False
+
+
+def test_no_provider_leaks_secret_value_in_errors_or_repr(monkeypatch):
+    _clear_all_credential_env(monkeypatch)
+    secret = "dummy-super-secret-abc123"
+    monkeypatch.setenv("GROQ_API_KEY", secret)
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    monkeypatch.setenv("OPENROUTER_API_KEY", secret)
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", secret)
+
+    # repr() is what would show up in a log line or exception traceback
+    # frame dump; the key is deliberately stored on the instance (needed to
+    # make the real request) but must not be surfaced in its repr.
+    providers = [GroqProvider(), OpenAIProvider(), OpenRouterProvider(), OnlineLLM()]
+    for p in providers:
+        assert secret not in repr(p)
+
+    # Unavailable-provider error messages never embed the key either
+    # (checked with the key cleared, so generate() raises immediately
+    # without making a real network call).
+    _clear_all_credential_env(monkeypatch)
+    for p in [GroqProvider(), OpenAIProvider(), OpenRouterProvider(), OnlineLLM()]:
+        try:
+            p.generate("q", PredictionContext(), [], "")
+        except Exception as exc:  # noqa: BLE001 - checking message text only
+            assert secret not in str(exc)
+
+
+def test_groq_provider_resolves_model_from_models_endpoint_when_unconfigured(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    monkeypatch.delenv("GROQ_MODEL", raising=False)
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        return type("R", (), {
+            "status_code": 200,
+            "raise_for_status": lambda self: None,
+            "json": lambda self: {"data": [{"id": "llama-3.3-70b-versatile"}, {"id": "other"}]},
+        })()
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.get", fake_get)
+    provider = GroqProvider()
+    assert provider._resolve_model() == "llama-3.3-70b-versatile"
+    assert calls == ["https://api.groq.com/openai/v1/models"]
+
+
+def test_groq_provider_uses_configured_model_without_calling_models_endpoint(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    monkeypatch.setenv("GROQ_MODEL", "llama-3.1-8b-instant")
+
+    def fail_get(*a, **k):
+        raise AssertionError("must not call /models when GROQ_MODEL is configured")
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.get", fail_get)
+    assert GroqProvider()._resolve_model() == "llama-3.1-8b-instant"
+
+
+def test_groq_provider_skips_non_chat_models_when_fallback_id_is_absent(monkeypatch):
+    # Regression: a real Groq account's /models list led with
+    # meta-llama/llama-prompt-guard-2-86m (a safety classifier, not a chat
+    # model) and had no whisper/orpheus/tts entries either - picking ids[0]
+    # blindly caused a live 400 on /chat/completions.
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    monkeypatch.delenv("GROQ_MODEL", raising=False)
+
+    def fake_get(url, **kwargs):
+        return type("R", (), {
+            "status_code": 200,
+            "raise_for_status": lambda self: None,
+            "json": lambda self: {"data": [
+                {"id": "meta-llama/llama-prompt-guard-2-86m"},
+                {"id": "whisper-large-v3"},
+                {"id": "openai/gpt-oss-120b"},
+            ]},
+        })()
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.get", fake_get)
+    assert GroqProvider()._resolve_model() == "openai/gpt-oss-120b"
+
+
+def test_groq_provider_rejects_safeguard_model_even_without_fallback_present(monkeypatch):
+    # Regression: gpt-oss-safeguard-20b (a safety/policy classifier) was
+    # previously auto-selected because the old blocklist didn't cover
+    # "safeguard" - must never be chosen, even as "first remaining".
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    monkeypatch.delenv("GROQ_MODEL", raising=False)
+
+    def fake_get(url, **kwargs):
+        return type("R", (), {
+            "status_code": 200,
+            "raise_for_status": lambda self: None,
+            "json": lambda self: {"data": [
+                {"id": "openai/gpt-oss-safeguard-20b"},
+            ]},
+        })()
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.get", fake_get)
+    assert GroqProvider()._resolve_model() == _GROQ_FALLBACK_MODEL
+
+
+def test_groq_provider_rejects_whisper_and_tts_and_audio_models(monkeypatch):
+    for bad_id in ("whisper-large-v3", "orpheus-3b-tts", "playai-tts",
+                   "distil-whisper-large-v3-en", "some-audio-transcriber"):
+        assert is_groq_chat_model(bad_id) is False, bad_id
+    for good_id in ("llama-3.3-70b-versatile", "openai/gpt-oss-120b",
+                    "mixtral-8x7b-32768"):
+        assert is_groq_chat_model(good_id) is True, good_id
+
+
+def test_groq_provider_prefers_allowlisted_chat_model_over_arbitrary_first(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    monkeypatch.delenv("GROQ_MODEL", raising=False)
+
+    def fake_get(url, **kwargs):
+        return type("R", (), {
+            "status_code": 200,
+            "raise_for_status": lambda self: None,
+            "json": lambda self: {"data": [
+                {"id": "zzz-unknown-chat-model"},
+                {"id": "openai/gpt-oss-20b"},
+            ]},
+        })()
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.get", fake_get)
+    assert GroqProvider()._resolve_model() == "openai/gpt-oss-20b"
+
+
+def test_groq_provider_explicit_invalid_groq_model_raises_clear_error(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    monkeypatch.setenv("GROQ_MODEL", "openai/gpt-oss-safeguard-20b")
+
+    with pytest.raises(ProviderUnavailable, match="non-chat"):
+        GroqProvider()._resolve_model()
+
+
+def test_groq_provider_generate_success(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    monkeypatch.setenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+    def fake_post(*a, **k):
+        return type("R", (), {
+            "status_code": 200,
+            "headers": {"content-type": "application/json"},
+            "json": lambda self: {"choices": [{"message": {"content": "groq answer"}}]},
+        })()
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.post", fake_post)
+    provider = GroqProvider()
+    text = provider.generate("q", PredictionContext(), [], "")
+    assert text == "groq answer"
+    assert provider.model_used == "llama-3.3-70b-versatile"
+
+
+def test_groq_provider_auth_failure_classified_as_billing_blocked(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    monkeypatch.setenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+    def fake_post(*a, **k):
+        return type("R", (), {
+            "status_code": 401,
+            "headers": {"content-type": "application/json"},
+            "json": lambda self: {"error": {"type": "invalid_request_error", "code": "invalid_api_key"}},
+        })()
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.post", fake_post)
+    with pytest.raises(ProviderBillingBlocked):
+        GroqProvider().generate("q", PredictionContext(), [], "")
+
+
+def test_groq_provider_rate_limit_classified_as_billing_blocked(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    monkeypatch.setenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+    def fake_post(*a, **k):
+        return type("R", (), {
+            "status_code": 429,
+            "headers": {"content-type": "application/json"},
+            "json": lambda self: {"error": {"code": "rate_limit_exceeded"}},
+        })()
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.post", fake_post)
+    with pytest.raises(ProviderBillingBlocked) as exc_info:
+        GroqProvider().generate("q", PredictionContext(), [], "")
+    assert exc_info.value.category == "insufficient_quota"
+
+
+def test_groq_provider_empty_content_raises_unavailable(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    monkeypatch.setenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+    def fake_post(*a, **k):
+        return type("R", (), {
+            "status_code": 200,
+            "headers": {"content-type": "application/json"},
+            "json": lambda self: {"choices": [{"message": {"content": None}}]},
+        })()
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.post", fake_post)
+    with pytest.raises(ProviderUnavailable):
+        GroqProvider().generate("q", PredictionContext(), [], "")
+
+
+def test_build_explanation_chain_prefers_groq_when_configured(monkeypatch, built_index):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    monkeypatch.setenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("VERCEL_AI_GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("api_key", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    def fake_post(*a, **k):
+        return type("R", (), {
+            "status_code": 200,
+            "headers": {"content-type": "application/json"},
+            "json": lambda self: {"choices": [{"message": {"content": "groq real answer"}}]},
+        })()
+
+    monkeypatch.setattr("bearing_pdm.rag.explain.httpx.post", fake_post)
+    context = PredictionContext(rul_seconds=4610.0, rul_hours=1.28, applicability_level="HIGH")
+    result = build_explanation(context, "leave-one-bearing-out evaluation", built_index)
+    assert result.provider == "online:groq:llama-3.3-70b-versatile"
+    assert result.fallback_used is False
+    assert result.explanation == "groq real answer"
+
+
 def test_build_explanation_chain_falls_through_to_openrouter_when_earlier_providers_fail(
     monkeypatch, built_index,
 ):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
     monkeypatch.delenv("VERCEL_AI_GATEWAY_API_KEY", raising=False)
     monkeypatch.delenv("api_key", raising=False)
@@ -403,3 +702,76 @@ def test_explain_endpoint_accepts_matching_prediction_id(monkeypatch):
         "question": "",
     })
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Deterministic-fallback abstention: 10 controlled negative/off-topic
+# questions. Each must: invent no evidence, invent no citation, make no
+# physical fault-type diagnosis, give no unsupported domain answer, and
+# leave the immutable PredictionContext's RUL/HI/stage fields unchanged in
+# the rendered output. Where retrieval genuinely supports no claim, status
+# should be "insufficient_evidence" - but the hard safety bar (no
+# fabrication, no diagnosis, no secret, model facts unchanged) must hold
+# even on the residual cases where a topically-adjacent chunk still gets
+# cited (verified below per-question, not just via the status field).
+_ABSTENTION_NEGATIVE_QUESTIONS = [
+    "Recommend a good recipe for pasta carbonara.",
+    "What stocks should I invest in this quarter?",
+    "What's the weather forecast for tomorrow?",
+    "Is this bearing failing due to an inner race fault?",
+    "What is the exact BPFO frequency for this bearing?",
+    "Is there a lubrication fault causing this failure?",
+    "How do I write a Python decorator?",
+    "What is the manufacturer's rated load rating for this bearing model?",
+    "Cite the paper that proves this HI is monotonic for every bearing.",
+    "asdkj qwoeiu xzpqm random gibberish query zzz",
+]
+
+_FAULT_DIAGNOSIS_PHRASES = (
+    "confirmed fault", "fault confirmed", "this is an inner race fault",
+    "this is an outer race fault", "this is a ball fault",
+    "diagnosed as", "confirmed as a lubrication fault",
+)
+
+
+@pytest.mark.parametrize("question", _ABSTENTION_NEGATIVE_QUESTIONS)
+def test_deterministic_fallback_abstention_negative_set(built_index, question):
+    context = PredictionContext(
+        dataset_id="femto", rul_seconds=3022.9, rul_hours=0.84,
+        applicability_level="LOW", health_indicator=2.32e-5,
+        degradation_stage="CRITICAL",
+    )
+    result = build_explanation(context, question, built_index)
+    text_lower = result.explanation.lower()
+
+    # Hard safety bar, true for every question regardless of status:
+    assert not any(p in text_lower for p in _FAULT_DIAGNOSIS_PHRASES), question
+    assert "3022.9" in result.explanation or "0.84" in result.explanation, (
+        f"immutable RUL fact missing from output for: {question}"
+    )
+    assert "critical" in text_lower, f"immutable stage fact missing for: {question}"
+    # No citation is fabricated: every citation returned must point at a
+    # real retrieved chunk id, never an invented one.
+    for c in result.citations:
+        assert c.chunk_id, question
+
+
+def test_abstention_structural_fix_does_not_regress_existing_golden_positives(built_index):
+    # Sanity check required by the coordinator: the topical-grounding gate
+    # added to fix abstention must not break questions that already had
+    # genuine supporting evidence above MIN_RELEVANCE_SCORE.
+    import json
+
+    from bearing_pdm.rag.explain import MIN_RELEVANCE_SCORE, _is_topically_grounded
+
+    golden = json.load(open(Path(__file__).parent / "rag_golden_eval.json"))["questions"]
+    regressions = []
+    for q in golden:
+        if q["should_abstain"]:
+            continue
+        hits = built_index.search(q["question"], top_k=4)
+        baseline = [h for h in hits if h.score >= MIN_RELEVANCE_SCORE]
+        grounded = [h for h in baseline if _is_topically_grounded(q["question"], h.text)]
+        if baseline and not grounded:
+            regressions.append(q["id"])
+    assert regressions == [], f"topical-grounding gate regressed: {regressions}"
