@@ -18,7 +18,7 @@ Rolling-element bearings are one of the most common failure points in rotating m
 | Student researcher (project owner) | Deliver a defensible, reproducible capstone; demonstrate the full ML + data-engineering pipeline. |
 | Faculty evaluators (review 2026-07-25) | Assess scientific validity, honesty of claims, and engineering quality. Primary audience for this review. |
 | Maintenance engineer (illustrative persona) | *Would* consume RUL estimates and evidence to schedule interventions - used to shape dashboard/report UX only; **not** a validated production user. |
-| Dataset providers | IEEE PHM 2012 challenge (FEMTO/PRONOSTIA); the college lab that collected the run-to-failure recording. Cited, terms respected. |
+| Dataset providers | IEEE PHM 2012 challenge (FEMTO/PRONOSTIA), cited and terms respected. The single-bearing run-to-failure recording has **no established provenance** - the "college lab collected it" attribution is unsupported and is being traced (see README Datasets). |
 
 ## 3. Business need and value
 

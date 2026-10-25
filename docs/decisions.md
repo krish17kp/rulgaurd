@@ -104,9 +104,13 @@ Result (ground truth = archive-derived; `reports/metrics/hidden_set_evaluation.j
 | model | MAE | RMSE | mean abs %Er | PHM2012 score | over-estimates |
 |---|---|---|---|---|---|
 | extra_trees | **4,555.4 s** | 5,388.0 s | 347.5% | **0.0682** | 8/11 |
-| naive | 9,459.4 s | 9,786.4 s | 681.7% | 0.0000 | 11/11 |
+| ~~naive~~ | ~~9,459.4 s~~ | ~~9,786.4 s~~ | ~~681.7%~~ | ~~0.0000~~ | ~~11/11~~ |
 
-Honest reading: ExtraTrees beats the naive baseline by **2.1x on MAE** on data it has never seen, which is a real result and the first evidence that the model learned something transferable rather than memorising the learning bearings. But the absolute performance is poor - a mean absolute percent error of 347% and a PHM2012 score of 0.068 against a reported competition best of roughly 0.28 (that 0.28 figure is itself **unverified** - the official challenge document publishes no numeric scores, and the paper it is attributed to is paywalled; do not cite it as fact). 8 of 11 predictions are over-estimates, i.e. wrong in the *unsafe* direction for maintenance planning.
+> **The `naive` row above is WRONG and is retained only as the historical record.**
+> It was produced by the bug in D20 item 1. Corrected: MAE **5,203.9 s** (archive-derived) / 5,122.5 s (official), RMSE 5,917.9 s, **4/11** over-estimates.
+> Do not quote this row, and do not quote the "2.1x" sentence below it.
+
+Honest reading (**the "2.1x" in this paragraph is superseded - the real margin is ~1.14x, see D20 item 1**): ExtraTrees beats the naive baseline by ~~**2.1x on MAE**~~ on data it has never seen, which is a real result and the first evidence that the model learned something transferable rather than memorising the learning bearings. But the absolute performance is poor - a mean absolute percent error of 347% and a PHM2012 score of 0.068 against a reported competition best of roughly 0.28 (that 0.28 figure is itself **unverified** - the official challenge document publishes no numeric scores, and the paper it is attributed to is paywalled; do not cite it as fact). 8 of 11 predictions are over-estimates, i.e. wrong in the *unsafe* direction for maintenance planning.
 
 Diagnosis of why, for the record: the model sees only instantaneous vibration/temperature statistics of a single 2,560-sample acquisition, with no notion of elapsed time or trajectory (correctly so - elapsed time is excluded from the feature matrix to prevent leakage). Two bearings with similar instantaneous RMS can be at very different points in their lives, and tree ensembles cannot extrapolate outside the training target range. This is a genuine limitation of the feature/model formulation, not a bug, and it is the strongest scientific argument yet for a sequence-aware comparison model - which remains a *comparison*, not a replacement (see `CLAUDE.md`).
 
@@ -254,3 +258,95 @@ Resolution: added `stages.UNKNOWN` (deliberately excluded from `STAGE_ORDER` - n
 **8. SECURITY MEDIUM - review deliverables directory had no `.gitignore` coverage.** `deliverables/review/` holds `REVIEW2_STATUS.md` (tracked, generated, meant to be committed) alongside several untracked large binaries and study material (two PPTX, a PDF, markdown explainers, `diagrams/`, `study_pdfs/` - none currently staged, but nothing prevented an accidental `git add` from picking them up). Added `deliverables/review/*` with `!deliverables/review/REVIEW2_STATUS.md` to `.gitignore` - narrow to that one directory, keeps the one file that should be tracked, does not touch or untrack anything else.
 
 **Not addressed, recorded as post-review technical debt:** `resolve_stored_path`'s `../` handling (flagged separately from this review) was left as-is - it is read-only, exercised only against paths this project itself writes into DuckDB/Parquet (`config/data_paths.toml`, feature-batch paths), and not on the Review 2 execution path. Revisit before treating this project's path handling as hardened against untrusted input.
+
+## D21: college RUL labels were biased 10,680 s low whenever the file list was sampled (2026-09-23, found during the pre-paper audit)
+
+`pipeline.build_college_feature_rows` derived the run end from whatever file list it was
+handed: `run_end_timestamp = _college_run_end_timestamp(files)`. `scripts/build_features.py`
+passes the **strided** list (`all_files[::sample_stride]`), so with the `--sample-stride 5`
+sample the project actually ships, the labelled failure instant was placed at the last
+*sampled* file rather than the last real one.
+
+Measured on the real 129-file run:
+
+| | last file used | run end | max `rul_seconds` |
+|---|---|---|---|
+| before | `LogFile_2022-06-25-22-02-31.csv` | 2022-06-25 22:03:49 | 450,198.125 s (125.06 h) |
+| after | `LogFile_2022-06-26-01-00-31.csv` | 2022-06-26 01:01:49 | **460,878.125 s (128.02 h)** |
+
+Every college `rul_seconds` was therefore **10,680 s (2.967 h, 2.3% of the run) too low**, a
+uniform offset across all 4,030 rows. The corrected total matches the 128 h stated in
+`context/Description.txt`; the old value did not. `artifacts/evidence/REVIEW-M2/summary.md`
+recorded the 125 h figure as "consistent with the ~128h total run" - it noticed the gap and
+read it as rounding rather than as a label defect.
+
+Why it survived: the offset is constant, so it cancels in the walk-forward comparison and
+leaves the D10 naive-baseline identity (`MAE = 0.0`) intact. Nothing downstream looked wrong.
+It only matters when a college RUL number is quoted in absolute terms - which is exactly what
+a paper does.
+
+Confirmed empirically after the fix (2026-09-23): rebuilding the batch and re-running
+`scripts/evaluate_models.py` leaves **all four blocks of `reports/metrics/rul_evaluation.json`
+byte-identical** - `femto_lobo`, `femto_lobo_mean_mae_by_model`, `college_walk_forward` and
+`college_mean_mae_by_model`. A uniform offset `c` on the target is absorbed by every estimator
+here: the tree fits `y + c` and predicts `y_hat + c`, so the residual is unchanged, and the
+naive baseline's `mean_total_life_seconds` shifts by the same `c` while elapsed time does not
+move. Every college row's label rose by exactly 10,680.0 s (verified elementwise across all
+4,030 rows), and the new batch's `max(rul_seconds)` is 460,878.125 s = 128.022 h, matching
+`context/Description.txt`; the superseded batch read 450,198.125 s = 125.055 h.
+
+So **no previously reported metric was ever wrong because of this defect** - the error was
+confined to the labels themselves. That is the opposite of reassuring for a write-up: the
+numbers a paper quotes in absolute terms (total run length, time-to-failure, any RUL in hours)
+were the only things affected, and they were affected silently.
+
+Resolution: `build_college_feature_rows` takes an explicit `run_end_timestamp` (defaulting to
+the old behaviour for the full-run case and for tests), and `build_features.build_college`
+always computes it from `all_files`, never from the strided subset. FEMTO is unaffected - its
+label is `(final_acc_index - acc_index) * 10 s` per bearing and never depends on a file list.
+Regression test:
+`tests/test_pipeline.py::test_strided_college_subset_keeps_the_full_runs_rul_scale`, which
+drops the last fixture file (the real first/last files of the run) to reproduce the
+truncation and asserts the corrected labels match the full-run labels exactly.
+
+## D22: the FEMTO leave-one-bearing-out naive baseline is a lifetime-spread identity, not a predictor (2026-09-23, found during the pre-paper audit)
+
+D10 records that college's naive baseline scores `MAE = 0.0` by algebraic identity. The same
+mechanism operates, attenuated, on FEMTO leave-one-bearing-out - and that had not been
+written down, so "ExtraTrees beats naive by 1.30x on LOBO" was being read as a sensor-driven
+result on both sides of the comparison.
+
+FEMTO learning labels are also `(t_end - t)` on complete runs, and `predict_naive_baseline`
+resolves the held-out bearing's true `t=0` through its group-min fallback (correctly - the
+first acquisition is observable). So the naive residual is a **constant**:
+`mean(total life of the 5 training bearings) - (true total life of the held-out bearing)`.
+
+The tell is in `reports/metrics/rul_evaluation.json`: `mae_seconds == rmse_seconds` exactly on
+four of six bearings, which can only happen for a constant residual. Each equals that
+lifetime difference to the digit:
+
+| held-out | true life | mean of other 5 | predicted offset | reported naive MAE |
+|---|---|---|---|---|
+| Bearing1_2 | 8,700 s | 13,316 s | 4,616 s | **4,616.0** |
+| Bearing2_1 | 9,100 s | 13,236 s | 4,136 s | **4,136.0** |
+| Bearing2_2 | 7,960 s | 13,464 s | 5,504 s | **5,504.0** |
+| Bearing3_1 | 5,140 s | 14,028 s | 8,888 s | **8,888.0** |
+
+Bearing1_1 and Bearing3_2 differ only because their lives are far enough from the mean that
+`predict_naive_baseline`'s `clip(lower=0)` engages.
+
+Two consequences, both of which must be stated wherever the LOBO comparison is reported:
+
+1. The naive LOBO figure measures **the dispersion of bearing lifetimes in the learning set**,
+   not any sensor-derived skill. It is an informed oracle in the same family as D10, not a
+   predictor that happens to be simple.
+2. The comparison is **asymmetric in naive's favour**: elapsed time is supplied to the naive
+   baseline but deliberately withheld from the tree's feature matrix
+   (`health.NON_FEATURE_COLUMNS` excludes `sequence_index` and `event_timestamp`), because on a
+   single run a monotone function of the label would be leakage. ExtraTrees is solving a
+   strictly harder problem than the number it is compared against.
+
+No code change: the baseline is doing what it is defined to do, the exclusion of elapsed time
+is correct, and `leave_one_bearing_out_femto` is not buggy. This is a reporting obligation, not
+a defect. The hidden-set comparison (D16/D20) is **not** subject to point 1 - those bearings'
+total lives are genuinely unknown to the model - but it remains subject to point 2.

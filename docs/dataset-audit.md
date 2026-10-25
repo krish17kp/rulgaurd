@@ -101,6 +101,6 @@ Implication for M2: window-level features must carry an explicit missing-sample 
 
 ## Processing-cost estimate
 
-College: 129 files x ~143.5MB = ~18.5GB raw, 2M rows/file. Feature extraction at the 25,600-sample/50%-overlap default yields ~78 windows/file (2,000,000/12,800 - 1) x 129 files = ~10,000 feature rows total (tiny — kilobytes as Parquet). Never materialize raw windows to disk.
+College: 129 files x ~143.5MB = ~18.5GB raw, 2M rows/file. Feature extraction at the 25,600-sample/50%-overlap default yields **155 windows/file** (floor((2,000,001 - 25,600)/12,800) + 1; the ~78 figure previously recorded here omitted the 50% overlap and is the non-overlapping count) x 129 files = **~19,995 feature rows** for the full run (tiny — kilobytes as Parquet). Never materialize raw windows to disk.
 
 FEMTO: acceleration files are already bounded (2560 rows, ~2560*6*8bytes~123KB each); one feature row per acquisition. Total acquisitions across Learning_set: 2803+871+911+797+515+1637 = 7534 feature rows for the six training bearings.

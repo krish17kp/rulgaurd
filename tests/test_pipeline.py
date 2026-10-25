@@ -114,3 +114,36 @@ def test_femto_feature_rows_test_censored_role_has_no_rul():
     bearing = FemtoBearing(bearing_label="Bearing1_1", condition_id=1, role="test_censored", path=FEMTO_FIXTURES / "Bearing1_1")
     rows = list(build_femto_feature_rows(bearing))
     assert all(r["rul_seconds"] is None for r in rows)
+
+
+def test_strided_college_subset_keeps_the_full_runs_rul_scale(tmp_path):
+    """D21 regression: sampling files must not shorten the labelled run.
+
+    The bug: build_college_feature_rows derived run_end from whatever list it
+    was handed, so `all_files[::5]` placed the failure instant at the last
+    SAMPLED file and every rul_seconds came out low - measured at 10,680 s on
+    the real 129-file run. The fixtures here are the real first and last files,
+    so dropping the last one reproduces exactly that truncation.
+    """
+    files = _copy_college_fixtures(tmp_path)
+    full_run_end = _college_run_end_timestamp(files)
+    subset = files[:1]
+
+    biased = list(
+        build_college_feature_rows(subset, window_samples=1000, overlap_fraction=0.5)
+    )
+    corrected = list(
+        build_college_feature_rows(
+            subset, run_end_timestamp=full_run_end, window_samples=1000, overlap_fraction=0.5
+        )
+    )
+    reference = list(
+        build_college_feature_rows(files, window_samples=1000, overlap_fraction=0.5)
+    )
+
+    assert len(biased) == len(corrected)
+    assert corrected[0]["rul_seconds"] > biased[0]["rul_seconds"], (
+        "a truncated file list must not be allowed to shorten the labelled run"
+    )
+    # Passing the true run end reproduces the full-run label exactly.
+    assert corrected[0]["rul_seconds"] == pytest.approx(reference[0]["rul_seconds"])

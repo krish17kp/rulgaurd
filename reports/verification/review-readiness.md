@@ -37,7 +37,9 @@ ruff check .   # All checks passed
 ## Deferred (explicitly out of scope for the review, per command.md section 26.2)
 `scripts/audit_data.py` was never written as a standalone script - the M0/M1 dataset audit was done via direct inspection this session and recorded in `docs/dataset-audit.md`; the numbers were independently re-verified via the adapters themselves in M1 evidence. Writing the standalone script is a `DEFERRED_AFTER_REVIEW` polish item, not a gap in the underlying verification.
 
-Also deferred: spectral-kurtosis ConvNet, 1D CNN reproduction, LSTM monitoring agent, RAG/Ollama, PDF report, degradation-stage classification (M5), full 129-file college processing (currently a 1-in-5 sample - background full run was killed by the environment twice, see `docs/decisions.md`), full-129-file production run, `Full_Test_Set` hidden-RUL scoring (frozen pipeline exists but hasn't been scored against the hidden continuation yet - that's a dedicated future step, not needed for the review demo).
+Also deferred: spectral-kurtosis ConvNet, 1D CNN reproduction (M6), LSTM monitoring agent, RAG/Ollama (M7), PDF report, full 129-file college processing (currently a 1-in-5 sample - background full run was killed by the environment twice, see `docs/decisions.md`), final reproducibility audit (M9).
+
+**No longer deferred** (this document predates them): degradation-stage classification (M5) and `Full_Test_Set` hidden-RUL scoring (M4b) both shipped 2026-08-30 - see `docs/milestone.md` and `docs/decisions.md` D16-D20. `docs/milestone.md` and `TODO.md` are the authoritative status; this file describes the 2026-07-25 review snapshot.
 
 ## Known limitations (say these proactively, don't wait to be asked)
 1. College's `rul_seconds` label is defined from the known final timestamp (uncensored run) - its "naive" baseline scores a trivial 0.0 MAE by mathematical construction, not a real predictive result (`docs/decisions.md` D10). Only the `extra_trees` college numbers (~117k-132k s MAE, ~33-37h on a ~128h run) are meaningful.

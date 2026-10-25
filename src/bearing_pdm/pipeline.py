@@ -121,11 +121,23 @@ def build_college_window_rows(
 
 
 def build_college_feature_rows(
-    files: list[CollegeFile], code_version: str = "unknown", **window_kwargs
+    files: list[CollegeFile],
+    code_version: str = "unknown",
+    run_end_timestamp: datetime | None = None,
+    **window_kwargs,
 ) -> Iterator[dict]:
     """Whole-run entry point: assigns a globally increasing sequence_index
-    across all 129 files in chronological order."""
-    run_end_timestamp = _college_run_end_timestamp(files)
+    across all 129 files in chronological order.
+
+    `run_end_timestamp` must be derived from the COMPLETE file list whenever
+    `files` is a subset. The RUL label is `run_end - event_timestamp`, so
+    deriving the run end from a strided subset moves the labelled failure
+    instant earlier and biases every label low (docs/decisions.md D21:
+    a 1-in-5 sample understated every college RUL by 10,680 s). Defaults to
+    deriving it from `files` for the full-run case and for tests.
+    """
+    if run_end_timestamp is None:
+        run_end_timestamp = _college_run_end_timestamp(files)
     global_index = 0
     for f in files:
         for row in build_college_window_rows(f, run_end_timestamp, code_version=code_version, **window_kwargs):

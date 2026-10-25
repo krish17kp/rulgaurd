@@ -16,7 +16,11 @@ import time
 from bearing_pdm.college import discover_college_files
 from bearing_pdm.config import load_data_paths
 from bearing_pdm.femto import discover_femto_bearings
-from bearing_pdm.pipeline import build_college_feature_rows, build_femto_feature_rows
+from bearing_pdm.pipeline import (
+    _college_run_end_timestamp,
+    build_college_feature_rows,
+    build_femto_feature_rows,
+)
 from bearing_pdm.storage import (
     ensure_bearing_run,
     ensure_dataset,
@@ -49,7 +53,12 @@ def build_college(paths, con, code_version: str, sample_stride: int = 1) -> None
     ensure_bearing_run(con, "college:nsk6205", "college", "nsk6205", "college_run")
 
     t0 = time.time()
-    rows = list(build_college_feature_rows(files, code_version=code_version))
+    # From all_files, never `files`: the RUL label is run_end - event_timestamp,
+    # so a strided subset would move the failure instant earlier (D21).
+    run_end = _college_run_end_timestamp(all_files)
+    rows = list(
+        build_college_feature_rows(files, code_version=code_version, run_end_timestamp=run_end)
+    )
     print(f"[college] {len(rows)} window rows built in {time.time()-t0:.0f}s")
 
     batch_id, parquet_path = write_feature_batch(

@@ -38,7 +38,7 @@ Requires Python >=3.11 (developed on 3.13). The importable package is `bearing_p
 
 ### Datasets
 
-- **College**: 129 hourly `LogFile_*.csv` files, published in this repo under `datasets/college/` via Git LFS. User-collected run-to-failure recording of one NSK 6205 bearing, 128 hours to failure.
+- **College**: 129 hourly `LogFile_*.csv` files, published in this repo under `datasets/college/` via Git LFS. A single-bearing accelerated-life run-to-failure recording (one NSK 6205 bearing, 128 hours to failure; see `context/Description.txt` for the rig parameters). **Provenance not established.** The repo previously described this as "user-collected"; that claim is unsupported. Every entry inside the source archive `Vibration_Bearing_RuntoFailure.zip` carries a zip timestamp of 2023-03-14 - roughly nine months after the 2022-06-20..26 experiment it contains - and no URL, DOI or citation for it exists anywhere in this project. The evidence points to a downloaded third-party dataset whose original source has not yet been identified. Until it is, do not claim it was collected by this project, and do not cite it.
 - **FEMTO/PRONOSTIA**: `Training_set.zip`, `Test_set.zip`, `Validation_Set.zip`, published under `datasets/femto/` via Git LFS. IEEE PHM 2012 Prognostic Challenge dataset — cite the original challenge if you reuse this data; the archives are redistributed here under the challenge's original terms.
 
 A `git clone` pulls Git LFS pointers for both; run `git lfs pull` (or clone with LFS enabled) to fetch the actual archive/CSV content. FEMTO's zips need local extraction (gitignored, not committed — extracting ~9GB) before the adapters can read them; college's CSVs are used directly from `datasets/college/`.
@@ -96,4 +96,4 @@ M0-M4, M4b, minimal M8, and M5 are done. Remaining post-review work is scoped in
 
 ## License and citation
 
-Research/educational capstone code. FEMTO/PRONOSTIA data is the IEEE PHM 2012 Prognostic Challenge dataset — cite the challenge if you reuse it. College dataset is user-collected; cite this repository if you reuse it. No warranty; not validated for production or safety-critical use.
+Research/educational capstone code. FEMTO/PRONOSTIA data is the IEEE PHM 2012 Prognostic Challenge dataset — cite the challenge if you reuse it. The single-bearing run-to-failure dataset has **no established provenance** (see the Datasets section) - its original source must be identified before it is cited or redistributed. No warranty; not validated for production or safety-critical use.
