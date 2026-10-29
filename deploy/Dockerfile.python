@@ -12,6 +12,7 @@ WORKDIR /app
 COPY src ./src
 COPY scripts ./scripts
 COPY streamlit_app.py pyproject.toml README.md ./
+COPY .streamlit ./.streamlit
 COPY deploy_data ./deploy_data
 COPY reports ./reports
 COPY artifacts/rag_index ./artifacts/rag_index
