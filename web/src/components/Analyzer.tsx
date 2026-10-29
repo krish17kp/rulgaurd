@@ -33,6 +33,19 @@ function precheck(f: File): Result | null {
     ] }
   if (/\.(rar|7z)$/i.test(f.name))
     return { ok: false, chip: 'archive', lines: [`RAR and 7z archives (${mb(f.size)}) are extracted and analyzed in the research lab, not in this quick check.`] }
+  // Headerless files from datasets the pipeline reads with its own adapters (ims.py, femto.py, college.py).
+  if (/^\d{4}(\.\d{2}){5}$/.test(f.name))
+    return { ok: false, chip: 'IMS snapshot', lines: [
+      'This is one IMS snapshot: 1 s of headerless vibration at 20 kHz. IMS has no elapsed-time label inside a single file, so its run-to-failure tests are analyzed as whole folders in the research lab (Cross-Dataset Validation).',
+    ] }
+  if (/^temp_\d+\.csv$/i.test(f.name))
+    return { ok: false, chip: 'FEMTO temperature', lines: [
+      'This is a FEMTO temperature file. Life is predicted from the vibration files next to it: drop the matching acc_NNNNN.csv instead.',
+    ] }
+  if (/^logfile_.*\.csv$/i.test(f.name))
+    return { ok: false, chip: 'college rig log', lines: [
+      `This looks like a college test-rig log (${mb(f.size)}). These hour-long headerless logs are read by the college adapter in the offline pipeline, and their results are on the research lab's Health Indicator and RUL pages.`,
+    ] }
   if (f.size > MAX_UPLOAD_BYTES)
     return { ok: false, chip: 'too large', lines: [`${mb(f.size)} is over the ${mb(MAX_UPLOAD_BYTES)} quick-check limit. Drop a single recording here, or analyze the full dataset in the research lab.`] }
   return null
@@ -51,6 +64,9 @@ async function analyzeUpload(f: File): Promise<Result> {
         : '/api/dataset/inspect'
   const form = new FormData()
   form.append('file', f)
+  // XJTU-SY recordings carry named columns but no rate; 25.6 kHz is fixed by the dataset (xjtu.py XJTU_SAMPLE_RATE_HZ).
+  const xjtu = path.endsWith('inspect') && (await f.slice(0, 200).text()).startsWith('Horizontal_vibration_signals')
+  if (xjtu) form.append('declared_sampling_rate_hz', '25600')
   const res = await fetch(path, { method: 'POST', body: form })
   const j: Json | null = await res.json().catch(() => null)
   if (!res.ok || !j) return { ok: false, lines: [errorText(res.status, j)] }
@@ -74,12 +90,16 @@ async function analyzeUpload(f: File): Promise<Result> {
       ...(j.applicability_reasons ?? []).slice(0, 2),
     ] }
   // The API's adapter guidance is written for developers; visitors get the fix in plain words.
-  if (j.compatibility === 'ADAPTER_REQUIRED')
-    return { ok: false, chip: 'needs more info', lines: [
+  if (j.compatibility === 'ADAPTER_REQUIRED') {
+    const missing: string[] = j.required_action?.missing ?? []
+    const rate = missing.some((m) => m.startsWith('declared_sampling_rate_hz'))
+    const what = rate && missing.includes('declared_units') ? 'sampling rate and units' : rate ? 'sampling rate' : 'units'
+    return { ok: false, chip: xjtu ? 'XJTU-SY recording' : 'needs more info', lines: [
       (j.reasons ?? []).some((r: string) => r.startsWith('no header row'))
         ? 'This CSV has no header row, so its columns cannot be identified. Add a header such as time,vibration_x,vibration_y and drop it again.'
-        : 'The vibration columns were found, but the sampling rate and units are unknown, and RULGuard never guesses them. Add a time column in seconds, or declare the rate and units on the upload page of the RULGuard app.',
+        : `${xjtu ? 'Recognized as an XJTU-SY recording at the dataset\'s documented 25.6 kHz.' : 'The vibration columns were found.'} The ${what} must be declared, because RULGuard never guesses them. Declare them on the upload page of the RULGuard app${rate ? ', or add a time column in seconds' : ''}.`,
     ] }
+  }
   return { ok: true, chip: j.compatibility?.replaceAll('_', ' ').toLowerCase(), lines: [j.required_action?.message, ...(j.reasons ?? []).slice(0, 2)].filter(Boolean) }
 }
 
