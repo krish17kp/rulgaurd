@@ -176,15 +176,15 @@ test("Generic non-FEMTO CSV is treated as out-of-distribution, not a FEMTO predi
   ).toBeVisible({ timeout: 20_000 });
 });
 
-test("one part of a split archive names the missing parts, never the FEMTO error", async ({ page }) => {
+test("one part of a split archive is offered as a partial analysis naming the missing parts", async ({ page }) => {
   await page.goto("/upload");
   await page.setInputFiles('[data-testid="file-input"]', {
     name: "XJTU-SY_Bearing_Datasets.part05.rar",
     mimeType: "application/x-rar-compressed",
     buffer: Buffer.from("fake rar bytes"),
   });
-  await expect(page.getByText(/can.t be analyzed as it is/)).toBeVisible();
-  await expect(page.getByText(/missing XJTU-SY_Bearing_Datasets\.part01\.rar/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Upload and analyze these parts" })).toBeVisible();
+  await expect(page.getByText(/missing: XJTU-SY_Bearing_Datasets\.part01\.rar/)).toBeVisible();
   await expect(page.getByText(/Dataset not recognized for RUL prediction/)).not.toBeVisible();
 });
 

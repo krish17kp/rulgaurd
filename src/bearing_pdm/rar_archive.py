@@ -209,6 +209,39 @@ def rar_volume_number(path: str | Path) -> int | None:
     raise RarArchiveError(f"{Path(path).name} is not a readable RAR archive")
 
 
+def list_rar_volume(path: str | Path) -> list[tuple[RarEntry, bool, bool]]:
+    """Members stored in ONE RAR volume (`unrar lt` without -v lists only that
+    volume), each with (continued_from_previous, continues_in_next). A non-solid
+    RAR5 volume is readable on its own, so this works without the other parts."""
+    exe = _require_unrar()
+    try:
+        result = subprocess.run([exe, "lt", "-p-", "--", str(path)], capture_output=True,
+                                text=True, timeout=600, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise RarArchiveError(f"timed out listing {Path(path).name}") from exc
+    if "Details:" not in result.stdout:
+        raise RarArchiveError(f"{Path(path).name} is not a readable RAR archive")
+    if "solid" in result.stdout.split("Details:", 1)[1].splitlines()[0].lower():
+        raise RarArchiveError(f"{Path(path).name} is a solid archive: its parts cannot be read "
+                              "without all the parts before them")
+    out: list[tuple[RarEntry, bool, bool]] = []
+    for block in result.stdout.split("\n\n"):
+        fields = {}
+        for line in block.splitlines():
+            key, sep, value = line.partition(": ")
+            if sep:
+                fields[key.strip()] = value.strip()
+        if "Name" not in fields or fields.get("Type", "File") == "Directory":
+            continue
+        ratio = fields.get("Ratio", "")
+        out.append((RarEntry(path=fields["Name"], size=int(fields.get("Size") or 0),
+                             packed_size=int(fields.get("Packed size") or 0),
+                             is_symlink=fields.get("Type", "File") != "File",
+                             encrypted="encrypt" in block.lower()),
+                    ratio in ("<--", "<->"), ratio in ("-->", "<->")))
+    return out
+
+
 def extract_command(first_part: str | Path, dest: str | Path) -> list[str]:
     """Extractor argv for a checked archive: unrar for RAR (see _require_unrar), 7z otherwise."""
     if Path(first_part).suffix.lower() == ".rar":

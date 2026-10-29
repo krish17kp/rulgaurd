@@ -25,6 +25,7 @@ import fcntl
 import json
 import math
 import os
+import posixpath
 import re
 import secrets
 import shutil
@@ -32,6 +33,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +44,7 @@ from bearing_pdm.rar_archive import (
     check_entries,
     extract_command,
     list_rar_entries,
+    list_rar_volume,
     rar_volume_number,
 )
 
@@ -177,20 +180,26 @@ def plan_upload(files: list[dict]) -> dict:
     example = next(iter(parts.values()))["name"]
     known_total = _KNOWN_PART_COUNTS.get(stem_key.removesuffix(".7z"))
     last = max(max(parts), known_total or 0)
-    missing = [n for n in range(1, last + 1) if n not in parts]
-    if missing:
-        msg = (f"incomplete multi-part archive: missing "
-               f"{', '.join(_part_name(example, n, kind) for n in missing)}. A multi-part archive "
-               "can only be extracted with every part, starting from part 1.")
-        if known_total:
-            msg += f" The official download of this dataset has {known_total} parts."
-        raise JobError(msg, code="MISSING_PARTS")
+    missing = [_part_name(example, n, kind) for n in range(1, last + 1) if n not in parts]
+    if missing and kind == "multipart_7z":
+        # .7z.NNN is a plain byte split: no part is readable without all those before it.
+        raise JobError(f"incomplete multi-part archive: missing {', '.join(missing)}. A split 7z "
+                       "archive can only be extracted with every part, starting from .001.",
+                       code="MISSING_PARTS")
     notes = [] if known_total else [
         "The total number of parts cannot be known from file names alone. After upload, the "
         "archive headers are read to confirm the last part is present."]
+    if missing:
+        of = f"{known_total}" if known_total else f"at least {last}"
+        notes.insert(0, (
+            f"Only {len(parts)} of {of} parts selected (missing: {', '.join(missing)}). Each RAR "
+            "part can be read on its own, so the recordings stored completely inside the selected "
+            "part(s) are analysed; the recordings in the missing parts are not. A recording split "
+            "across a missing part is skipped, and a bearing cut by a missing part is reported as "
+            "incomplete, with no end-of-life label. Select every part to analyse the whole dataset."))
     ordered = [parts[n] for n in sorted(parts)]
     return {"kind": kind, "files": ordered, "first": ordered[0]["name"], "total_bytes": total,
-            "notes": notes}
+            "notes": notes, "missing": missing, "expected_parts": last}
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +336,8 @@ def public_state(d: Path, all_files: bool = False) -> dict:
     # A folder upload can hold thousands of files: list only what still needs bytes.
     state["files"] = (files if all_files or len(files) <= 50
                       else [f for f in files if f["received"] < f["size"]][:50])
-    state["plan"] = {k: plan[k] for k in ("kind", "first", "total_bytes", "notes")}
+    state["plan"] = {k: plan.get(k, []) for k in ("kind", "first", "total_bytes", "notes",
+                                                   "missing")}
     state.pop("pid", None)
     state["has_result"] = (d / "result.json").is_file()
     return _json_clean(state)
@@ -535,16 +545,19 @@ def _check_archive(d: Path, plan: dict) -> int:
 
     if plan["kind"] == "multipart_rar":
         for i, f in enumerate(plan["files"], start=1):
+            num = _part_number(f["name"])
             try:
                 vol = rar_volume_number(upload / f["name"])
             except RarArchiveError as exc:
                 raise JobError(f"{f['name']} is not a readable RAR volume (corrupt, incomplete, "
                                "or not a RAR file)") from exc
-            if vol != i:
+            if vol != num:
                 raise JobError(f"{f['name']} is volume {vol} of its archive according to its own "
-                               f"header, not part {i}. The parts look renamed or come from "
+                               f"header, not part {num}. The parts look renamed or come from "
                                "different downloads.", code="MISMATCHED_PARTS")
             _update(d, stages={"check": {"done": i, "detail": f"{f['name']}: volume {vol} OK"}})
+        if plan.get("missing"):
+            return _check_partial(d, plan)
     try:
         entries = list_rar_entries(first)  # 7z lists RAR and 7Z alike, and names a missing volume
     except RarArchiveError as exc:
@@ -568,13 +581,78 @@ def _check_archive(d: Path, plan: dict) -> int:
                        code="UNSAFE_ARCHIVE") from exc
 
 
+def _part_number(name: str) -> int:
+    return int(_RAR_PART_RE.match(name).group("num"))
+
+
+def _part_groups(plan: dict) -> list[tuple[int, int]]:
+    """Runs of consecutive uploaded part numbers, e.g. parts 2,3,5 -> [(2, 3), (5, 5)]."""
+    groups: list[list[int]] = []
+    for n in sorted(_part_number(f["name"]) for f in plan["files"]):
+        if groups and n == groups[-1][1] + 1:
+            groups[-1][1] = n
+        else:
+            groups.append([n, n])
+    return [(a, b) for a, b in groups]
+
+
+def _check_partial(d: Path, plan: dict) -> int:
+    """Incomplete RAR set: read every uploaded volume on its own and work out which
+    members lie wholly inside the uploaded parts. Writes partial.json for the worker."""
+    upload = d / "upload"
+    members: dict[str, dict] = {}
+    for f in plan["files"]:
+        try:
+            listing = list_rar_volume(upload / f["name"])
+        except RarArchiveError as exc:
+            raise JobError(_safe_message(exc, d)) from exc
+        for entry, before, after in listing:
+            m = members.setdefault(entry.path, {"entry": entry, "vols": [], "start": False,
+                                                "end": False})
+            m["vols"].append(_part_number(f["name"]))
+            m["start"] |= not before
+            m["end"] |= not after
+    if not members:
+        raise JobError(f"{plan['first']} is an empty archive")
+    try:
+        total = check_entries([m["entry"] for m in members.values()], LOCAL_FULL_MODE)
+    except RarSecurityError as exc:
+        raise JobError(f"archive rejected for safety: {_safe_message(exc, d)}",
+                       code="UNSAFE_ARCHIVE") from exc
+    example = plan["files"][0]["name"]
+    incomplete = {}
+    for path, m in members.items():
+        lo, hi = min(m["vols"]), max(m["vols"])
+        if m["start"] and m["end"] and hi - lo + 1 == len(set(m["vols"])):
+            continue
+        gap = (lo - 1 if not m["start"] else hi + 1 if not m["end"]
+               else next(n for n in range(lo, hi) if n not in m["vols"]))
+        incomplete[path] = (f"split across {_part_name(example, gap, 'multipart_rar')}, which was "
+                            "not uploaded")
+    # Members are stored folder by folder, so a missing neighbour part can only cut the first
+    # and the last folder of each run of consecutive uploaded parts.
+    cut: dict[str, str] = {}
+    order = list(members)
+    for a, b in _part_groups(plan):
+        inside = [p for p in order if any(a <= v <= b for v in members[p]["vols"])]
+        if a > 1:
+            cut.setdefault(posixpath.dirname(inside[0]),
+                           f"some of its recordings are in {_part_name(example, a - 1, 'multipart_rar')} "
+                           "or earlier parts, which were not uploaded")
+        if b < plan["expected_parts"] or not members[inside[-1]]["end"]:
+            cut.setdefault(posixpath.dirname(inside[-1]),
+                           f"some of its recordings are in {_part_name(example, b + 1, 'multipart_rar')} "
+                           "or later parts, which were not uploaded")
+    (d / "partial.json").write_text(json.dumps({"incomplete": incomplete, "cut": cut}))
+    return total
+
+
 def _extract(d: Path, plan: dict, expected_bytes: int) -> None:
     data = d / "data"
     data.mkdir(exist_ok=True)
     first = d / "upload" / plan["first"]
     limit = expected_bytes + 64 * 1024**2
     errors: list[BaseException] = []
-    proc = None
 
     if plan["kind"] == "zip":
         def run_zip() -> None:
@@ -586,12 +664,24 @@ def _extract(d: Path, plan: dict, expected_bytes: int) -> None:
         thread.start()
         alive = thread.is_alive
     else:
+        # A partial RAR set is extracted from the first part of each run of consecutive
+        # parts; unrar follows the volumes within a run and stops at the gap.
+        firsts = ([next(f["name"] for f in plan["files"] if _part_number(f["name"]) == a)
+                   for a, _ in _part_groups(plan)] if plan.get("missing") else [plan["first"]])
         log = open(d / "extract.log", "wb")  # noqa: SIM115 - closed after the loop
-        proc = subprocess.Popen(extract_command(first, data), stdout=log,
-                                stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        stop, codes, current = threading.Event(), [], []
 
-        def alive() -> bool:
-            return proc.poll() is None
+        def run_extractors() -> None:
+            for name in firsts:
+                if stop.is_set():
+                    return
+                current[:] = [subprocess.Popen(extract_command(d / "upload" / name, data),
+                                               stdout=log, stderr=subprocess.STDOUT,
+                                               stdin=subprocess.DEVNULL)]
+                codes.append(current[0].wait())
+        thread = threading.Thread(target=run_extractors, daemon=True)
+        thread.start()
+        alive = thread.is_alive
     started = time.monotonic()
     try:
         while alive():
@@ -604,17 +694,20 @@ def _extract(d: Path, plan: dict, expected_bytes: int) -> None:
                 raise JobError("extraction took longer than the 3-hour limit")
             _update(d, stages={"extract": {"done": done, "detail": f"{count:,} files extracted"}})
     finally:
-        if proc is not None:
-            if proc.poll() is None:
-                proc.kill()
-                proc.wait()
+        if plan["kind"] != "zip":
+            stop.set()
+            if current and current[0].poll() is None:
+                current[0].kill()
+            thread.join()
             log.close()
-    if proc is not None:
+    if plan["kind"] != "zip":
         out = (d / "extract.log").read_text(errors="replace")
         # unrar/7z exit 1 = warning (e.g. bytes after the last volume's end on
         # the real XJTU-SY download); data errors still print one of these.
         bad = ("Program aborted", "CRC failed", "checksum error", "Data Error", "Cannot open")
-        if proc.returncode not in (0, 1) or any(b in out for b in bad):
+        if plan.get("missing"):
+            _settle_partial(d, data, out)
+        elif any(c not in (0, 1) for c in codes) or any(b in out for b in bad):
             tail = " ".join(out.strip().splitlines()[-3:])
             raise JobError("extraction failed (corrupt, truncated or mismatched archive parts): "
                            f"{_safe_message(tail, d)}")
@@ -632,6 +725,19 @@ def _extract(d: Path, plan: dict, expected_bytes: int) -> None:
         if root not in p.resolve().parents:
             raise JobError("an archive member resolved outside the extraction folder; rejected",
                            code="UNSAFE_ARCHIVE")
+
+
+def _settle_partial(d: Path, data: Path, out: str) -> None:
+    """unrar reports the members split across a missing part as errors (expected);
+    any other damaged member means a corrupt part. Drop the split members."""
+    incomplete = json.loads((d / "partial.json").read_text())["incomplete"]
+    for line in out.splitlines():
+        if (any(b in line for b in ("checksum error", "CRC failed", "Data Error"))
+                and not any(p in line for p in incomplete)) or "Program aborted" in line:
+            raise JobError("extraction failed: a recording inside the uploaded parts is damaged "
+                           f"(corrupt or truncated part): {_safe_message(line.strip(), d)}")
+    for p in incomplete:
+        (data / p).unlink(missing_ok=True)
 
 
 def _unwrap(root: Path) -> Path:
@@ -749,8 +855,8 @@ def _run_locked(d: Path) -> None:
     if not data.is_dir() or not any(p.is_file() for p in data.rglob("*")):
         raise JobError("the upload contains no files (empty archive or only folders)")
     root = _unwrap(data)
-    all_files = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
     profile = profile_folder(root)
+    all_files = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
     known = [k["dataset_id"] for k in profile["known_datasets"]]
     if not known:
         summary = {"dataset_id": None, "display_name": None,
@@ -773,11 +879,31 @@ def _run_locked(d: Path) -> None:
 
     dataset = known[0]
     adapter = get_adapter(dataset)
-    try:
-        runs = adapter.discover(root)
-    except (FileNotFoundError, ValueError) as exc:
-        raise JobError(f"recognised as {adapter.display_name}, but no bearing runs were found: "
-                       f"{_safe_message(exc, d)}") from exc
+    runs, level = None, root
+    while runs is None:
+        try:
+            runs = adapter.discover(level)
+        except (FileNotFoundError, ValueError) as exc:
+            # Unwrapping can go one folder too deep: a partial XJTU-SY set holds a single
+            # condition folder, but the adapter expects condition folders under its root.
+            if level == data:
+                raise JobError(f"recognised as {adapter.display_name}, but no bearing runs were "
+                               f"found: {_safe_message(exc, d)}") from exc
+            level = level.parent
+    if level != root:
+        root, profile = level, profile_folder(level)
+        all_files = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
+    partial = json.loads((d / "partial.json").read_text()) if plan.get("missing") else None
+    cut_runs = []
+    if partial:
+        # A bearing cut by a missing part has no known end of life: censor it, as
+        # build_canonical_features does for any run that is not run-to-failure.
+        droot = data.resolve()
+        for i, r in enumerate(runs):
+            reason = partial["cut"].get(Path(r.source).resolve().relative_to(droot).as_posix())
+            if reason:
+                cut_runs.append({"bearing": r.run_id, "reason": reason})
+                runs[i] = replace(r, run_to_failure=False)
     run_files = {r.run_id: _run_files(r) for r in runs}
     _update(d, state="processing",
             message=f"Recognised {adapter.display_name}: {len(runs)} bearing run(s). Extracting "
@@ -834,26 +960,41 @@ def _run_locked(d: Path) -> None:
         pd.concat(frames, ignore_index=True), dataset, bundle, oof=oof,
         progress=lambda msg: _update(d, stages={"process": {"detail": msg[:200]}}))
     validation = validation_for(dataset, adapter.display_name, candidates_from_bundle(bundle))
+    split = []
+    if partial:
+        wrap = root.relative_to(data).as_posix()
+        split = [{"path": p.removeprefix(f"{wrap}/") if wrap != "." else p, "reason": reason}
+                 for p, reason in partial["incomplete"].items()]
     summary = {
         "dataset_id": dataset, "display_name": adapter.display_name,
-        "files_found": len(all_files), "files_processed": len(processed),
-        "files_skipped": len(skipped), "files_failed": len(failed_files),
+        "files_found": len(all_files) + len(split), "files_processed": len(processed),
+        "files_skipped": len(skipped) + len(split), "files_failed": len(failed_files),
         "bearings_found": len(runs), "bearings_processed": len(frames),
         "bearings_failed": len(failed_runs),
-        "skipped": [{"path": p, "reason": _skip_reason(p, adapter.display_name)}
-                    for p in skipped[:200]],
+        "skipped": split + [{"path": p, "reason": _skip_reason(p, adapter.display_name)}
+                            for p in skipped[:200]],
         "failed": failed_runs,
     }
+    if partial:
+        summary["partial_set"] = {"uploaded": [f["name"] for f in plan["files"]],
+                                  "missing": plan["missing"], "incomplete_bearings": cut_runs}
     result = {"outcome": "analyzed", "dataset_id": dataset,
               "profile": _sanitize(profile, root), "decisions": _sanitize(decisions, root),
               "trajectories": trajectories, "validation": validation, "summary": summary}
     (d / "result.json").write_text(json.dumps(_json_clean(result)))
-    partial = bool(failed_runs)
-    _update(d, state="partial" if partial else "completed", summary=summary, validation=validation,
-            message=(f"Partially completed: {len(failed_runs)} of {len(runs)} bearing run(s) "
-                     "could not be processed; the results cover the others only." if partial else
-                     f"Completed: all {len(runs)} bearing run(s) processed."),
-            stages={"process": {"status": "partial" if partial else "done",
+    if failed_runs:
+        message = (f"Partially completed: {len(failed_runs)} of {len(runs)} bearing run(s) could "
+                   "not be processed; the results cover the others only.")
+    else:
+        message = f"Completed: all {len(runs)} bearing run(s) processed."
+    if partial:
+        message += (f" Partial dataset: {len(plan['files'])} of {plan['expected_parts']} archive "
+                    "parts uploaded, so this covers only the recordings stored in them; "
+                    f"{len(cut_runs)} bearing run(s) are incomplete (no end-of-life label). "
+                    "Upload every part to analyse the whole dataset.")
+    _update(d, state="partial" if failed_runs or partial else "completed", summary=summary,
+            validation=validation, message=message,
+            stages={"process": {"status": "partial" if failed_runs else "done",
                                 "done": len(processed), "detail": ""}})
     _delete_raw(d)
 

@@ -75,8 +75,9 @@ through a background job instead of a single request (`src/bearing_pdm/dataset_j
 decision D31). This is the one place the service *does* retain raw uploads, and only
 for the life of the job:
 
-- `POST /jobs/plan` checks a selection by file name and size only (missing,
-  duplicate or unsupported parts are refused here, before any byte is sent).
+- `POST /jobs/plan` checks a selection by file name and size only (duplicate or
+  unsupported parts are refused here, before any byte is sent). An incomplete RAR set
+  is planned as a partial analysis naming the missing parts (decision D31).
 - `POST /jobs` creates the job; the client then sends each file in chunks of at most
   32 MB to `POST /jobs/{id}/files/{index}?offset=`. A wrong offset returns 409 with
   the server's offset so the client resumes from there; `GET /jobs/{id}/files/{index}`

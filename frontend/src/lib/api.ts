@@ -716,6 +716,8 @@ export interface JobPlan {
   first: string | null;
   total_bytes: number;
   notes: string[];
+  /** Parts of a multi-part RAR set that were not selected: only the selected parts are analysed. */
+  missing?: string[];
   files?: Array<{ name: string; size: number }>;
   file_count?: number;
 }
@@ -739,6 +741,11 @@ export interface JobSummary {
   bearings_failed: number;
   skipped: Array<{ path: string; reason: string }>;
   failed: Array<{ bearing: string; files: number; reason: string }>;
+  partial_set?: {
+    uploaded: string[];
+    missing: string[];
+    incomplete_bearings: Array<{ bearing: string; reason: string }>;
+  };
 }
 
 export interface JobValidation {

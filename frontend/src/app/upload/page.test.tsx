@@ -281,17 +281,14 @@ describe("UploadPage", () => {
     expect(uploadFileToBlob).not.toHaveBeenCalled();
   });
 
-  it("only part05 of a split archive names the missing parts instead of a generic warning", async () => {
-    vi.mocked(planDatasetJob).mockRejectedValue(
-      new ApiError(
-        400,
-        "incomplete multi-part archive: missing XJTU-SY_Bearing_Datasets.part01.rar, " +
-          "XJTU-SY_Bearing_Datasets.part02.rar, XJTU-SY_Bearing_Datasets.part03.rar, " +
-          "XJTU-SY_Bearing_Datasets.part04.rar, XJTU-SY_Bearing_Datasets.part06.rar.",
-        false,
-        "MISSING_PARTS"
-      )
-    );
+  it("only part05 of a split archive is offered as a partial analysis naming the missing parts", async () => {
+    vi.mocked(planDatasetJob).mockResolvedValue({
+      kind: "multipart_rar",
+      first: "XJTU-SY_Bearing_Datasets.part05.rar",
+      total_bytes: 14,
+      missing: ["XJTU-SY_Bearing_Datasets.part01.rar", "XJTU-SY_Bearing_Datasets.part06.rar"],
+      notes: ["Only 1 of 6 parts selected (missing: XJTU-SY_Bearing_Datasets.part01.rar, XJTU-SY_Bearing_Datasets.part06.rar)."],
+    });
     render(<UploadPage />);
 
     await userEvent.upload(
@@ -299,8 +296,9 @@ describe("UploadPage", () => {
       new File(["fake rar bytes"], "XJTU-SY_Bearing_Datasets.part05.rar")
     );
 
-    await waitFor(() => expect(screen.getByText(/can.t be analyzed as it is/)).toBeInTheDocument());
-    expect(screen.getByText(/missing XJTU-SY_Bearing_Datasets\.part01\.rar/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Upload and analyze these parts" })).toBeInTheDocument());
+    expect(screen.getByText(/missing: XJTU-SY_Bearing_Datasets\.part01\.rar/)).toBeInTheDocument();
+    expect(screen.queryByText(/can.t be analyzed as it is/)).not.toBeInTheDocument();
     expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
   });
 

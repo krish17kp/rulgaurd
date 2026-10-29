@@ -68,13 +68,13 @@ def _submit(paths: list[Path], names: list[str] | None = None, chunk=200_000) ->
     ([2, 3, 4, 5, 6], "XJTU-SY_Bearing_Datasets.part01.rar"),
     ([1, 2, 3, 4, 5], "XJTU-SY_Bearing_Datasets.part06.rar"),
 ])
-def test_incomplete_xjtu_set_is_refused_with_the_missing_parts_named(selected, missing):
+def test_incomplete_xjtu_rar_set_plans_a_partial_analysis_naming_the_missing_parts(selected, missing):
     files = [{"name": f"XJTU-SY_Bearing_Datasets.part{n:02d}.rar", "size": 10} for n in selected]
-    with pytest.raises(dj.JobError) as e:
-        dj.plan_upload(files)
-    assert e.value.code == "MISSING_PARTS"
-    assert f"missing {missing}." in str(e.value)
-    assert "6 parts" in str(e.value)
+    plan = dj.plan_upload(files)
+    assert ", ".join(plan["missing"]) == missing
+    assert plan["expected_parts"] == 6
+    assert f"Only {len(selected)} of 6 parts selected (missing: {missing})" in plan["notes"][0]
+    assert [dj._part_number(f["name"]) for f in plan["files"]] == sorted(selected)
 
 
 def test_complete_unknown_set_plans_in_part_order_with_header_check_note():
@@ -86,8 +86,18 @@ def test_complete_unknown_set_plans_in_part_order_with_header_check_note():
 
 
 def test_unknown_set_missing_middle_part():
-    with pytest.raises(dj.JobError, match=r"missing set\.part03\.rar"):
-        dj.plan_upload([{"name": f"set.part{n:02d}.rar", "size": 9} for n in (1, 2, 4)])
+    plan = dj.plan_upload([{"name": f"set.part{n:02d}.rar", "size": 9} for n in (1, 2, 4)])
+    assert plan["missing"] == ["set.part03.rar"]
+    assert "of at least 4 parts" in plan["notes"][0]
+    assert dj._part_groups(plan) == [(1, 2), (4, 4)]
+
+
+def test_split_7z_with_a_gap_is_still_refused():
+    # .7z.NNN is a byte split: no part is readable without every part before it.
+    with pytest.raises(dj.JobError) as e:
+        dj.plan_upload([{"name": f"set.7z.{n:03d}", "size": 9} for n in (1, 3)])
+    assert e.value.code == "MISSING_PARTS"
+    assert "set.7z.002" in str(e.value)
 
 
 @pytest.mark.parametrize("files, match", [
@@ -363,16 +373,16 @@ def test_api_round_trip_with_detached_worker_and_resume(tmp_path, monkeypatch):
     assert client.get("/jobs/not-a-real-job-id-xx").status_code == 404
 
 
-def test_api_refuses_part05_alone():
+def test_api_plans_part05_alone_as_a_partial_analysis():
     from fastapi.testclient import TestClient
 
     from bearing_pdm.api import app
 
-    r = TestClient(app).post("/jobs", json={"files": [
+    r = TestClient(app).post("/jobs/plan", json={"files": [
         {"name": "XJTU-SY_Bearing_Datasets.part05.rar", "size": 744488960}]})
-    assert r.status_code == 400
-    assert r.json()["code"] == "MISSING_PARTS"
-    assert "part01" in r.json()["message"]
+    assert r.status_code == 200, r.text
+    assert "XJTU-SY_Bearing_Datasets.part01.rar" in r.json()["missing"]
+    assert "Only 1 of 6 parts" in r.json()["notes"][0]
 
 
 # --------------------------------------------------------------------------- real XJTU-SY parts
@@ -413,6 +423,38 @@ def test_real_xjtu_missing_last_part_and_swapped_parts(tmp_path, monkeypatch):
     with pytest.raises(dj.JobError) as e:
         dj._check_archive(d, plan)
     assert e.value.code == "MISMATCHED_PARTS"
+
+
+@needs_real
+def test_real_xjtu_single_middle_part_listing(tmp_path, monkeypatch):
+    """part04 alone: only the two recordings split into part03/part05 are incomplete,
+    and only the two folders at its edges are cut (fast: lists, does not extract)."""
+    monkeypatch.setattr(dj, "JOBS_ROOT", tmp_path)
+    p = REAL_XJTU / "XJTU-SY_Bearing_Datasets.part04.rar"
+    d = _job_with_links(tmp_path, {p.name: p})
+    plan = dj.plan_upload([{"name": p.name, "size": p.stat().st_size}])
+    assert dj._check_archive(d, plan) > 1_800_000_000
+    info = json.loads((d / "partial.json").read_text())
+    root = "XJTU-SY_Bearing_Datasets/40Hz10kN"
+    assert info["incomplete"] == {
+        f"{root}/Bearing3_1/966.csv": "split across XJTU-SY_Bearing_Datasets.part03.rar, which was "
+                                      "not uploaded",
+        f"{root}/Bearing3_2/2317.csv": "split across XJTU-SY_Bearing_Datasets.part05.rar, which "
+                                       "was not uploaded"}
+    assert set(info["cut"]) == {f"{root}/Bearing3_1", f"{root}/Bearing3_2"}
+
+
+def test_xjtu_elapsed_time_is_the_file_minute(tmp_path):
+    """Complete runs are unchanged (file N -> (N-1) min); a partial run keeps real time."""
+    from bearing_pdm.adapters import get_adapter
+
+    adapter = get_adapter("xjtu")
+    base = make_xjtu_tree(tmp_path, bearings=("Bearing1_1",), n_files=5)
+    run = adapter.discover(base)[0]
+    assert [r.elapsed_s for r in adapter.recordings(run)] == [0.0, 60.0, 120.0, 180.0, 240.0]
+    for n in (1, 2):
+        (base / "35Hz12kN" / "Bearing1_1" / f"{n}.csv").unlink()
+    assert [r.elapsed_s for r in adapter.recordings(run)] == [120.0, 180.0, 240.0]
 
 
 def test_api_plan_is_a_dry_run(tmp_path, monkeypatch):

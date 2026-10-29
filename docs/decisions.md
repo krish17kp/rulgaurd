@@ -644,3 +644,15 @@ extraction ~1 min to 12,220,812,451 bytes / 9,217 files, processing 229 s from s
 RUL_SUPPRESSED, validation "not_validated". API container peak 609 MiB of 2.4 GiB; afterwards
 only 3.2 MB of job metadata/result remained (raw upload and extraction deleted). The part05-only
 plan was refused live with MISSING_PARTS naming part01-04 and part06.
+
+Follow-up (same day): selecting one part (part04 alone) still ended at "This selection can't be
+analyzed". A non-solid RAR5 volume is readable on its own, so an incomplete RAR set is now a
+partial job, not an error: each uploaded volume is listed with `unrar lt` (which marks members
+continued from / into a neighbouring volume), each run of consecutive parts is extracted from
+its first part, members split across a missing part are deleted and listed as skipped, and the
+bearings at the edges of each run (members are stored folder by folder) are reported as
+incomplete and censored (`run_to_failure=False`, so no end-of-life label is invented). XJTU
+`elapsed_s` now comes from the file number (file N = minute N), identical for complete runs and
+true time for partial ones. Split `.7z.NNN` sets with a gap are still refused (byte split).
+Real part04 alone, run through the worker locally: 1,503 members, 1,501 recordings processed,
+2 skipped (split into part03/part05), Bearing3_1 and Bearing3_2 incomplete, job state "partial".

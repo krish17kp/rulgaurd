@@ -397,8 +397,8 @@ export default function UploadPage() {
               resumable pieces and processed on the server.
             </li>
             <li>
-              A split archive needs <span className="font-medium">every part, including part01</span>; one part alone
-              cannot be extracted.
+              For the whole dataset, select <span className="font-medium">every part</span> of a split RAR archive. A
+              single part (or a few) is analysed too, but only for the recordings stored in it.
             </li>
           </ul>
           <button

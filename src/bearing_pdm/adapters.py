@@ -290,9 +290,11 @@ class XjtuAdapter(DatasetAdapter):
     def recordings(self, run):
         for seq, path in enumerate(xjtu.list_xjtu_files(run.source)):
             df = xjtu.read_xjtu_file(path)
+            # File N is minute N: identical to seq * 60 for a complete run (1..N),
+            # and still the true time when a partial upload holds only some files.
             yield Recording(
                 run=run, recording_id=path.name, sequence_index=seq,
-                elapsed_s=seq * xjtu.XJTU_RECORDING_INTERVAL_S, source_path=path,
+                elapsed_s=(int(path.stem) - 1) * xjtu.XJTU_RECORDING_INTERVAL_S, source_path=path,
                 signals={
                     "vibration_x": df["Horizontal_vibration_signals"].to_numpy(),
                     "vibration_y": df["Vertical_vibration_signals"].to_numpy(),

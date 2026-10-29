@@ -400,18 +400,20 @@ function PlanSummary({
   onCancel: () => void;
 }) {
   const archive = plan.kind !== "files";
+  const partial = (plan.missing?.length ?? 0) > 0;
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-surface-border bg-surface p-5 text-sm">
       <h2 className="text-base font-semibold">What will happen</h2>
       <p>
         {count.toLocaleString()} file{count === 1 ? "" : "s"}, {formatBytes(plan.total_bytes)}, recognised as a{" "}
         <span className="font-medium">{KIND_LABEL[plan.kind]}</span>
-        {plan.kind.startsWith("multipart") && plan.first && (
+        {plan.kind.startsWith("multipart") && plan.first && !partial && (
           <>
             {" "}
             with every part present; extraction starts from <span className="font-mono">{plan.first}</span>
           </>
         )}
+        {partial && <> with only some of its parts: the recordings stored in the selected part(s) are analysed</>}
         .
       </p>
       <ol className="list-inside list-decimal text-foreground-muted">
@@ -432,7 +434,7 @@ function PlanSummary({
       ))}
       <div className="flex gap-2">
         <button type="button" onClick={onStart} className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white shadow-sm hover:bg-accent/90">
-          Upload and analyze
+          {partial ? "Upload and analyze these parts" : "Upload and analyze"}
         </button>
         <button type="button" onClick={onCancel} className="rounded-lg border border-surface-border px-3 py-2 text-xs font-medium">
           Remove
@@ -547,6 +549,28 @@ function SummaryCard({ job }: { job: DatasetJob }) {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+      {s.partial_set && (
+        <div className="rounded-lg border border-caution/40 bg-caution/10 p-3 text-xs text-caution">
+          <p className="font-medium">
+            Partial dataset: {s.partial_set.uploaded.length} of{" "}
+            {s.partial_set.uploaded.length + s.partial_set.missing.length} archive parts uploaded.
+          </p>
+          <p className="mt-1">
+            Not included (not uploaded): <span className="font-mono">{s.partial_set.missing.join(", ")}</span>. Upload every
+            part together to analyse the whole dataset.
+          </p>
+          {s.partial_set.incomplete_bearings.length > 0 && (
+            <ul className="mt-1 list-inside list-disc">
+              {s.partial_set.incomplete_bearings.map((b) => (
+                <li key={b.bearing}>
+                  <span className="font-mono">{b.bearing}</span> is incomplete: {b.reason}. Its health indicator uses
+                  the earliest uploaded recordings as the reference, and it has no end-of-life label.
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {s.skipped.length > 0 && (
