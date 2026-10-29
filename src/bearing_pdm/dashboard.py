@@ -268,7 +268,11 @@ def _render_raw_explorer() -> None:
             "or datasets/college",
         )
         if root_str:
+            from bearing_pdm.dashboard_cross import allowed_roots, is_within
             root = Path(root_str)
+            if not is_within(root, allowed_roots()):
+                st.error("Only folders inside this project or its known dataset roots can be browsed.")
+                return
             if not root.is_dir():
                 if root.suffix.lower() == ".rar" or (root.exists() and root.is_file()):
                     st.error(f"Not a directory: {root}. This is the FEMTO/college-specific "

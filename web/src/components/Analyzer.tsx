@@ -28,7 +28,7 @@ function precheck(f: File): Result | null {
     return { ok: false, chip: `archive part ${part[1]}`, lines: [
       `This is one piece of a multi-part RAR archive (${mb(f.size)}). A single part can't be opened on its own, so there is nothing to analyze yet.`,
       /xjtu/i.test(f.name)
-        ? 'The full XJTU-SY run-to-failure analysis, including which bearings get an RUL estimate and why the rest are withheld, is already in the research lab.'
+        ? 'The full XJTU-SY run-to-failure analysis, including which bearings get an RUL estimate and why the rest are withheld, was run offline and lives in the research lab. Single recordings can be analyzed right here or in the RULGuard app.'
         : 'Whole archives are analyzed in the research lab, where all parts are read together.',
     ] }
   if (/\.(rar|7z)$/i.test(f.name))
@@ -231,8 +231,8 @@ export function Analyzer() {
                 )}
                 {phase.result.lines.map((l) => <p key={l} className="text-paper/85">{l}</p>)}
                 <div className="flex flex-wrap gap-3">
-                  <a href={LAB_URL} className="rounded-full border-2 border-paper bg-mint px-5 py-2.5 font-display text-sm font-bold text-ink">Run the full analysis</a>
-                  <a href={`${APP_URL}/upload`} className="rounded-full border-2 border-paper px-5 py-2.5 font-display text-sm font-bold">Open the analyzer app</a>
+                  <a href={`${APP_URL}/upload`} className="rounded-full border-2 border-paper bg-mint px-5 py-2.5 font-display text-sm font-bold text-ink">Run the full analysis</a>
+                  <a href={LAB_URL} className="rounded-full border-2 border-paper px-5 py-2.5 font-display text-sm font-bold">Open the research lab</a>
                 </div>
               </motion.div>
             )}

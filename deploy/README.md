@@ -4,7 +4,7 @@
 |---|---|
 | `DOMAIN` | landing site (`web/dist`) + `/api` |
 | `app.DOMAIN` | Next.js analyzer (`frontend/`) + `/api` |
-| `lab.DOMAIN` | Streamlit research dashboard (basic auth) |
+| `lab.DOMAIN` | Streamlit research dashboard (public; `RULGUARD_LAB_READONLY=1` turns off server-path analysis) |
 
 Containers (`compose.yaml`) bind to 127.0.0.1 only; host nginx terminates TLS (certbot).
 
@@ -24,7 +24,6 @@ then rsync `web/dist/` to `/opt/rulguard/site/`.
 ## Operate
 - Set the Groq key without echoing it:
   `ssh -t <host> 'read -rsp "Groq key: " k; sed -i "s|^GROQ_API_KEY=.*|GROQ_API_KEY=$k|" /opt/rulguard/app/deploy/.env; cd /opt/rulguard/app/deploy && docker compose up -d api dashboard'`
-- Lab login: `ssh <host> cat /root/rulguard-lab-credentials.txt`
 - Logs: `docker compose logs -f api` (rotated, 5x10MB per service)
 - Backups: `backup.sh` nightly 03:30 via `/etc/cron.d/rulguard-backup` -> `/opt/rulguard/backups` (14 days)
 - Restart policy `unless-stopped` + docker/nginx enabled at boot.

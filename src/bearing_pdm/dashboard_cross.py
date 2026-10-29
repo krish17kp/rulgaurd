@@ -16,6 +16,7 @@ source file is unreachable it says so instead of drawing anything.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -460,6 +461,13 @@ def _analyze_archive_box() -> None:
             "discovered automatically) or a folder. Extraction of a large archive is cached by "
             "archive identity, so re-analyzing the same archive reuses it instead of re-extracting."
         )
+        if os.environ.get("RULGUARD_LAB_READONLY") == "1":
+            # Public deployment: this writes the shared routing_<id>.json every visitor sees.
+            st.info("Server-side archive analysis is turned off on the public site, because a run "
+                    "replaces the shared results every visitor sees. The results below were produced "
+                    "by this exact workflow; to analyze your own file, use the Analyze page of the "
+                    "RULGuard app.")
+            return
         path_str = st.text_input("Archive file or folder path", key="ua_archive_path")
         dataset_hint = st.text_input(
             "Dataset id (optional - auto-detected from the data when left blank)",
@@ -468,6 +476,9 @@ def _analyze_archive_box() -> None:
         if not st.button("Analyze dataset", key="ua_archive_go") or not path_str:
             return
         path = Path(path_str).expanduser()
+        if not is_within(path, allowed_roots()):
+            st.error("Only folders inside this project or its known dataset roots can be analyzed.")
+            return
         if not path.exists():
             st.error(f"No such file or folder: {path}")
             return
