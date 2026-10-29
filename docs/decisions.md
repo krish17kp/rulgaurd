@@ -636,3 +636,11 @@ are shown as inspection only. Nothing is refit or retrained by a job.
 the CLI and the worker share it. API `mem_limit` raised 1800m -> 2400m for the worker.
 Synthetic fixtures (`tests/_xjtu_fixture.py`) are labelled as not real XJTU-SY data; the
 real-download header checks in `tests/test_dataset_jobs.py` run only where the parts exist.
+
+Live verification on forevue.tech (2026-10-29, real XJTU-SY download, all 6 parts, 4,444,600,440
+bytes): upload 2,210 s (~2 MB/s from this connection, 16 MB chunks), header check 6/6 volumes,
+extraction ~1 min to 12,220,812,451 bytes / 9,217 files, processing 229 s from start to finish.
+9,216 files processed, 1 skipped (the intro PDF, with reason), 0 failed; 15/15 bearings, all
+RUL_SUPPRESSED, validation "not_validated". API container peak 609 MiB of 2.4 GiB; afterwards
+only 3.2 MB of job metadata/result remained (raw upload and extraction deleted). The part05-only
+plan was refused live with MISSING_PARTS naming part01-04 and part06.
