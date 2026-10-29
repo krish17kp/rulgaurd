@@ -153,7 +153,7 @@ def analyze_femto_bearing_zip(
     manifest = build_manifest_from_zip(zip_path, sha256=source_sha256)
 
     if manifest.compatibility == "INVALID_ARCHIVE":
-        raise BearingArchiveError(f"invalid archive: {manifest.warnings}")
+        raise BearingArchiveError("invalid archive: " + "; ".join(manifest.warnings))
     if manifest.dataset_type != "femto_bearing":
         raise BearingArchiveError(
             f"not a FEMTO bearing archive (detected dataset_type={manifest.dataset_type!r}); "

@@ -73,6 +73,13 @@ async function analyzeUpload(f: File): Promise<Result> {
       `Predicted life left: ${hours(j.rul_seconds)}h (${j.rul_seconds} s), model ${j.model_name}.`,
       ...(j.applicability_reasons ?? []).slice(0, 2),
     ] }
+  // The API's adapter guidance is written for developers; visitors get the fix in plain words.
+  if (j.compatibility === 'ADAPTER_REQUIRED')
+    return { ok: false, chip: 'needs more info', lines: [
+      (j.reasons ?? []).some((r: string) => r.startsWith('no header row'))
+        ? 'This CSV has no header row, so its columns cannot be identified. Add a header such as time,vibration_x,vibration_y and drop it again.'
+        : 'The vibration columns were found, but the sampling rate and units are unknown, and RULGuard never guesses them. Add a time column in seconds, or declare the rate and units on the upload page of the RULGuard app.',
+    ] }
   return { ok: true, chip: j.compatibility?.replaceAll('_', ' ').toLowerCase(), lines: [j.required_action?.message, ...(j.reasons ?? []).slice(0, 2)].filter(Boolean) }
 }
 
