@@ -3,6 +3,9 @@ import { AnimatePresence, motion } from 'motion/react'
 import { Check, FileUp, LoaderCircle, Play, TriangleAlert } from 'lucide-react'
 import { STAGE, data, hours } from '../data'
 import { Bearing, Wave } from './Visuals'
+import { BorderBeam } from './ui/border-beam'
+import confetti from 'canvas-confetti'
+import { prefersReducedMotion } from '../data'
 
 const RUNS = Object.keys(data.bearings)
 const STEPS = ['Reading the recording', 'Extracting 30+ vibration features', 'Checking the model applies', 'Scoring health', 'Estimating life left']
@@ -25,7 +28,11 @@ export function Analyzer() {
     timers.current = Array.from({ length: last + 1 }, (_, s) =>
       window.setTimeout(() => {
         if (s < last) setPhase({ kind: 'running', step: s, file })
-        else setPhase(file ? { kind: 'offline', file } : { kind: 'done' })
+        else {
+          setPhase(file ? { kind: 'offline', file } : { kind: 'done' })
+          if (!file && !prefersReducedMotion())
+            confetti({ particleCount: 90, spread: 75, origin: { x: 0.75, y: 0.6 }, colors: ['#3d2bff', '#ff4fd8', '#38f2b1', '#ffe14d'] })
+        }
       }, s * 420),
     )
   }
@@ -85,6 +92,7 @@ export function Analyzer() {
         </div>
 
         <div className="relative min-h-[26rem] overflow-hidden rounded-[2rem] border-[3px] border-ink bg-ink p-5 text-paper shadow-[var(--shadow-hard)] sm:p-7" aria-live="polite">
+          {phase.kind !== 'idle' && <BorderBeam size={160} duration={5} colorFrom="#38f2b1" colorTo="#ffe14d" borderWidth={3} />}
           <AnimatePresence mode="wait">
             {phase.kind === 'idle' && (
               <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex h-full flex-col justify-between gap-6">

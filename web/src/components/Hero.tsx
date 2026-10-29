@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react'
 import { animate, motion } from 'motion/react'
 import { Sparkles } from 'lucide-react'
 import { Bearing, KineticTitle, Sticker, Wave } from './Visuals'
+import Magnet from './Magnet'
+import ShinyText from './ShinyText'
+import { BorderBeam } from './ui/border-beam'
+import { InteractiveGridPattern } from './ui/interactive-grid-pattern'
 import { STAGE, data, hours, prefersReducedMotion } from '../data'
 
 const RUN = data.bearings.Bearing3_2
@@ -21,10 +25,17 @@ export function Hero() {
   const wear = i / LAST
 
   return (
-    <section id="top" className="relative mx-auto grid max-w-6xl gap-10 px-4 pt-32 pb-16 sm:px-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-center lg:pt-36">
+    <section id="top" className="relative isolate mx-auto grid max-w-6xl gap-10 px-4 pt-32 pb-16 sm:px-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-center lg:pt-36">
+      <InteractiveGridPattern
+        width={56}
+        height={56}
+        squares={[40, 16]}
+        className="-z-10 !border-0 [mask-image:radial-gradient(ellipse_at_30%_40%,black,transparent_70%)] opacity-60"
+        squaresClassName="stroke-ink/10 fill-transparent hover:fill-mint transition-colors duration-300"
+      />
       <div className="relative z-10">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="mb-6 flex flex-wrap gap-2">
-          <Sticker bg="var(--color-butter)"><Sparkles size={14} /> Capstone research project</Sticker>
+          <Sticker bg="var(--color-butter)"><Sparkles size={14} /> <ShinyText text="Capstone research project" color="#14123a" shineColor="#ffffff" speed={2.5} /></Sticker>
           <Sticker bg="var(--color-paper)">Built over 6 months</Sticker>
         </motion.div>
 
@@ -44,12 +55,16 @@ export function Hero() {
         </motion.p>
 
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.05 }} className="mt-8 flex flex-wrap gap-3">
+          <Magnet padding={50} magnetStrength={2.5}>
           <a href="#try" className="rounded-full border-2 border-ink bg-cobalt px-6 py-3 font-display text-sm font-bold text-paper shadow-[var(--shadow-hard)] transition hover:-translate-y-0.5 hover:shadow-[7px_7px_0_0_var(--color-ink)] active:translate-y-0.5 active:shadow-none">
-            Try it on a real bearing
-          </a>
+              Try it on a real bearing
+            </a>
+          </Magnet>
+          <Magnet padding={50} magnetStrength={2.5}>
           <a href="#results" className="rounded-full border-2 border-ink bg-paper px-6 py-3 font-display text-sm font-bold shadow-[var(--shadow-hard)] transition hover:-translate-y-0.5 hover:bg-mint active:translate-y-0.5 active:shadow-none">
-            See the results
-          </a>
+              See the results
+            </a>
+          </Magnet>
         </motion.div>
       </div>
 
@@ -85,6 +100,7 @@ export function Hero() {
           <Wave wear={wear} color={stage.hex} className="h-full w-full" />
         </div>
 
+        <BorderBeam size={120} duration={7} colorFrom="#ff4fd8" colorTo="#3d2bff" borderWidth={3} />
         <label htmlFor="age" className="mt-5 block font-display text-sm font-bold">
           Drag to age the bearing
         </label>

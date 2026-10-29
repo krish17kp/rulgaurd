@@ -7,6 +7,10 @@ import { Story } from './components/Story'
 import { Results } from './components/Results'
 import { Analyzer } from './components/Analyzer'
 import { Sticker } from './components/Visuals'
+import ClickSpark from './components/ClickSpark'
+import Magnet from './components/Magnet'
+import { ScrollVelocity } from './components/ScrollVelocity'
+import SpotlightCard from './components/SpotlightCard'
 import { prefersReducedMotion } from './data'
 
 const LINKS = [
@@ -54,9 +58,14 @@ function Nav() {
             </a>
           ))}
         </div>
-        <a href="#try" className="ml-auto hidden rounded-full border-2 border-ink bg-magenta px-4 py-2 font-display text-xs font-bold transition hover:-rotate-2 sm:inline-block md:ml-0">
-          Analyze a bearing
-        </a>
+        {/* Magnet sets inline display, so the responsive hide lives on this wrapper */}
+        <span className="ml-auto hidden sm:block md:ml-0">
+        <Magnet padding={40} magnetStrength={3}>
+          <a href="#try" className="inline-block rounded-full border-2 border-ink bg-magenta px-4 py-2 font-display text-xs font-bold">
+            Analyze a bearing
+          </a>
+        </Magnet>
+        </span>
         <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label={open ? 'Close menu' : 'Open menu'} className="ml-auto rounded-full border-2 border-ink p-2 sm:ml-0 md:hidden">
           {open ? <X size={18} /> : <Menu size={18} />}
         </button>
@@ -83,17 +92,20 @@ function Nav() {
 }
 
 function Ticker() {
-  const row = [...TICKER, ...TICKER]
+  const sep = <span className="px-6 text-mint">✺</span>
   return (
-    <div className="overflow-hidden py-4" aria-hidden>
+    <div className="overflow-hidden py-6" aria-hidden>
       <div className="-mx-4 -rotate-2 border-y-[3px] border-ink bg-cobalt py-3 text-paper">
-      <div className="marquee gap-8 font-display text-lg font-bold whitespace-nowrap">
-        {row.map((t, i) => (
-          <span key={i} className="flex items-center gap-8">
-            {t} <span className="text-mint">✺</span>
-          </span>
-        ))}
-      </div>
+        <ScrollVelocity
+          texts={[TICKER.slice(0, 5).join('  ✺  '), TICKER.slice(5).join('  ✺  ')]}
+          velocity={60}
+          separator={sep}
+          className="font-display font-bold"
+          fontSize="1.25rem"
+          skewWithVelocity={8}
+          outlineAlternate
+          pauseOnHover
+        />
       </div>
     </div>
   )
@@ -142,13 +154,15 @@ function Datasets() {
               whileHover={{ rotate: i % 2 ? 2 : -2, scale: 1.03 }}
               viewport={{ once: true, margin: '-60px' }}
               transition={{ type: 'spring', stiffness: 160, damping: 15, delay: (i % 3) * 0.07 }}
-              className="rounded-[1.75rem] border-[3px] border-paper/80 bg-paper/5 p-6"
+              className="h-full"
             >
+              <SpotlightCard theme="dark" spotlightColor={bg} className="h-full !rounded-[1.75rem] border-[3px] border-paper/70 !p-6">
               <span className="inline-block rounded-full border-2 border-ink px-3 py-1 font-display text-xs font-bold text-ink" style={{ background: bg }}>
                 {verdict}
               </span>
               <h3 className="mt-4 font-display text-xl font-extrabold">{name}</h3>
               <p className="mt-2 text-sm leading-relaxed text-paper/75">{body}</p>
+              </SpotlightCard>
             </motion.article>
           ))}
         </div>
@@ -224,7 +238,7 @@ export default function App() {
   }, [])
 
   return (
-    <>
+    <ClickSpark sparkColor={['#3d2bff', '#ff4fd8', '#38f2b1', '#ffe14d']} sparkCount={10} sparkSize={12} sparkRadius={28} shape="star">
       <Nav />
       <main>
         <Hero />
@@ -237,6 +251,6 @@ export default function App() {
         <Honest />
       </main>
       <Footer />
-    </>
+    </ClickSpark>
   )
 }
