@@ -1,6 +1,10 @@
 """Fetch every model in artifacts/models/manifest.json into a directory, verifying sha256.
 Usage: python3 fetch_models.py <manifest.json> <out_dir>   (stdlib only; re-runs skip verified files)"""
-import hashlib, json, shutil, sys, urllib.request
+import hashlib
+import json
+import shutil
+import sys
+import urllib.request
 from pathlib import Path
 
 manifest, out = Path(sys.argv[1]), Path(sys.argv[2])
