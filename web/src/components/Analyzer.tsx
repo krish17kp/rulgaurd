@@ -9,12 +9,72 @@ import { prefersReducedMotion } from '../data'
 
 const RUNS = Object.keys(data.bearings)
 const STEPS = ['Reading the recording', 'Extracting 30+ vibration features', 'Checking the model applies', 'Scoring health', 'Estimating life left']
-type Inspect = { compatibility?: string; reasons?: string[]; required_action?: { message?: string }; message?: string; detail?: unknown }
-type Phase = { kind: 'idle' } | { kind: 'running'; step: number; file?: string } | { kind: 'done' } | { kind: 'inspected'; file: string; ok: boolean; data: Inspect | null }
+type Result = { ok: boolean; chip?: string; lines: string[] }
+type Phase = { kind: 'idle' } | { kind: 'running'; step: number; file?: string } | { kind: 'done' } | { kind: 'inspected'; file: string; result: Result }
 
 // Full tools live on their own hosts in production (deploy/README); fall back to same-origin paths in dev.
 const APP_URL = import.meta.env.VITE_APP_URL ?? 'http://localhost:3000'
 const LAB_URL = import.meta.env.VITE_LAB_URL ?? 'http://localhost:8501'
+
+// Matches the API's MAX_UPLOAD_BYTES and nginx client_max_body_size; anything bigger never reaches the server.
+const MAX_UPLOAD_BYTES = 64 * 1024 * 1024
+const mb = (n: number) => `${(n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`
+type Json = Record<string, any>
+
+/** Files a browser upload can never analyze: answered locally, with what to do instead. */
+function precheck(f: File): Result | null {
+  const part = f.name.match(/\.part0*(\d+)\.rar$/i)
+  if (part)
+    return { ok: false, chip: `archive part ${part[1]}`, lines: [
+      `This is one piece of a multi-part RAR archive (${mb(f.size)}). A single part can't be opened on its own, so there is nothing to analyze yet.`,
+      /xjtu/i.test(f.name)
+        ? 'The full XJTU-SY run-to-failure analysis, including which bearings get an RUL estimate and why the rest are withheld, is already in the research lab.'
+        : 'Whole archives are analyzed in the research lab, where all parts are read together.',
+    ] }
+  if (/\.(rar|7z)$/i.test(f.name))
+    return { ok: false, chip: 'archive', lines: [`RAR and 7z archives (${mb(f.size)}) are extracted and analyzed in the research lab, not in this quick check.`] }
+  if (f.size > MAX_UPLOAD_BYTES)
+    return { ok: false, chip: 'too large', lines: [`${mb(f.size)} is over the ${mb(MAX_UPLOAD_BYTES)} quick-check limit. Drop a single recording here, or analyze the full dataset in the research lab.`] }
+  return null
+}
+
+const errorText = (status: number, j: Json | null) =>
+  status === 413 ? `The file is over the ${mb(MAX_UPLOAD_BYTES)} upload limit.`
+    : (j?.message ?? (typeof j?.detail === 'string' ? j.detail : `The analysis server returned an error (${status}).`))
+
+/** Each file type goes to the endpoint built for it; the card shows the real response. */
+async function analyzeUpload(f: File): Promise<Result> {
+  const name = f.name.toLowerCase()
+  const path = name.endsWith('.zip') ? '/api/analyze/femto-bearing-zip'
+    : name.endsWith('.mat') ? '/api/analyze/mat'
+      : /^acc_\d+\.csv$/.test(name) ? '/api/predict/rul/femto-acquisition'
+        : '/api/dataset/inspect'
+  const form = new FormData()
+  form.append('file', f)
+  const res = await fetch(path, { method: 'POST', body: form })
+  const j: Json | null = await res.json().catch(() => null)
+  if (!res.ok || !j) return { ok: false, lines: [errorText(res.status, j)] }
+  if (path.endsWith('femto-bearing-zip')) {
+    const n = j.stage.length - 1
+    const counts = (['HEALTHY', 'DEGRADING', 'CRITICAL'] as const).map((k) => `${j.stage.filter((x: string) => x === k).length} ${k.toLowerCase()}`)
+    return { ok: true, chip: j.bearing_run_id, lines: [
+      `${j.acquisition_count} acquisitions at ${j.sample_rate_hz} Hz. Final stage: ${j.stage[n]}, health indicator ${j.reference_hi[n].toFixed(2)}.`,
+      `Stages across the run: ${counts.join(', ')}.`,
+      j.held_out_mae_seconds != null ? `Held-out RUL error over the run: ${hours(j.held_out_mae_seconds)}h on average.` : (j.held_out_unavailable_reason ?? ''),
+    ].filter(Boolean) }
+  }
+  if (path.endsWith('mat'))
+    return { ok: true, chip: j.dataset_label, lines: [
+      `${j.n_samples} samples at ${j.sample_rate_hz} Hz, channel ${j.channel}. Model applicability: ${j.applicability_level}.`,
+      j.rul_supported ? `Predicted life left: ${hours(j.rul_seconds)}h.` : `RUL withheld: ${j.note}`,
+    ] }
+  if (path.endsWith('femto-acquisition'))
+    return { ok: true, chip: `${j.applicability_level ?? ''} applicability`.trim(), lines: [
+      `Predicted life left: ${hours(j.rul_seconds)}h (${j.rul_seconds} s), model ${j.model_name}.`,
+      ...(j.applicability_reasons ?? []).slice(0, 2),
+    ] }
+  return { ok: true, chip: j.compatibility?.replaceAll('_', ' ').toLowerCase(), lines: [j.required_action?.message, ...(j.reasons ?? []).slice(0, 2)].filter(Boolean) }
+}
 
 export function Analyzer() {
   const [run, setRun] = useState(RUNS[0])
@@ -42,19 +102,19 @@ export function Analyzer() {
     )
   }
 
-  // Real backend call: profile the upload and say whether the trained models apply to it.
   const onFile = async (f?: File | null) => {
     if (!f) return
     timers.current.forEach(clearTimeout)
+    const early = precheck(f)
+    if (early) return setPhase({ kind: 'inspected', file: f.name, result: early })
     setPhase({ kind: 'running', step: 0, file: f.name })
-    const form = new FormData()
-    form.append('file', f)
+    let result: Result
     try {
-      const res = await fetch('/api/dataset/inspect', { method: 'POST', body: form })
-      setPhase({ kind: 'inspected', file: f.name, ok: res.ok, data: await res.json().catch(() => null) })
+      result = await analyzeUpload(f)
     } catch {
-      setPhase({ kind: 'inspected', file: f.name, ok: false, data: null })
+      result = { ok: false, lines: ['Could not reach the analysis server. Check your connection and try again.'] }
     }
+    setPhase({ kind: 'inspected', file: f.name, result })
   }
 
   return (
@@ -103,8 +163,8 @@ export function Analyzer() {
             className={`flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-ink p-6 text-center transition ${drag ? 'scale-[1.02] bg-butter' : 'bg-paper hover:bg-paper-2'}`}
           >
             <FileUp />
-            <span className="font-semibold">Drop a CSV, ZIP or RAR recording</span>
-            <span className="text-sm text-ink-soft">FEMTO, XJTU-SY, IMS, CWRU, Paderborn or a mapped custom format</span>
+            <span className="font-semibold">Drop a CSV, .mat or bearing ZIP (up to 64 MB)</span>
+            <span className="text-sm text-ink-soft">FEMTO acquisitions and bearing ZIPs, CWRU/Paderborn .mat, or any headered vibration CSV. Large RAR datasets go to the research lab.</span>
             <input type="file" accept=".csv,.zip,.rar,.txt,.mat" className="sr-only" onChange={(e) => onFile(e.target.files?.[0])} />
           </label>
         </div>
@@ -163,24 +223,13 @@ export function Analyzer() {
             {phase.kind === 'inspected' && (
               <motion.div key="insp" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col gap-4">
                 <p className="truncate font-display text-sm font-bold">{phase.file}</p>
-                {phase.ok && phase.data?.compatibility ? (
-                  <>
-                    <span className="w-fit -rotate-2 rounded-full border-2 border-paper bg-butter px-3 py-1 font-display text-xs font-bold text-ink">
-                      {phase.data.compatibility.replaceAll('_', ' ').toLowerCase()}
-                    </span>
-                    {phase.data.required_action?.message && <p className="text-paper/85">{phase.data.required_action.message}</p>}
-                    <ul className="list-disc space-y-1 pl-5 text-sm text-paper/70">
-                      {(phase.data.reasons ?? []).slice(0, 3).map((r) => <li key={r}>{r}</li>)}
-                    </ul>
-                  </>
-                ) : (
-                  <>
-                    <TriangleAlert className="text-butter" size={28} />
-                    <p className="text-paper/85">
-                      {phase.data?.message ?? (typeof phase.data?.detail === 'string' ? phase.data.detail : 'The analysis server could not read this file.')}
-                    </p>
-                  </>
+                {!phase.result.ok && <TriangleAlert className="text-butter" size={28} />}
+                {phase.result.chip && (
+                  <span className={`w-fit -rotate-2 rounded-full border-2 border-paper px-3 py-1 font-display text-xs font-bold text-ink ${phase.result.ok ? 'bg-mint' : 'bg-butter'}`}>
+                    {phase.result.chip}
+                  </span>
                 )}
+                {phase.result.lines.map((l) => <p key={l} className="text-paper/85">{l}</p>)}
                 <div className="flex flex-wrap gap-3">
                   <a href={LAB_URL} className="rounded-full border-2 border-paper bg-mint px-5 py-2.5 font-display text-sm font-bold text-ink">Run the full analysis</a>
                   <a href={`${APP_URL}/upload`} className="rounded-full border-2 border-paper px-5 py-2.5 font-display text-sm font-bold">Open the analyzer app</a>
