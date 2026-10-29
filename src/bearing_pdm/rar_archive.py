@@ -24,6 +24,8 @@ from bearing_pdm.archive import LOCAL_FULL_MODE, ZipLimits
 
 _PART_RE = re.compile(r"^(?P<stem>.+)\.part(?P<num>\d+)\.rar$", re.IGNORECASE)
 _7Z_TIMEOUT_S = 1800
+_MISSING_VOLUME_RE = re.compile(r"Missing volume\s*:\s*(\S+)")
+_UNRAR_VOLUME_RE = re.compile(r"Details:.*\bvolume (\d+)")
 
 
 class RarArchiveError(ValueError):
@@ -122,7 +124,11 @@ def list_rar_entries(part01_path: str | Path) -> list[RarEntry]:
     except subprocess.TimeoutExpired as exc:
         raise RarArchiveError(f"7z list timed out on {part01_path}") from exc
     if result.returncode != 0:
-        raise RarArchiveError(f"7z could not read {part01_path}: {result.stderr.strip()[:500]}")
+        missing = _MISSING_VOLUME_RE.findall(result.stdout + result.stderr)
+        if missing:
+            raise RarArchiveError(f"missing archive part: {', '.join(sorted(set(missing)))}")
+        raise RarArchiveError(f"7z could not read {Path(part01_path).name}: "
+                              f"{(result.stderr or result.stdout).strip()[-500:]}")
 
     entries: list[RarEntry] = []
     block: dict[str, str] = {}
@@ -160,22 +166,10 @@ def list_rar_entries(part01_path: str | Path) -> list[RarEntry]:
     return entries
 
 
-def safe_extract_rar(
-    any_part_path: str | Path, dest_dir: str | Path, limits: ZipLimits = LOCAL_FULL_MODE
-) -> list[str]:
-    """Validate a (multipart) RAR set and extract it into `dest_dir`.
-
-    Requires the complete part sequence starting at part01 (discover_rar_parts
-    raises on a gap). Extraction always starts from part01; 7z follows the
-    volume chain itself using the other parts found alongside it.
-    """
-    parts = discover_rar_parts(any_part_path)
-    part01 = parts[0]
-
-    entries = list_rar_entries(part01)
+def check_entries(entries: list[RarEntry], limits: ZipLimits = LOCAL_FULL_MODE) -> int:
+    """Safety-check a listing before anything is extracted; returns total uncompressed bytes."""
     if len(entries) > limits.max_files:
         raise RarSecurityError(f"archive has {len(entries)} entries, limit is {limits.max_files}")
-
     total_uncompressed = 0
     for entry in entries:
         if entry.encrypted:
@@ -195,6 +189,47 @@ def safe_extract_rar(
                 raise RarSecurityError(
                     f"compression ratio {ratio:.0f}x exceeds limit for {entry.path} (archive-bomb guard)"
                 )
+    return total_uncompressed
+
+
+def rar_volume_number(path: str | Path) -> int | None:
+    """1-based volume number read from the RAR header (not the filename), or
+    None for a single-volume archive. Raises RarArchiveError if unreadable."""
+    exe = _require_unrar()
+    try:
+        result = subprocess.run([exe, "l", "-p-", "--", str(path)], capture_output=True,
+                                text=True, timeout=120, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise RarArchiveError(f"timed out reading {Path(path).name}") from exc
+    m = _UNRAR_VOLUME_RE.search(result.stdout)
+    if m:
+        return int(m.group(1))
+    if "Details:" in result.stdout:
+        return None
+    raise RarArchiveError(f"{Path(path).name} is not a readable RAR archive")
+
+
+def extract_command(first_part: str | Path, dest: str | Path) -> list[str]:
+    """Extractor argv for a checked archive: unrar for RAR (see _require_unrar), 7z otherwise."""
+    if Path(first_part).suffix.lower() == ".rar":
+        return [_require_unrar(), "x", "-y", "-o+", "-p-", "--", str(first_part), f"{dest}/"]
+    return [_require_7z(), "x", "-y", f"-o{dest}", "--", str(first_part)]
+
+
+def safe_extract_rar(
+    any_part_path: str | Path, dest_dir: str | Path, limits: ZipLimits = LOCAL_FULL_MODE
+) -> list[str]:
+    """Validate a (multipart) RAR set and extract it into `dest_dir`.
+
+    Requires the complete part sequence starting at part01 (discover_rar_parts
+    raises on a gap). Extraction always starts from part01; 7z follows the
+    volume chain itself using the other parts found alongside it.
+    """
+    parts = discover_rar_parts(any_part_path)
+    part01 = parts[0]
+
+    entries = list_rar_entries(part01)
+    total_uncompressed = check_entries(entries, limits)
 
     dest = Path(dest_dir).resolve()
     dest.mkdir(parents=True, exist_ok=True)

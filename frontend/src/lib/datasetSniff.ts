@@ -56,3 +56,15 @@ export function detectArchiveKind(filename: string): ArchiveKind | null {
   if (lower.endsWith(".tar") || lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) return "tar";
   return null;
 }
+
+/**
+ * Files the whole-dataset job workflow (src/bearing_pdm/dataset_jobs.py)
+ * takes: a ZIP / 7Z / RAR archive or one part of a multi-part `.partNN.rar`
+ * or `.7z.NNN` set. Never `.rulguard.zip` (an Analysis Bundle, routed to
+ * /analyze-bundle). Filename routing only; the server checks the contents.
+ */
+export function isDatasetArchive(filename: string): boolean {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".rulguard.zip")) return false;
+  return /\.(zip|7z|rar)$/.test(lower) || /\.7z\.\d{3}$/.test(lower);
+}

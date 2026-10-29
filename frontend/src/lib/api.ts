@@ -691,3 +691,136 @@ export interface CrossDatasetResponse {
 export function getCrossDatasetComparison(): Promise<CrossDatasetResponse> {
   return request<CrossDatasetResponse>("/evaluation/cross-dataset");
 }
+
+// ---------------------------------------------------------------------------
+// Whole-dataset jobs (src/bearing_pdm/dataset_jobs.py): multi-part / large
+// archives and folders. Chunked, resumable upload; server-side worker.
+// ---------------------------------------------------------------------------
+
+export type JobKind = "zip" | "7z" | "rar" | "multipart_rar" | "multipart_7z" | "files";
+export type JobStateName =
+  | "awaiting_upload"
+  | "queued"
+  | "checking"
+  | "extracting"
+  | "detecting"
+  | "processing"
+  | "completed"
+  | "partial"
+  | "failed"
+  | "cancelled";
+export type JobStageName = "upload" | "check" | "extract" | "detect" | "process";
+
+export interface JobPlan {
+  kind: JobKind;
+  first: string | null;
+  total_bytes: number;
+  notes: string[];
+  files?: Array<{ name: string; size: number }>;
+  file_count?: number;
+}
+
+export interface JobStage {
+  status: "pending" | "running" | "done" | "partial" | "failed" | "skipped";
+  done: number;
+  total: number;
+  detail: string;
+}
+
+export interface JobSummary {
+  dataset_id: string | null;
+  display_name: string | null;
+  files_found: number;
+  files_processed: number;
+  files_skipped: number;
+  files_failed: number;
+  bearings_found: number;
+  bearings_processed: number;
+  bearings_failed: number;
+  skipped: Array<{ path: string; reason: string }>;
+  failed: Array<{ bearing: string; files: number; reason: string }>;
+}
+
+export interface JobValidation {
+  status: "validated" | "not_validated";
+  note: string;
+  skills: Record<string, number | null>;
+  trained_on: string[];
+}
+
+export interface DatasetJob {
+  id: string;
+  state: JobStateName;
+  message: string;
+  error: string | null;
+  plan: JobPlan;
+  stages: Record<JobStageName, JobStage>;
+  files: Array<{ name: string; size: number; received: number }>;
+  file_count: number;
+  summary: JobSummary | null;
+  validation: JobValidation | null;
+  has_result: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface DatasetJobResult extends RoutingBundlePayload {
+  outcome: "analyzed" | "profile_only";
+  validation: JobValidation | null;
+  summary: JobSummary;
+}
+
+export const JOB_TERMINAL_STATES: JobStateName[] = ["completed", "partial", "failed", "cancelled"];
+
+export function planDatasetJob(files: Array<{ name: string; size: number }>): Promise<JobPlan> {
+  return request<JobPlan>("/jobs/plan", { method: "POST", body: JSON.stringify({ files }) });
+}
+
+export function createDatasetJob(files: Array<{ name: string; size: number }>): Promise<DatasetJob> {
+  return request<DatasetJob>("/jobs", { method: "POST", body: JSON.stringify({ files }) });
+}
+
+export function getDatasetJob(id: string): Promise<DatasetJob> {
+  return request<DatasetJob>(`/jobs/${encodeURIComponent(id)}`);
+}
+
+export async function getDatasetJobFileOffset(id: string, index: number): Promise<number> {
+  const body = await request<{ received: number }>(`/jobs/${encodeURIComponent(id)}/files/${index}`);
+  return body.received;
+}
+
+export async function uploadDatasetJobChunk(
+  id: string,
+  index: number,
+  offset: number,
+  chunk: Blob
+): Promise<number> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/jobs/${encodeURIComponent(id)}/files/${index}?offset=${offset}`,
+      { method: "POST", body: chunk, headers: { "Content-Type": "application/octet-stream" } }
+    );
+  } catch {
+    throw new ApiError(0, "Network error while uploading.");
+  }
+  if (!response.ok) throw await parseErrorResponse(response);
+  return ((await response.json()) as { received: number }).received;
+}
+
+export function startDatasetJob(id: string): Promise<DatasetJob> {
+  return request<DatasetJob>(`/jobs/${encodeURIComponent(id)}/start`, { method: "POST" });
+}
+
+export function cancelDatasetJob(id: string): Promise<DatasetJob> {
+  return request<DatasetJob>(`/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+}
+
+export function getDatasetJobResult(id: string): Promise<DatasetJobResult> {
+  return request<DatasetJobResult>(`/jobs/${encodeURIComponent(id)}/result`);
+}
+
+/** Every file of a job with its received bytes - used to resume an upload. */
+export function getDatasetJobAllFiles(id: string): Promise<DatasetJob> {
+  return request<DatasetJob>(`/jobs/${encodeURIComponent(id)}?all_files=true`);
+}

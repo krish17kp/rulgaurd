@@ -610,3 +610,29 @@ Regression check: FEMTO `acc_00450.csv` -> 4610.0s / HIGH / FULLY_SUPPORTED unch
 `tsc --noEmit` clean, `next build --webpack` succeeds (Turbopack's own build hit an unrelated
 internal panic in this environment, reproduced independent of this change).
 
+
+## D31: server-side dataset jobs for archives and multi-part sets (2026-10-29)
+
+Symptom: selecting `XJTU-SY_Bearing_Datasets.part05.rar` (710 MB) on forevue.tech/upload
+showed "Offline Research Mode". Root causes: the upload page routed every `.rar`/`.7z`
+to that warning by file name; there was no server-side archive workflow at all; a single
+API request was capped at 64 MB (nginx `/api/` at 70m), so a 710 MB part could never
+arrive; and part05 alone cannot be extracted anyway (RAR volumes 1-6 are all required).
+
+Fix: `dataset_jobs.py` + `/jobs` routes (lifecycle in upload-lifecycle.md) and the
+`DatasetJobPanel` UI. The plan step names missing parts before upload (the official
+XJTU-SY download is known to have 6 parts, so part05 alone lists part01-04 and part06);
+after upload the RAR headers are checked (volume number must match the part's position,
+7z reports any missing volume by name). Bearings are processed independently: one bad
+run fails that run only and the job ends `partial` with per-run reasons; non-data files
+are listed as skipped with a reason.
+
+Model honesty: the job reports `validation` from the bundle's own `skill_for(dataset)`.
+XJTU-SY is in no training set and its measured skill is negative, so XJTU jobs are
+labelled not validated and the routing gate withholds RUL (RUL_SUPPRESSED); HI and stage
+are shown as inspection only. Nothing is refit or retrained by a job.
+
+`scripts/analyze_dataset.py`'s per-bearing loop moved into `routing.route_dataset` so
+the CLI and the worker share it. API `mem_limit` raised 1800m -> 2400m for the worker.
+Synthetic fixtures (`tests/_xjtu_fixture.py`) are labelled as not real XJTU-SY data; the
+real-download header checks in `tests/test_dataset_jobs.py` run only where the parts exist.

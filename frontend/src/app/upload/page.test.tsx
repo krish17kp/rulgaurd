@@ -13,6 +13,7 @@ vi.mock("@/lib/api", async () => {
     predictRulFromFemtoAcquisition: vi.fn(),
     predictRulFromFemtoAcquisitionBlob: vi.fn(),
     analyzeMat: vi.fn(),
+    planDatasetJob: vi.fn(),
     analyzeFemtoSignal: vi.fn().mockRejectedValue(new actual.ApiError(0, "not mocked in this test")),
   };
 });
@@ -24,6 +25,7 @@ vi.mock("@/lib/blobUpload", async () => {
 
 import {
   analyzeMat,
+  planDatasetJob,
   inspectDataset,
   inspectDatasetBlob,
   predictRulFromFemtoAcquisition,
@@ -117,6 +119,7 @@ describe("UploadPage", () => {
     vi.mocked(predictRulFromFemtoAcquisition).mockReset();
     vi.mocked(predictRulFromFemtoAcquisitionBlob).mockReset();
     vi.mocked(uploadFileToBlob).mockReset();
+    vi.mocked(planDatasetJob).mockReset();
   });
 
   it("defaults to FEMTO analysis (not generic inspection)", async () => {
@@ -264,74 +267,74 @@ describe("UploadPage", () => {
     expect(screen.getByText(/inspect another dataset/i)).toBeInTheDocument();
   });
 
-  it("a .rar file never reaches FEMTO prediction and shows offline-mode guidance", async () => {
+  it("a single .rar goes to the whole-dataset workflow and shows the plan, never FEMTO prediction", async () => {
+    vi.mocked(planDatasetJob).mockResolvedValue({ kind: "rar", first: "data.rar", total_bytes: 14, notes: [] });
     render(<UploadPage />);
 
-    await userEvent.upload(
-      screen.getByTestId("file-input") as HTMLInputElement,
-      new File(["fake rar bytes"], "XJTU-SY_Bearing_Datasets.rar"),
-    );
-    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, new File(["fake rar bytes"], "data.rar"));
 
-    await waitFor(() =>
-      expect(screen.getByText(/Offline Research Mode/)).toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.getByText(/What will happen/)).toBeInTheDocument());
+    expect(screen.getByText(/RAR archive/)).toBeInTheDocument();
+    expect(planDatasetJob).toHaveBeenCalledWith([{ name: "data.rar", size: 14 }]);
     expect(screen.queryByText(/not recognized for RUL prediction/)).not.toBeInTheDocument();
     expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
-    expect(predictRulFromFemtoAcquisitionBlob).not.toHaveBeenCalled();
     expect(uploadFileToBlob).not.toHaveBeenCalled();
   });
 
-  it(".part01.rar of a multipart set shows offline-mode guidance, never FEMTO prediction", async () => {
+  it("only part05 of a split archive names the missing parts instead of a generic warning", async () => {
+    vi.mocked(planDatasetJob).mockRejectedValue(
+      new ApiError(
+        400,
+        "incomplete multi-part archive: missing XJTU-SY_Bearing_Datasets.part01.rar, " +
+          "XJTU-SY_Bearing_Datasets.part02.rar, XJTU-SY_Bearing_Datasets.part03.rar, " +
+          "XJTU-SY_Bearing_Datasets.part04.rar, XJTU-SY_Bearing_Datasets.part06.rar.",
+        false,
+        "MISSING_PARTS"
+      )
+    );
     render(<UploadPage />);
 
     await userEvent.upload(
       screen.getByTestId("file-input") as HTMLInputElement,
-      new File(["fake rar bytes"], "XJTU-SY_Bearing_Datasets.part01.rar"),
+      new File(["fake rar bytes"], "XJTU-SY_Bearing_Datasets.part05.rar")
     );
-    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
 
-    await waitFor(() =>
-      expect(screen.getByText(/Offline Research Mode/)).toBeInTheDocument()
-    );
-    expect(screen.getByText(/start with part01\.rar/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/can.t be analyzed as it is/)).toBeInTheDocument());
+    expect(screen.getByText(/missing XJTU-SY_Bearing_Datasets\.part01\.rar/)).toBeInTheDocument();
     expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
   });
 
-  it(".part02.rar explains multipart extraction starts from part01, never FEMTO prediction", async () => {
+  it("several files selected together are planned as one dataset", async () => {
+    vi.mocked(planDatasetJob).mockResolvedValue({
+      kind: "multipart_rar",
+      first: "set.part1.rar",
+      total_bytes: 6,
+      notes: ["The total number of parts cannot be known from file names alone."],
+    });
     render(<UploadPage />);
 
-    await userEvent.upload(
-      screen.getByTestId("file-input") as HTMLInputElement,
-      new File(["fake rar bytes"], "XJTU-SY_Bearing_Datasets.part02.rar"),
-    );
-    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
+    await userEvent.upload(screen.getByTestId("file-input") as HTMLInputElement, [
+      new File(["bbb"], "set.part2.rar"),
+      new File(["aaa"], "set.part1.rar"),
+    ]);
 
-    await waitFor(() =>
-      expect(screen.getByText(/Offline Research Mode/)).toBeInTheDocument()
-    );
-    expect(screen.getByText(/start with part01\.rar/i)).toBeInTheDocument();
-    expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText(/multi-part RAR archive/)).toBeInTheDocument());
+    expect(screen.getByText(/extraction starts from/)).toBeInTheDocument();
+    expect(screen.getByText(/cannot be known from file names/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /upload and analyze/i })).toBeInTheDocument();
   });
 
-  it(".7z and .tar.gz archives show offline-mode guidance, never FEMTO prediction", async () => {
+  it("a .tar.gz archive explains how to upload it, never FEMTO prediction", async () => {
     render(<UploadPage />);
 
-    await userEvent.upload(
-      screen.getByTestId("file-input") as HTMLInputElement,
-      new File(["fake 7z bytes"], "dataset.7z"),
-    );
-    await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
-    await waitFor(() => expect(screen.getByText(/Offline Research Mode/)).toBeInTheDocument());
-
-    await userEvent.click(screen.getByRole("button", { name: /remove/i }));
     await userEvent.upload(
       screen.getByTestId("file-input") as HTMLInputElement,
       new File(["fake tar bytes"], "dataset.tar.gz"),
     );
     await userEvent.click(screen.getByRole("button", { name: /analyze bearing/i }));
-    await waitFor(() => expect(screen.getByText(/Offline Research Mode/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/TAR archives are not extracted/)).toBeInTheDocument());
     expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();
+    expect(planDatasetJob).not.toHaveBeenCalled();
   });
 
   it("a .rulguard.zip routes to the Analysis Bundle workflow, never FEMTO prediction", async () => {
@@ -372,7 +375,7 @@ describe("UploadPage", () => {
     render(<UploadPage />);
     expect(screen.getByTestId("file-input")).toHaveAttribute(
       "accept",
-      ".csv,.mat,.rar,.7z,.tar,.tar.gz,.tgz",
+      ".csv,.mat,.zip,.7z,.rar,.001,.tar,.tar.gz,.tgz",
     );
   });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AnalyzeMatResponse,
   ApiError,
@@ -19,7 +19,8 @@ import { SignalAndFeatures } from "@/components/SignalAndFeatures";
 import { SignalChart } from "@/components/SignalChart";
 import { SuppressedResultNotice, isSuppressedApplicability } from "@/components/SuppressedResultNotice";
 import { BlobUploadError, DIRECT_UPLOAD_THRESHOLD_BYTES, uploadFileToBlob } from "@/lib/blobUpload";
-import { ArchiveKind, detectArchiveKind, looksLikeFemtoAcquisition } from "@/lib/datasetSniff";
+import { ArchiveKind, detectArchiveKind, isDatasetArchive, looksLikeFemtoAcquisition } from "@/lib/datasetSniff";
+import { DatasetJobPanel, LAST_JOB_KEY, PickedFile } from "@/components/DatasetJobPanel";
 
 const MAT_DATASET_TYPE_LABEL: Record<string, string> = {
   FAULT_DIAGNOSIS: "Fault diagnosis / condition monitoring",
@@ -70,15 +71,17 @@ const COMPATIBILITY_LABEL: Record<Compatibility, string> = {
   INVALID_INPUT: "Invalid input",
 };
 
-// Human-readable guidance for an archive filename analyze() intercepted
-// before any FEMTO/MAT routing (datasetSniff.ts's detectArchiveKind).
+// Guidance for an archive filename analyze() intercepted before any
+// FEMTO/MAT routing that the dataset-job workflow does not take
+// (ZIP/7Z/RAR and multi-part sets go to DatasetJobPanel instead).
 function archiveGuidance(kind: ArchiveKind): string {
-  const base =
-    "Archive detected. RAR/7Z and large archives are processed in RULGuard Offline Research Mode.";
-  if (kind === "multipart_rar") {
-    return `${base} Keep all archive parts together and start with part01.rar.`;
+  if (kind === "rulguard_bundle") {
+    return "This is a RULGuard Analysis Bundle (.rulguard.zip). Open it on the Analysis Bundle page.";
   }
-  return base;
+  return (
+    "TAR archives are not extracted on the server. Extract it on your computer, then upload the " +
+    'folder with "Choose a folder", or re-pack it as a ZIP.'
+  );
 }
 
 function formatBytes(n: number): string {
@@ -108,6 +111,10 @@ export default function UploadPage() {
   const [predictState, setPredictState] = useState<PredictState>({ status: "idle" });
   const [matState, setMatState] = useState<MatState>({ status: "idle" });
   const [archiveKind, setArchiveKind] = useState<ArchiveKind | null>(null);
+  // Whole-dataset workflow: several files, a folder, or a ZIP/7Z/RAR archive set.
+  const [datasetFiles, setDatasetFiles] = useState<PickedFile[] | null>(null);
+  const [resumeJobId, setResumeJobId] = useState<string | null>(null);
+  const [selectionSeq, setSelectionSeq] = useState(0); // fresh panel state per selection
   const [declaredSamplingRateHz, setDeclaredSamplingRateHz] = useState("");
   const [declaredUnits, setDeclaredUnits] = useState("");
   // Bumped on every mode switch/new analysis so an in-flight request whose
@@ -115,6 +122,39 @@ export default function UploadPage() {
   // stale result (found in review: switching modes mid-request, then
   // switching back, could resurrect an old response).
   const requestSeq = useRef(0);
+
+  // Reopen a dataset job after a refresh or a return visit: ?job=<id>, or
+  // this browser's last job.
+  useEffect(() => {
+    let id = new URLSearchParams(window.location.search).get("job");
+    if (!id) {
+      try {
+        id = localStorage.getItem(LAST_JOB_KEY);
+      } catch {
+        id = null;
+      }
+    }
+    // Browser-only state (URL, localStorage), read once after hydration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (id) setResumeJobId(id);
+  }, []);
+
+  function pickFiles(files: File[], fromFolder: boolean) {
+    if (files.length === 0) return;
+    const single = files.length === 1 && !fromFolder;
+    if (single && !isDatasetArchive(files[0].name)) {
+      setSelectedFile(files[0]);
+      return;
+    }
+    resetForNewFile();
+    setSelectionSeq((n) => n + 1);
+    setDatasetFiles(
+      files.map((file) => ({
+        file,
+        name: fromFolder && file.webkitRelativePath ? file.webkitRelativePath : file.name,
+      }))
+    );
+  }
 
   async function handleGenericFile(file: File) {
     const seq = ++requestSeq.current;
@@ -267,6 +307,12 @@ export default function UploadPage() {
     setPredictState({ status: "idle" });
     setMatState({ status: "idle" });
     setArchiveKind(null);
+    setDatasetFiles(null);
+  }
+
+  function resetDatasetJob() {
+    setDatasetFiles(null);
+    setResumeJobId(null);
   }
 
   function switchDatasetType(next: DatasetType) {
@@ -296,7 +342,7 @@ export default function UploadPage() {
         </p>
       </header>
 
-      {!selectedFile && (
+      {!selectedFile && !datasetFiles && !resumeJobId && (
         <div
           className="flex flex-col gap-3 rounded-xl border-2 border-dashed border-surface-border bg-surface/50 p-10 text-center transition-colors hover:border-accent/50"
         >
@@ -306,26 +352,55 @@ export default function UploadPage() {
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
-              const file = e.dataTransfer.files?.[0];
-              if (file) setSelectedFile(file);
+              pickFiles(Array.from(e.dataTransfer.files ?? []), false);
             }}
           >
-            Upload <span className="font-medium">.csv</span> or <span className="font-medium">.mat</span> bearing
-            data — drag and drop, or{" "}
-            <span className="font-medium text-accent underline">choose a file</span>.
+            Upload bearing data: drag and drop, or{" "}
+            <span className="font-medium text-accent underline">choose files</span>.
           </label>
           <input
             id="file-input"
             data-testid="file-input"
             type="file"
-            accept=".csv,.mat,.rar,.7z,.tar,.tar.gz,.tgz"
+            multiple
+            accept=".csv,.mat,.zip,.7z,.rar,.001,.tar,.tar.gz,.tgz"
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) setSelectedFile(file);
+              pickFiles(Array.from(e.target.files ?? []), false);
               e.target.value = "";
             }}
             className="sr-only"
           />
+          <label htmlFor="folder-input" className="cursor-pointer self-center text-xs text-accent underline">
+            Choose a folder
+          </label>
+          <input
+            id="folder-input"
+            data-testid="folder-input"
+            type="file"
+            multiple
+            // Non-standard but supported by Chrome, Edge, Firefox and Safari.
+            {...({ webkitdirectory: "" } as Record<string, string>)}
+            onChange={(e) => {
+              pickFiles(Array.from(e.target.files ?? []), true);
+              e.target.value = "";
+            }}
+            className="sr-only"
+          />
+          <ul className="mx-auto max-w-xl list-inside list-disc text-left text-xs leading-relaxed text-foreground-muted">
+            <li>
+              <span className="font-medium">One recording</span> (.csv or .mat, up to 64 MB): analyzed immediately.
+            </li>
+            <li>
+              <span className="font-medium">A whole dataset</span>: a ZIP, 7Z or RAR archive, a folder, or every part
+              of a split archive selected together (for example all six{" "}
+              <span className="font-mono">XJTU-SY_Bearing_Datasets.part01–06.rar</span>). Up to 20 GB, uploaded in
+              resumable pieces and processed on the server.
+            </li>
+            <li>
+              A split archive needs <span className="font-medium">every part, including part01</span>; one part alone
+              cannot be extracted.
+            </li>
+          </ul>
           <button
             type="button"
             onClick={() => void trySampleData()}
@@ -369,6 +444,24 @@ export default function UploadPage() {
             )}
           </div>
         </div>
+      )}
+
+      {(datasetFiles || resumeJobId) && (
+        <DatasetJobPanel
+          key={selectionSeq}
+          picked={datasetFiles}
+          resumeJobId={resumeJobId}
+          onReset={resetDatasetJob}
+          onPick={(files, fromFolder) => {
+            setSelectionSeq((n) => n + 1);
+            setDatasetFiles(
+              files.map((file) => ({
+                file,
+                name: fromFolder && file.webkitRelativePath ? file.webkitRelativePath : file.name,
+              }))
+            );
+          }}
+        />
       )}
 
       {archiveKind && (

@@ -25,7 +25,8 @@ services:
       timeout: 10s
       retries: 5
       start_period: 120s
-    mem_limit: 1800m
+    # dataset jobs run a worker beside uvicorn that loads the model bundle (~570 MB RSS)
+    mem_limit: 2400m
 
   dashboard:
     <<: *py

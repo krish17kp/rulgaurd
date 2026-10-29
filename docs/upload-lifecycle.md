@@ -67,3 +67,28 @@ validation and processing failures, file and request 413s, disconnects,
 cancellation, timeouts, prediction failure and retry, and request isolation in a
 monkeypatched temporary directory. Multipart files are forced onto disk and held
 by the tests until explicit closure is verified.
+
+## Dataset jobs (`/jobs`)
+
+Archives (ZIP, 7Z, RAR, multi-part RAR/7Z) and folders/multi-file selections go
+through a background job instead of a single request (`src/bearing_pdm/dataset_jobs.py`,
+decision D31). This is the one place the service *does* retain raw uploads, and only
+for the life of the job:
+
+- `POST /jobs/plan` checks a selection by file name and size only (missing,
+  duplicate or unsupported parts are refused here, before any byte is sent).
+- `POST /jobs` creates the job; the client then sends each file in chunks of at most
+  32 MB to `POST /jobs/{id}/files/{index}?offset=`. A wrong offset returns 409 with
+  the server's offset so the client resumes from there; `GET /jobs/{id}/files/{index}`
+  reports it after a refresh.
+- `POST /jobs/{id}/start` launches a detached worker (one at a time, file lock;
+  others wait as "queued"). It verifies the archive headers, extracts with the
+  path/link/size/ratio checks of `rar_archive.check_entries`, deletes the uploaded
+  archive, extracts features per bearing, routes through the deployed bundle and
+  writes `result.json` (no raw rows, no server paths). The extracted raw data is
+  deleted when the job ends, whatever the outcome.
+- Retention: an upload left incomplete for 6 h is deleted; finished jobs (state +
+  result only) are deleted after 7 days. `POST /jobs/{id}/cancel` stops the worker
+  and deletes raw data immediately.
+- Limits: 20 GB per job, 20,000 files, 200 parts, 3 open jobs, 2 GB free-disk margin,
+  3 h extraction timeout, extracted bytes capped at the archive's declared size + 64 MB.

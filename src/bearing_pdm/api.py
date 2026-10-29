@@ -47,7 +47,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from bearing_pdm import artifacts, cwru, paderborn, reliability
+from bearing_pdm import artifacts, cwru, dataset_jobs, paderborn, reliability
 from bearing_pdm.adapters import ADAPTERS, VIBRATION_CHANNELS
 from bearing_pdm.applicability import MEDIUM_SHIFT_RATIO
 from bearing_pdm.applicability import assess as applicability_assess
@@ -3741,6 +3741,79 @@ def _analyze_rows(rows, axes, stages, *, dataset_id, units, preprocessing_versio
                     "window": axes[0].window, "units": units,
                     "hi_model_version": _model_provenance(
                         "predict_hi", "reference_hi_model.joblib")[0]})
+
+
+# ---------------------------------------------------------------------------
+# Whole-dataset jobs (dataset_jobs.py): multi-part/large archives and folders.
+# Chunked, resumable upload -> detached worker -> poll state -> fetch result.
+# ---------------------------------------------------------------------------
+
+
+class JobFile(BaseModel):
+    name: str = Field(min_length=1, max_length=512)
+    size: int = Field(ge=0)
+
+
+class CreateJobRequest(BaseModel):
+    files: list[JobFile] = Field(min_length=1, max_length=dataset_jobs.MAX_FILES_PER_JOB)
+
+
+def _job_call(fn, *args):
+    try:
+        return fn(*args)
+    except dataset_jobs.JobError as exc:
+        raise ApiError(exc.status, exc.code, str(exc)) from exc
+
+
+@app.post("/jobs/plan")
+def plan_dataset_job(body: CreateJobRequest) -> dict:
+    """Dry run: what would this selection be processed as? Creates nothing."""
+    plan = _job_call(dataset_jobs.plan_upload, [f.model_dump() for f in body.files])
+    return {**plan, "files": plan["files"][:50], "file_count": len(plan["files"])}
+
+
+@app.post("/jobs", status_code=201)
+def create_dataset_job(body: CreateJobRequest) -> dict:
+    """Plan a whole-dataset upload. Refuses incomplete multi-part sets up front."""
+    return _job_call(dataset_jobs.create_job, [f.model_dump() for f in body.files])
+
+
+@app.get("/jobs/{job_id}")
+def get_dataset_job(job_id: str, all_files: bool = False) -> dict:
+    """`all_files=true` lists every file with its received bytes (to resume an upload)."""
+    return _job_call(lambda: dataset_jobs.public_state(dataset_jobs.job_dir(job_id), all_files))
+
+
+@app.get("/jobs/{job_id}/files/{index}")
+def get_dataset_job_file_offset(job_id: str, index: int) -> dict:
+    return {"received": _job_call(dataset_jobs.file_offset, job_id, index)}
+
+
+@app.post("/jobs/{job_id}/files/{index}")
+async def upload_dataset_job_chunk(job_id: str, index: int, request: Request,
+                                   offset: int = Query(ge=0)) -> dict:
+    """Raw-body chunk (application/octet-stream) appended at `offset`."""
+    data = bytearray()
+    async for piece in request.stream():
+        data += piece
+        if len(data) > dataset_jobs.MAX_CHUNK_BYTES:
+            raise ApiError(413, "CHUNK_TOO_LARGE", "chunk is larger than allowed")
+    return {"received": _job_call(dataset_jobs.append_chunk, job_id, index, offset, bytes(data))}
+
+
+@app.post("/jobs/{job_id}/start")
+def start_dataset_job(job_id: str) -> dict:
+    return _job_call(dataset_jobs.start_job, job_id)
+
+
+@app.post("/jobs/{job_id}/cancel")
+def cancel_dataset_job(job_id: str) -> dict:
+    return _job_call(dataset_jobs.cancel_job, job_id)
+
+
+@app.get("/jobs/{job_id}/result")
+def get_dataset_job_result(job_id: str) -> dict:
+    return _job_call(dataset_jobs.read_result, job_id)
 
 
 # Vercel's Python runtime forwards the original request path (e.g. /api/health)

@@ -95,16 +95,19 @@ def test_run_analysis_persists_canonical_parquet_and_manifest(tmp_path, monkeypa
     })
     monkeypatch.setattr(analyze_dataset, "get_adapter", lambda dataset: FakeAdapter())
     monkeypatch.setattr(analyze_dataset, "build_canonical_features", lambda adapter, run: fake_df)
-    monkeypatch.setattr(analyze_dataset, "add_self_normalized_features", lambda df: df)
+    import bearing_pdm.domain as domain
+    import bearing_pdm.routing as routing
+
+    monkeypatch.setattr(domain, "add_self_normalized_features", lambda df: df)
     monkeypatch.setattr(analyze_dataset.joblib, "load", lambda path: {
         "stage_thresholds": FakeThresholds(),
         "hi_model": object(),
     })
-    monkeypatch.setattr(analyze_dataset, "candidates_from_bundle", lambda bundle: [])
+    monkeypatch.setattr(routing, "candidates_from_bundle", lambda bundle: [])
     monkeypatch.setattr(analyze_dataset, "oof_from_predictions", lambda preds: None)
-    monkeypatch.setattr(analyze_dataset, "stage_persistence", lambda dataset: 1)
-    monkeypatch.setattr(analyze_dataset, "reference_window", lambda dataset: (2, 10))
-    monkeypatch.setattr(analyze_dataset, "hi_smooth_window", lambda dataset: 1)
+    monkeypatch.setattr(domain, "stage_persistence", lambda dataset: 1)
+    monkeypatch.setattr(domain, "reference_window", lambda dataset: (2, 10))
+    monkeypatch.setattr(domain, "hi_smooth_window", lambda dataset: 1)
 
     def fake_analyze_bearing(g, candidates, hi_model, thresholds, ref_window, oof=None,
                              smooth_window=None):
@@ -121,7 +124,7 @@ def test_run_analysis_persists_canonical_parquet_and_manifest(tmp_path, monkeypa
                     "applicability": {}}
         return out, decision
 
-    monkeypatch.setattr(analyze_dataset, "analyze_bearing", fake_analyze_bearing)
+    monkeypatch.setattr(routing, "analyze_bearing", fake_analyze_bearing)
 
     root = tmp_path / "source"
     root.mkdir()

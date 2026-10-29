@@ -28,7 +28,6 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,12 +35,6 @@ import joblib
 import pandas as pd
 
 from bearing_pdm.adapters import ADAPTERS, GenericAdapter, get_adapter
-from bearing_pdm.domain import (
-    add_self_normalized_features,
-    hi_smooth_window,
-    reference_window,
-    stage_persistence,
-)
 from bearing_pdm.pipeline import (
     CANONICAL_SCHEMA_VERSION,
     CANONICAL_WINDOW_S,
@@ -49,7 +42,7 @@ from bearing_pdm.pipeline import (
 )
 from bearing_pdm.profiler import apply_manual_mapping, profile_folder
 from bearing_pdm.rar_archive import discover_rar_parts, safe_extract_rar
-from bearing_pdm.routing import analyze_bearing, candidates_from_bundle, oof_from_predictions
+from bearing_pdm.routing import oof_from_predictions, route_dataset
 
 METRICS = Path("reports/metrics")
 RAR_SCRATCH_ROOT = Path.home() / ".cache" / "rulguard_rar_scratch"
@@ -181,34 +174,10 @@ def run_analysis(
         }
         cached.with_suffix(".json").write_text(json.dumps(manifest, indent=2))
         progress(f"Wrote canonical features {cached} and manifest {cached.with_suffix('.json')}")
-    df = add_self_normalized_features(df)
-
     bundle = joblib.load("artifacts/models/cross_domain_bundle.joblib")
-    candidates = candidates_from_bundle(bundle)
     pred_path = METRICS / "cross_dataset_predictions.parquet"
     oof = oof_from_predictions(pd.read_parquet(pred_path)) if pred_path.exists() else None
-
-    # Per-recording columns a portable bundle needs to chart a trajectory
-    # without shipping the raw dataset (web Results Workspace: HI vs
-    # progression, stage transitions, RUL vs progression). Additive to the
-    # JSON only; the parquet (full `out` frame) is unchanged.
-    _TRAJECTORY_COLUMNS = (
-        "sequence_index", "elapsed_s", "health_indicator", "stage",
-        "actual_rul_seconds", "rul_status", "predicted_rul_seconds", "rul_lo", "rul_hi",
-    )
-
-    frames, decisions, trajectories = [], {}, {}
-    for bearing, g in df.groupby("bearing_run_id"):
-        thresholds = replace(bundle["stage_thresholds"], persistence=stage_persistence(dataset))
-        out, decision = analyze_bearing(g, candidates, bundle["hi_model"],
-                                        thresholds, reference_window(dataset),
-                                        oof=oof, smooth_window=hi_smooth_window(dataset))
-        frames.append(out)
-        decisions[bearing] = decision
-        present = [c for c in _TRAJECTORY_COLUMNS if c in out]
-        trajectories[bearing] = out[present].to_dict(orient="records")
-        progress(f"{bearing}: now {decision['current']['status']} "
-                 f"(model: {decision['current']['model']}); whole-run summary {decision['status']}")
+    frames, decisions, trajectories = route_dataset(df, dataset, bundle, oof=oof, progress=progress)
     METRICS.mkdir(parents=True, exist_ok=True)
     pd.concat(frames).to_parquet(METRICS / f"routing_{dataset}.parquet", index=False)
     (METRICS / f"routing_{dataset}.json").write_text(json.dumps(

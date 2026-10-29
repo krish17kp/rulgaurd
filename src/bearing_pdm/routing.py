@@ -235,3 +235,43 @@ def candidates_from_bundle(bundle: dict) -> list[Candidate]:
 def oof_from_predictions(pred: pd.DataFrame) -> dict[str, pd.DataFrame]:
     return {name: pred[(pred["experiment"] == exp) & (pred["model"] == kind)]
             for name, (exp, kind) in OOF_EXPERIMENT.items()}
+
+
+# Per-recording columns a portable result needs to chart a trajectory without
+# shipping the raw dataset (HI vs progression, stages, RUL vs progression).
+TRAJECTORY_COLUMNS = (
+    "sequence_index", "elapsed_s", "health_indicator", "stage",
+    "actual_rul_seconds", "rul_status", "predicted_rul_seconds", "rul_lo", "rul_hi",
+)
+
+
+def route_dataset(df: pd.DataFrame, dataset: str, bundle: dict, oof=None, progress=print):
+    """Route every bearing of one dataset's canonical feature frame.
+
+    Shared by scripts/analyze_dataset.py and the web dataset jobs
+    (dataset_jobs.py) so both apply the identical gate. Returns
+    (per-recording frames, decisions by bearing, trajectories by bearing)."""
+    from dataclasses import replace
+
+    from bearing_pdm.domain import (
+        add_self_normalized_features,
+        hi_smooth_window,
+        reference_window,
+        stage_persistence,
+    )
+
+    df = add_self_normalized_features(df)
+    candidates = candidates_from_bundle(bundle)
+    frames, decisions, trajectories = [], {}, {}
+    for bearing, g in df.groupby("bearing_run_id"):
+        thresholds = replace(bundle["stage_thresholds"], persistence=stage_persistence(dataset))
+        out, decision = analyze_bearing(g, candidates, bundle["hi_model"],
+                                        thresholds, reference_window(dataset),
+                                        oof=oof, smooth_window=hi_smooth_window(dataset))
+        frames.append(out)
+        decisions[bearing] = decision
+        present = [c for c in TRAJECTORY_COLUMNS if c in out]
+        trajectories[bearing] = out[present].to_dict(orient="records")
+        progress(f"{bearing}: now {decision['current']['status']} "
+                 f"(model: {decision['current']['model']}); whole-run summary {decision['status']}")
+    return frames, decisions, trajectories
