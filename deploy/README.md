@@ -22,6 +22,9 @@ Landing build: `VITE_APP_URL=https://app.DOMAIN VITE_LAB_URL=https://lab.DOMAIN 
 then rsync `web/dist/` to `/opt/rulguard/site/`.
 
 ## Operate
+- Update after a change: commit, then `deploy/update.sh`. It pushes to GitHub (backup), sends the
+  committed files to the server, rebuilds the containers and the landing page, and prints health.
+  The server is not connected to GitHub, so a push alone never changes the live site.
 - Set the Groq key without echoing it:
   `ssh -t <host> 'read -rsp "Groq key: " k; sed -i "s|^GROQ_API_KEY=.*|GROQ_API_KEY=$k|" /opt/rulguard/app/deploy/.env; cd /opt/rulguard/app/deploy && docker compose up -d api dashboard'`
 - Logs: `docker compose logs -f api` (rotated, 5x10MB per service)
