@@ -12,9 +12,9 @@ const STEPS = ['Reading the recording', 'Extracting 30+ vibration features', 'Ch
 type Result = { ok: boolean; chip?: string; lines: string[] }
 type Phase = { kind: 'idle' } | { kind: 'running'; step: number; file?: string } | { kind: 'done' } | { kind: 'inspected'; file: string; result: Result }
 
-// Full tools live on their own hosts in production (deploy/README); fall back to same-origin paths in dev.
-const APP_URL = import.meta.env.VITE_APP_URL ?? 'http://localhost:3000'
-const LAB_URL = import.meta.env.VITE_LAB_URL ?? 'http://localhost:8501'
+// The full app and the lab live on this same domain (deploy/nginx/rulguard.conf); env overrides are for local dev.
+const APP_URL = import.meta.env.VITE_APP_URL ?? ''
+const LAB_URL = import.meta.env.VITE_LAB_URL ?? '/lab/'
 
 // Matches the API's MAX_UPLOAD_BYTES and nginx client_max_body_size; anything bigger never reaches the server.
 const MAX_UPLOAD_BYTES = 64 * 1024 * 1024

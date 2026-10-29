@@ -1,18 +1,23 @@
 @import "tailwindcss";
 
-/* Industrial dark theme: deep graphite background, charcoal panels, teal accent. */
+/* One site with the landing page (web/src/index.css): lavender paper, ink text, cobalt accent.
+   dark: variants follow a .dark class nobody sets, so pages always render their light variants. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #0b0f12;
-  --surface: #141a1f;
-  --surface-border: #232b31;
-  --foreground: #e8edf0;
-  --foreground-muted: #8b9aa3;
-  --accent: #2dd4bf;
-  --accent-strong: #14b8a6;
-  --accent-blue: #38bdf8;
-  --success: #34d399;
-  --caution: #fbbf24;
-  --danger: #f87171;
+  --background: #eee9ff;
+  --surface: #f8f6ff;
+  --surface-border: #14123a;
+  --foreground: #14123a;
+  --foreground-muted: #4a4775;
+  --accent: #3d2bff;
+  --accent-strong: #2a1bd6;
+  --accent-blue: #3d2bff;
+  --success: #0b8a5c;
+  --caution: #9a6700;
+  --danger: #c4243f;
+  --mint: #38f2b1;
+  --magenta: #ff4fd8;
 }
 
 @theme inline {
@@ -27,15 +32,34 @@
   --color-success: var(--success);
   --color-caution: var(--caution);
   --color-danger: var(--danger);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-mint: var(--mint);
+  --color-magenta: var(--magenta);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display-face);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
   font-size: 16px;
+}
+
+h1, h2 {
+  font-family: var(--font-display-face), ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+::selection {
+  background: var(--magenta);
+  color: var(--foreground);
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
 }
 
 /* Project-wide floor: nothing renders smaller than 13px (nightshift

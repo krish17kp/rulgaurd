@@ -792,8 +792,11 @@ def _render_college_bundle(entry: dict) -> None:
 def main() -> None:
     st.set_page_config(page_title="RULGuard - Capstone Review", layout="wide")
     st.markdown(
-        '<span style="color:#2dd4bf;">●</span> **RULGuard**'
-        ' &mdash; Offline Research Mode (full-capability superset of the public site)',
+        '<span style="color:#3d2bff;">●</span> **RULGuard**'
+        ' &mdash; Offline Research Mode (full-capability superset of the public site)'
+        ' &nbsp;|&nbsp; <a href="/" target="_self">Home</a>'
+        ' &nbsp;·&nbsp; <a href="/upload" target="_self">Analyze</a>'
+        ' &nbsp;·&nbsp; <a href="/evaluation" target="_self">Evaluation</a>',
         unsafe_allow_html=True,
     )
     st.title("RULGuard: Bearing Health Monitoring and Remaining Useful Life Prediction")

@@ -31,10 +31,11 @@ services:
     <<: *py
     command: ["streamlit", "run", "streamlit_app.py", "--server.port", "8501",
               "--server.address", "0.0.0.0", "--server.headless", "true",
-              "--server.maxUploadSize", "2048", "--browser.gatherUsageStats", "false"]
+              "--server.maxUploadSize", "2048", "--browser.gatherUsageStats", "false",
+              "--server.baseUrlPath", "lab"]
     ports: ["127.0.0.1:8501:8501"]
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8501/_stcore/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8501/lab/_stcore/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -47,7 +48,7 @@ services:
     restart: unless-stopped
     ports: ["127.0.0.1:3000:3000"]
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/overview').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 5

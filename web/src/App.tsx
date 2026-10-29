@@ -15,10 +15,12 @@ import { prefersReducedMotion } from './data'
 
 const LINKS = [
   ['#how', 'How it works'],
-  ['#story', 'Story'],
   ['#results', 'Results'],
   ['#try', 'Try it'],
   ['#datasets', 'Datasets'],
+  // Same-domain pages: the full analysis app and the Streamlit research lab.
+  ['/upload', 'Analyze'],
+  ['/lab/', 'Lab'],
 ]
 
 const TICKER = ['FEMTO PRONOSTIA', 'XJTU-SY', 'IMS NASA', 'CWRU', 'Paderborn', 'NSK 6205 college rig', 'Extra Trees', 'leave-one-bearing-out', 'conformal intervals', 'applicability checks']

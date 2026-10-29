@@ -21,7 +21,7 @@ echo "== 3/4 Rebuild containers (unchanged images are reused)"
 ssh "$HOST" 'cd /opt/rulguard/app/deploy && docker compose up -d --build'
 
 echo "== 4/4 Landing page"
-(cd web && npm ci --silent && VITE_APP_URL="https://app.$DOMAIN" VITE_LAB_URL="https://lab.$DOMAIN" npm run build >/dev/null)
+(cd web && npm ci --silent && npm run build >/dev/null)
 rsync -az --delete web/dist/ "$HOST:/opt/rulguard/site/"
 
 echo "== Health"
@@ -29,6 +29,6 @@ for _ in $(seq 30); do
   ssh "$HOST" 'cd /opt/rulguard/app/deploy && ! docker compose ps --format "{{.Status}}" | grep -qv "(healthy)"' && break
   sleep 5
 done
-for u in "https://$DOMAIN/" "https://$DOMAIN/api/health" "https://app.$DOMAIN/" "https://lab.$DOMAIN/"; do
+for u in "https://$DOMAIN/" "https://$DOMAIN/api/health" "https://$DOMAIN/upload" "https://$DOMAIN/lab/"; do
   echo "$(curl -s -o /dev/null -w '%{http_code}' "$u") $u"
 done

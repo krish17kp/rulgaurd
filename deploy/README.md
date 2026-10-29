@@ -3,8 +3,9 @@
 | Host | Serves |
 |---|---|
 | `DOMAIN` | landing site (`web/dist`) + `/api` |
-| `app.DOMAIN` | Next.js analyzer (`frontend/`) + `/api` |
-| `lab.DOMAIN` | Streamlit research dashboard (public; `RULGUARD_LAB_READONLY=1` turns off server-path analysis) |
+| `DOMAIN/upload`, `/trajectory`, ... | Next.js analyzer (`frontend/`), every path not listed here |
+| `DOMAIN/lab/` | Streamlit research dashboard (public; `RULGUARD_LAB_READONLY=1` turns off server-path analysis) |
+| `app.DOMAIN`, `lab.DOMAIN` | 301 redirects into the one site, so old links keep working |
 
 Containers (`compose.yaml`) bind to 127.0.0.1 only; host nginx terminates TLS (certbot).
 
@@ -18,7 +19,7 @@ cd deploy && docker compose up -d --build
 sed "s/DOMAIN/<your domain>/g" nginx/rulguard.conf > /etc/nginx/sites-available/rulguard
 certbot --nginx -d DOMAIN -d app.DOMAIN -d lab.DOMAIN --redirect
 ```
-Landing build: `VITE_APP_URL=https://app.DOMAIN VITE_LAB_URL=https://lab.DOMAIN npm run build` in `web/`,
+Landing build: `npm run build` in `web/` (links are same-domain paths),
 then rsync `web/dist/` to `/opt/rulguard/site/`.
 
 ## Operate
