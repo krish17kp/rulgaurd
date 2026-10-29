@@ -9,7 +9,12 @@ import { prefersReducedMotion } from '../data'
 
 const RUNS = Object.keys(data.bearings)
 const STEPS = ['Reading the recording', 'Extracting 30+ vibration features', 'Checking the model applies', 'Scoring health', 'Estimating life left']
-type Phase = { kind: 'idle' } | { kind: 'running'; step: number; file?: string } | { kind: 'done' } | { kind: 'offline'; file: string }
+type Inspect = { compatibility?: string; reasons?: string[]; required_action?: { message?: string }; message?: string; detail?: unknown }
+type Phase = { kind: 'idle' } | { kind: 'running'; step: number; file?: string } | { kind: 'done' } | { kind: 'inspected'; file: string; ok: boolean; data: Inspect | null }
+
+// Full tools live on their own hosts in production (deploy/README); fall back to same-origin paths in dev.
+const APP_URL = import.meta.env.VITE_APP_URL ?? 'http://localhost:3000'
+const LAB_URL = import.meta.env.VITE_LAB_URL ?? 'http://localhost:8501'
 
 export function Analyzer() {
   const [run, setRun] = useState(RUNS[0])
@@ -22,22 +27,35 @@ export function Analyzer() {
   const i = Math.round((pct / 100) * (r.hi.length - 1))
   const stage = STAGE[r.stage[i]]
 
-  const go = (file?: string) => {
+  const go = () => {
     timers.current.forEach(clearTimeout)
-    const last = file ? 2 : STEPS.length
+    const last = STEPS.length
     timers.current = Array.from({ length: last + 1 }, (_, s) =>
       window.setTimeout(() => {
-        if (s < last) setPhase({ kind: 'running', step: s, file })
+        if (s < last) setPhase({ kind: 'running', step: s })
         else {
-          setPhase(file ? { kind: 'offline', file } : { kind: 'done' })
-          if (!file && !prefersReducedMotion())
+          setPhase({ kind: 'done' })
+          if (!prefersReducedMotion())
             confetti({ particleCount: 90, spread: 75, origin: { x: 0.75, y: 0.6 }, colors: ['#3d2bff', '#ff4fd8', '#38f2b1', '#ffe14d'] })
         }
       }, s * 420),
     )
   }
 
-  const onFile = (f?: File | null) => f && go(f.name)
+  // Real backend call: profile the upload and say whether the trained models apply to it.
+  const onFile = async (f?: File | null) => {
+    if (!f) return
+    timers.current.forEach(clearTimeout)
+    setPhase({ kind: 'running', step: 0, file: f.name })
+    const form = new FormData()
+    form.append('file', f)
+    try {
+      const res = await fetch('/api/dataset/inspect', { method: 'POST', body: form })
+      setPhase({ kind: 'inspected', file: f.name, ok: res.ok, data: await res.json().catch(() => null) })
+    } catch {
+      setPhase({ kind: 'inspected', file: f.name, ok: false, data: null })
+    }
+  }
 
   return (
     <section id="try" className="mx-auto max-w-6xl px-4 py-24 sm:px-6">
@@ -142,17 +160,31 @@ export function Analyzer() {
               </motion.div>
             )}
 
-            {phase.kind === 'offline' && (
-              <motion.div key="off" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col gap-4">
-                <TriangleAlert className="text-butter" size={32} />
-                <p className="font-display text-xl font-bold">The analysis server isn't connected yet.</p>
-                <p className="text-paper/75">
-                  <span className="font-semibold text-paper">{phase.file}</span> was read in your browser, but scoring happens on the server.
-                  This local preview runs without it. Once the site is deployed, the same upload goes through the full pipeline.
-                </p>
-                <button type="button" onClick={() => go()} className="w-fit rounded-full border-2 border-paper bg-mint px-5 py-2.5 font-display text-sm font-bold text-ink">
-                  Analyze a sample bearing instead
-                </button>
+            {phase.kind === 'inspected' && (
+              <motion.div key="insp" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col gap-4">
+                <p className="truncate font-display text-sm font-bold">{phase.file}</p>
+                {phase.ok && phase.data?.compatibility ? (
+                  <>
+                    <span className="w-fit -rotate-2 rounded-full border-2 border-paper bg-butter px-3 py-1 font-display text-xs font-bold text-ink">
+                      {phase.data.compatibility.replaceAll('_', ' ').toLowerCase()}
+                    </span>
+                    {phase.data.required_action?.message && <p className="text-paper/85">{phase.data.required_action.message}</p>}
+                    <ul className="list-disc space-y-1 pl-5 text-sm text-paper/70">
+                      {(phase.data.reasons ?? []).slice(0, 3).map((r) => <li key={r}>{r}</li>)}
+                    </ul>
+                  </>
+                ) : (
+                  <>
+                    <TriangleAlert className="text-butter" size={28} />
+                    <p className="text-paper/85">
+                      {phase.data?.message ?? (typeof phase.data?.detail === 'string' ? phase.data.detail : 'The analysis server could not read this file.')}
+                    </p>
+                  </>
+                )}
+                <div className="flex flex-wrap gap-3">
+                  <a href={LAB_URL} className="rounded-full border-2 border-paper bg-mint px-5 py-2.5 font-display text-sm font-bold text-ink">Run the full analysis</a>
+                  <a href={`${APP_URL}/upload`} className="rounded-full border-2 border-paper px-5 py-2.5 font-display text-sm font-bold">Open the analyzer app</a>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>

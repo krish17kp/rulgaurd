@@ -2109,7 +2109,8 @@ def _bearing_zip_response(path: str) -> BearingZipAnalysisResponse:
 # bearing ZIP (~900 acquisitions) is typically ~15-20MB, so the direct-upload
 # route only accepts small archives and otherwise asks for the blob route -
 # never silently truncates or times out on an oversized body.
-MAX_DIRECT_BEARING_ZIP_BYTES = 4 * 1024 * 1024
+# 4MB is Vercel's request-body ceiling; a self-hosted deployment raises it via env.
+MAX_DIRECT_BEARING_ZIP_BYTES = int(os.environ.get("RULGUARD_MAX_DIRECT_ZIP_BYTES", 4 * 1024 * 1024))
 
 
 @app.post("/analyze/femto-bearing-zip", response_model=BearingZipAnalysisResponse)
@@ -2874,7 +2875,7 @@ def explain(request: ExplainRequest) -> ExplainResponse:
 # upload above this size asks for an offline-built Knowledge Bundle instead of
 # silently truncating or timing out - same philosophy as
 # MAX_DIRECT_BEARING_ZIP_BYTES for bearing ZIPs.
-MAX_DIRECT_KNOWLEDGE_ZIP_BYTES = 4 * 1024 * 1024
+MAX_DIRECT_KNOWLEDGE_ZIP_BYTES = int(os.environ.get("RULGUARD_MAX_DIRECT_ZIP_BYTES", 4 * 1024 * 1024))
 
 
 class KnowledgeFileStatus(BaseModel):

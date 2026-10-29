@@ -7,7 +7,9 @@ import { upload } from "@vercel/blob/client";
  * docs on functions/limitations#request-body-size). Kept well under the
  * real limit as a margin for multipart overhead.
  */
-export const DIRECT_UPLOAD_THRESHOLD_BYTES = 4 * 1024 * 1024;
+// Self-hosted builds (no Vercel body cap) raise this at build time.
+export const DIRECT_UPLOAD_THRESHOLD_BYTES =
+  Number(process.env.NEXT_PUBLIC_DIRECT_UPLOAD_THRESHOLD_BYTES) || 4 * 1024 * 1024;
 
 export class BlobUploadError extends Error {}
 

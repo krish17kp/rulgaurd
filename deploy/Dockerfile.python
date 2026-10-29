@@ -1,0 +1,27 @@
+# One image for the FastAPI backend and the Streamlit research dashboard.
+# Versions pinned to the environment the shipped models were fitted/served with.
+FROM python:3.12-slim-bookworm
+RUN sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources \
+ && apt-get update && apt-get install -y --no-install-recommends p7zip-full unrar curl git \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir \
+    numpy==2.5.4 pandas==3.1.0 scipy==1.18.1 scikit-learn==1.9.0 joblib==1.6.0 \
+    fastapi==0.162.0 starlette==1.10.0 pydantic==2.14.1 httpx==0.28.1 python-multipart==0.0.32 \
+    "uvicorn[standard]" pyarrow duckdb matplotlib plotly streamlit==1.62.0 py7zr reportlab pypdf
+WORKDIR /app
+COPY src ./src
+COPY scripts ./scripts
+COPY streamlit_app.py pyproject.toml README.md ./
+COPY deploy_data ./deploy_data
+COPY reports ./reports
+COPY artifacts/rag_index ./artifacts/rag_index
+COPY docs ./docs
+# Same metrics files the Vercel build vendored from frontend/reports/metrics; never overwrite.
+COPY frontend/reports/metrics /tmp/fe-metrics
+# artifacts/models is a read-only volume (manifest + checksum-verified joblibs).
+RUN cp -n /tmp/fe-metrics/*.json reports/metrics/ && rm -rf /tmp/fe-metrics \
+ && mkdir -p artifacts/models /data data/processed data/interim \
+ && ln -sf /app/artifacts/models/rul_extra_trees.joblib deploy_data/rul_extra_trees.joblib \
+ && useradd -u 1000 -m app && chown -R app /app /data
+ENV PYTHONPATH=/app/src PYTHONUNBUFFERED=1 MPLCONFIGDIR=/tmp/mpl
+USER app

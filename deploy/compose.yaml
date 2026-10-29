@@ -1,0 +1,59 @@
+# RULGuard production stack. Host nginx terminates TLS and proxies to these
+# loopback-only ports; nothing here is reachable from the internet directly.
+name: rulguard
+x-py: &py
+  build: { context: .., dockerfile: deploy/Dockerfile.python }
+  image: rulguard-python:latest
+  env_file: .env
+  restart: unless-stopped
+  volumes:
+    - /opt/rulguard/models:/app/artifacts/models:ro
+    - rulguard-data:/data
+    - rulguard-processed:/app/data/processed
+    - /opt/rulguard/datasets/femto:/app/data/interim/femto:ro
+  logging: { driver: json-file, options: { max-size: "10m", max-file: "5" } }
+
+services:
+  api:
+    <<: *py
+    command: ["uvicorn", "bearing_pdm.api:vercel_app", "--host", "0.0.0.0", "--port", "8000",
+              "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    ports: ["127.0.0.1:8000:8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    mem_limit: 1800m
+
+  dashboard:
+    <<: *py
+    command: ["streamlit", "run", "streamlit_app.py", "--server.port", "8501",
+              "--server.address", "0.0.0.0", "--server.headless", "true",
+              "--server.maxUploadSize", "2048", "--browser.gatherUsageStats", "false"]
+    ports: ["127.0.0.1:8501:8501"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    mem_limit: 1800m
+
+  frontend:
+    build: { context: .., dockerfile: deploy/Dockerfile.frontend }
+    image: rulguard-frontend:latest
+    restart: unless-stopped
+    ports: ["127.0.0.1:3000:3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "5" } }
+    mem_limit: 512m
+
+volumes:
+  rulguard-data:
+  rulguard-processed:
