@@ -3822,5 +3822,9 @@ def get_dataset_job_result(job_id: str) -> dict:
 # in a separate wrapper keeps local dev (`uvicorn bearing_pdm.api:app`, routes
 # at /health) and the test suite (imports `app` directly) on unprefixed paths,
 # while api/index.py imports `vercel_app` for the actual deployed function.
+from bearing_pdm.lab_api import router as _lab_router  # noqa: E402 - needs app's helpers defined first
+
+app.include_router(_lab_router)
+
 vercel_app = FastAPI()
 vercel_app.mount("/api", app)

@@ -13,8 +13,6 @@ type Result = { ok: boolean; chip?: string; lines: string[] }
 type Phase = { kind: 'idle' } | { kind: 'running'; step: number; file?: string } | { kind: 'done' } | { kind: 'inspected'; file: string; result: Result }
 
 // The full app and the lab live on this same domain (deploy/nginx/rulguard.conf); env overrides are for local dev.
-const APP_URL = import.meta.env.VITE_APP_URL ?? ''
-const LAB_URL = import.meta.env.VITE_LAB_URL ?? '/lab/'
 
 // Matches the API's MAX_UPLOAD_BYTES and nginx client_max_body_size; anything bigger never reaches the server.
 const MAX_UPLOAD_BYTES = 64 * 1024 * 1024
@@ -258,8 +256,8 @@ export function Analyzer() {
                 )}
                 {phase.result.lines.map((l) => <p key={l} className="text-paper/85">{l}</p>)}
                 <div className="flex flex-wrap gap-3">
-                  <a href={`${APP_URL}/upload`} className="rounded-full border-2 border-paper bg-mint px-5 py-2.5 font-display text-sm font-bold text-ink">Run the full analysis</a>
-                  <a href={LAB_URL} className="rounded-full border-2 border-paper px-5 py-2.5 font-display text-sm font-bold">Open the research lab</a>
+                  <a href="/upload" className="rounded-full border-2 border-paper bg-mint px-5 py-2.5 font-display text-sm font-bold text-ink">Run the full analysis</a>
+                  <a href="/results" className="rounded-full border-2 border-paper px-5 py-2.5 font-display text-sm font-bold">See full dataset results</a>
                 </div>
               </motion.div>
             )}

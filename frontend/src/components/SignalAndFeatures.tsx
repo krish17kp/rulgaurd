@@ -44,7 +44,6 @@ function featureRows(features: Record<string, number>, axis: "vibration_x" | "vi
  * the backend remains the only place features/FFT are computed. */
 export function SignalAndFeatures({ file }: { file: File }) {
   const [state, setState] = useState<State>({ status: "loading" });
-  const [tab, setTab] = useState<"signal" | "features">("signal");
 
   useEffect(() => {
     let cancelled = false;
@@ -66,8 +65,19 @@ export function SignalAndFeatures({ file }: { file: File }) {
   if (state.status === "error") {
     return <p className="text-sm text-danger">{state.error}</p>;
   }
+  return <SignalView data={state.data} />;
+}
 
-  const { data } = state;
+/** The waveform/FFT/feature view for any FemtoSignalResponse-shaped result: an upload, a
+ * FEMTO recording on the server, or a bundled snapshot window (Signals page). */
+export function SignalView({
+  data,
+  source = "the raw uploaded acquisition — not reconstructed",
+}: {
+  data: FemtoSignalResponse;
+  source?: string;
+}) {
+  const [tab, setTab] = useState<"signal" | "features">("signal");
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-surface-border bg-surface p-4">
@@ -91,8 +101,7 @@ export function SignalAndFeatures({ file }: { file: File }) {
       {tab === "signal" && (
         <div className="flex flex-col gap-4">
           <p className="text-xs text-foreground-muted">
-            {data.samples} samples at {data.sample_rate_hz.toLocaleString()} Hz (the raw uploaded acquisition — not
-            reconstructed).
+            {data.samples} samples at {data.sample_rate_hz.toLocaleString()} Hz ({source}).
           </p>
           <div>
             <p className="mb-1 text-xs font-medium text-foreground-muted">Vibration X waveform</p>

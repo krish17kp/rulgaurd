@@ -3,9 +3,8 @@
 | Host | Serves |
 |---|---|
 | `DOMAIN` | landing site (`web/dist`) + `/api` |
-| `DOMAIN/upload`, `/trajectory`, ... | Next.js analyzer (`frontend/`), every path not listed here |
-| `DOMAIN/lab/` | Streamlit research dashboard (public; `RULGUARD_LAB_READONLY=1` turns off server-path analysis) |
-| `app.DOMAIN`, `lab.DOMAIN` | 301 redirects into the one site, so old links keep working |
+| `DOMAIN/upload`, `/results`, `/signals`, `/experiment`, `/knowledge`, ... | Next.js app (`frontend/`): every tool, including the former Streamlit lab |
+| `app.DOMAIN`, `lab.DOMAIN`, `DOMAIN/lab` | 301 redirects into the one site, so old links keep working |
 
 Containers (`compose.yaml`) bind to 127.0.0.1 only; host nginx terminates TLS (certbot).
 
@@ -27,7 +26,7 @@ then rsync `web/dist/` to `/opt/rulguard/site/`.
   committed files to the server, rebuilds the containers and the landing page, and prints health.
   The server is not connected to GitHub, so a push alone never changes the live site.
 - Set the Groq key without echoing it:
-  `ssh -t <host> 'read -rsp "Groq key: " k; sed -i "s|^GROQ_API_KEY=.*|GROQ_API_KEY=$k|" /opt/rulguard/app/deploy/.env; cd /opt/rulguard/app/deploy && docker compose up -d api dashboard'`
+  `ssh -t <host> 'read -rsp "Groq key: " k; sed -i "s|^GROQ_API_KEY=.*|GROQ_API_KEY=$k|" /opt/rulguard/app/deploy/.env; cd /opt/rulguard/app/deploy && docker compose up -d api'`
 - Logs: `docker compose logs -f api` (rotated, 5x10MB per service)
 - Backups: `backup.sh` nightly 03:30 via `/etc/cron.d/rulguard-backup` -> `/opt/rulguard/backups` (14 days)
 - Restart policy `unless-stopped` + docker/nginx enabled at boot.

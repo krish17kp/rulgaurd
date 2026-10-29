@@ -29,6 +29,6 @@ for _ in $(seq 30); do
   ssh "$HOST" 'cd /opt/rulguard/app/deploy && ! docker compose ps --format "{{.Status}}" | grep -qv "(healthy)"' && break
   sleep 5
 done
-for u in "https://$DOMAIN/" "https://$DOMAIN/api/health" "https://$DOMAIN/upload" "https://$DOMAIN/lab/"; do
+for u in "https://$DOMAIN/" "https://$DOMAIN/api/health" "https://$DOMAIN/upload" "https://$DOMAIN/results" "https://$DOMAIN/api/lab/signals"; do
   echo "$(curl -s -o /dev/null -w '%{http_code}' "$u") $u"
 done

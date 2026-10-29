@@ -18,9 +18,9 @@ const LINKS = [
   ['#results', 'Results'],
   ['#try', 'Try it'],
   ['#datasets', 'Datasets'],
-  // Same-domain pages: the full analysis app and the Streamlit research lab.
+  // Same-domain pages of the analysis app.
   ['/upload', 'Analyze'],
-  ['/lab/', 'Lab'],
+  ['/results', 'Lab'],
 ]
 
 const TICKER = ['FEMTO PRONOSTIA', 'XJTU-SY', 'IMS NASA', 'CWRU', 'Paderborn', 'NSK 6205 college rig', 'Extra Trees', 'leave-one-bearing-out', 'conformal intervals', 'applicability checks']

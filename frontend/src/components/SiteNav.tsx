@@ -4,13 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
-// "/" (landing page) and "/lab/" (Streamlit) are other apps behind the same domain,
-// so they get plain <a> links; everything else is a Next.js route.
+// "/" is the landing page, a separate static app behind the same domain, so it gets a
+// plain <a> link; everything else is a Next.js route.
 const HOME = "/";
-const LAB = "/lab/";
 
 const PRIMARY_LINKS = [
   { href: "/upload", label: "Analyze" },
+  { href: "/results", label: "Results" },
+  { href: "/signals", label: "Signals" },
   { href: "/trajectory", label: "Trajectory" },
   { href: "/evaluation", label: "Evaluation" },
   { href: "/datasets", label: "Datasets" },
@@ -21,6 +22,8 @@ const PRIMARY_LINKS = [
 const MORE_LINKS = [
   { href: "/overview", label: "Overview" },
   { href: "/cross-dataset", label: "Cross-dataset" },
+  { href: "/experiment", label: "Experiment lab" },
+  { href: "/knowledge", label: "Knowledge search" },
   { href: "/analyze-bearing-zip", label: "Analyze bearing ZIP" },
   { href: "/analyze-bundle", label: "Analysis Bundle" },
   { href: "/predict", label: "Predict (manual feature row)" },
@@ -86,12 +89,12 @@ export function SiteNav() {
               </div>
             )}
           </div>
-          <a
-            href={LAB}
+          <Link
+            href="/upload"
             className="ml-1 rounded-full border-2 border-surface-border bg-magenta px-4 py-2 font-display text-xs font-bold"
           >
-            Research lab
-          </a>
+            Upload data
+          </Link>
         </div>
 
         <button
@@ -131,9 +134,6 @@ export function SiteNav() {
               {link.label}
             </Link>
           ))}
-          <a href={LAB} className="rounded-2xl px-4 py-3 font-display text-sm font-bold hover:bg-magenta">
-            Research lab
-          </a>
         </div>
       )}
     </header>

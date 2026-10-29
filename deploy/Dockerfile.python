@@ -17,6 +17,9 @@ COPY deploy_data ./deploy_data
 COPY reports ./reports
 COPY artifacts/rag_index ./artifacts/rag_index
 COPY docs ./docs
+# Example CWRU/Paderborn recordings for the site's Experiment Lab page (~800 KB).
+COPY data/fixtures/cwru ./data/fixtures/cwru
+COPY data/fixtures/paderborn ./data/fixtures/paderborn
 # Same metrics files the Vercel build vendored from frontend/reports/metrics; never overwrite.
 COPY frontend/reports/metrics /tmp/fe-metrics
 # artifacts/models is a read-only volume (manifest + checksum-verified joblibs).
