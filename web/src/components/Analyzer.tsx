@@ -1,16 +1,18 @@
 import { useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Check, FileUp, LoaderCircle, Play, TriangleAlert } from 'lucide-react'
+import { Check, FileUp, FolderUp, LoaderCircle, Play, TriangleAlert } from 'lucide-react'
 import { STAGE, data, hours } from '../data'
 import { Bearing, Wave } from './Visuals'
 import { BorderBeam } from './ui/border-beam'
 import confetti from 'canvas-confetti'
 import { prefersReducedMotion } from '../data'
+import { fromEntries, fromFileList, sendToJob, type Picked } from '../lib/jobUpload'
 
 const RUNS = Object.keys(data.bearings)
 const STEPS = ['Reading the recording', 'Extracting 30+ vibration features', 'Checking the model applies', 'Scoring health', 'Estimating life left']
 type Result = { ok: boolean; chip?: string; lines: string[] }
 type Phase = { kind: 'idle' } | { kind: 'running'; step: number; file?: string } | { kind: 'done' } | { kind: 'inspected'; file: string; result: Result }
+  | { kind: 'uploading'; file: string; sent: number; total: number }
 
 // The full app and the lab live on this same domain (deploy/nginx/rulguard.conf); env overrides are for local dev.
 
@@ -19,18 +21,13 @@ const MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`
 type Json = Record<string, any>
 
-/** Files a browser upload can never analyze: answered locally, with what to do instead. */
+/** Several files, a folder, an archive set or anything over the quick-check limit: a whole-dataset job. */
+const isDataset = (picked: Picked[]) =>
+  picked.length > 1 || picked[0].name.includes('/') || picked[0].file.size > MAX_UPLOAD_BYTES
+  || /\.(rar|7z|\d{3})$/i.test(picked[0].file.name)
+
+/** Single files the quick check can never analyze: answered locally, with what to do instead. */
 function precheck(f: File): Result | null {
-  const part = f.name.match(/\.part0*(\d+)\.rar$/i)
-  if (part)
-    return { ok: false, chip: `archive part ${part[1]}`, lines: [
-      `This is one piece of a multi-part RAR archive (${mb(f.size)}). A single part can't be opened on its own, so there is nothing to analyze yet.`,
-      /xjtu/i.test(f.name)
-        ? 'The full XJTU-SY run-to-failure analysis, including which bearings get an RUL estimate and why the rest are withheld, was run offline and lives in the research lab. Single recordings can be analyzed right here or in the RULGuard app.'
-        : 'Whole archives are analyzed in the research lab, where all parts are read together.',
-    ] }
-  if (/\.(rar|7z)$/i.test(f.name))
-    return { ok: false, chip: 'archive', lines: [`RAR and 7z archives (${mb(f.size)}) are extracted and analyzed in the research lab, not in this quick check.`] }
   // Headerless files from datasets the pipeline reads with its own adapters (ims.py, femto.py, college.py).
   if (/^\d{4}(\.\d{2}){5}$/.test(f.name))
     return { ok: false, chip: 'IMS snapshot', lines: [
@@ -44,8 +41,6 @@ function precheck(f: File): Result | null {
     return { ok: false, chip: 'college rig log', lines: [
       `This looks like a college test-rig log (${mb(f.size)}). These hour-long headerless logs are read by the college adapter in the offline pipeline, and their results are on the research lab's Health Indicator and RUL pages.`,
     ] }
-  if (f.size > MAX_UPLOAD_BYTES)
-    return { ok: false, chip: 'too large', lines: [`${mb(f.size)} is over the ${mb(MAX_UPLOAD_BYTES)} quick-check limit. Drop a single recording here, or analyze the full dataset in the research lab.`] }
   return null
 }
 
@@ -127,6 +122,24 @@ export function Analyzer() {
     )
   }
 
+  const onPicked = async (picked: Picked[]) => {
+    if (!picked.length) return
+    if (!isDataset(picked)) return onFile(picked[0].file)
+    timers.current.forEach(clearTimeout)
+    const folder = picked[0].name.includes('/') ? ` from ${picked[0].name.split('/')[0]}/` : ''
+    const label = picked.length === 1 ? picked[0].name : `${picked.length} files${folder}`
+    const total = picked.reduce((s, p) => s + p.file.size, 0)
+    setPhase({ kind: 'uploading', file: label, sent: 0, total })
+    try {
+      const id = await sendToJob(picked, (sent) => setPhase({ kind: 'uploading', file: label, sent, total }))
+      window.location.assign(`/upload?job=${encodeURIComponent(id)}`)
+    } catch (err) {
+      setPhase({ kind: 'inspected', file: label, result: { ok: false, chip: 'upload stopped', lines: [
+        err instanceof Error ? err.message : 'Could not reach the analysis server. Check your connection and try again.',
+      ] } })
+    }
+  }
+
   const onFile = async (f?: File | null) => {
     if (!f) return
     timers.current.forEach(clearTimeout)
@@ -184,13 +197,23 @@ export function Analyzer() {
           <label
             onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
             onDragLeave={() => setDrag(false)}
-            onDrop={(e) => { e.preventDefault(); setDrag(false); onFile(e.dataTransfer.files[0]) }}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDrag(false)
+              // Entries must be read before any await; they let a dropped folder be walked.
+              const entries = Array.from(e.dataTransfer.items, (it) => it.webkitGetAsEntry()).filter((x): x is FileSystemEntry => !!x)
+              void (entries.length ? fromEntries(entries) : Promise.resolve(fromFileList(e.dataTransfer.files))).then(onPicked)
+            }}
             className={`flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-ink p-6 text-center transition ${drag ? 'scale-[1.02] bg-butter' : 'bg-paper hover:bg-paper-2'}`}
           >
             <FileUp />
-            <span className="font-semibold">Drop a CSV, .mat or bearing ZIP (up to 64 MB)</span>
-            <span className="text-sm text-ink-soft">FEMTO acquisitions and bearing ZIPs, CWRU/Paderborn .mat, or any headered vibration CSV. Large RAR datasets go to the research lab.</span>
-            <input type="file" accept=".csv,.zip,.rar,.txt,.mat" className="sr-only" onChange={(e) => onFile(e.target.files?.[0])} />
+            <span className="font-semibold">Drop files, a folder, or ZIP / RAR archives</span>
+            <span className="text-sm text-ink-soft">One recording (CSV, .mat or bearing ZIP up to 64 MB) is checked instantly. Several files, a folder, or a ZIP/RAR/7z set, multi-part archives included, run as a full dataset analysis.</span>
+            <input type="file" multiple accept=".csv,.txt,.dat,.mat,.wav,.zip,.rar,.7z" className="sr-only" onChange={(e) => { if (e.target.files) void onPicked(fromFileList(e.target.files)); e.target.value = '' }} />
+          </label>
+          <label className="-mt-3 flex cursor-pointer items-center justify-center gap-2 self-center rounded-full border-2 border-ink bg-paper px-4 py-2 text-sm font-semibold transition hover:bg-mint focus-within:ring-2 focus-within:ring-cobalt">
+            <FolderUp size={16} /> Choose a folder
+            <input type="file" multiple className="sr-only" {...{ webkitdirectory: '' }} onChange={(e) => { if (e.target.files) void onPicked(fromFileList(e.target.files)); e.target.value = '' }} />
           </label>
         </div>
 
@@ -217,6 +240,17 @@ export function Analyzer() {
                   </motion.li>
                 ))}
               </motion.ol>
+            )}
+
+            {phase.kind === 'uploading' && (
+              <motion.div key="up" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col gap-4">
+                <p className="truncate font-display text-sm font-bold">{phase.file}</p>
+                <p className="flex items-center gap-3"><LoaderCircle className="animate-spin text-butter" size={20} /> Uploading the dataset: {mb(phase.sent)} of {mb(phase.total)}</p>
+                <div className="h-3 overflow-hidden rounded-full border-2 border-paper/40" role="progressbar" aria-valuemin={0} aria-valuemax={phase.total} aria-valuenow={phase.sent}>
+                  <div className="h-full bg-mint transition-[width]" style={{ width: `${phase.total ? (100 * phase.sent) / phase.total : 0}%` }} />
+                </div>
+                <p className="text-sm text-paper/70">Keep this tab open. When the upload finishes, the analysis page opens and shows each step, then health, stages and, for bearings that ran to failure, remaining life.</p>
+              </motion.div>
             )}
 
             {phase.kind === 'done' && (
