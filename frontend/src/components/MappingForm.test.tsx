@@ -46,11 +46,13 @@ describe("MappingForm", () => {
     expect(screen.getByText("Choose at least one vibration column.")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Role of acc_x"), "vibration_x");
 
+    await userEvent.click(screen.getByLabelText(/Every bearing ran until it failed/));
     await userEvent.click(go);
     expect(submitDatasetJobMapping).toHaveBeenCalledWith("J1", {
       columns: { acc_x: "vibration_x" },
       sampling_rate_hz: 2000,
       recording_interval_s: 600,
+      ran_to_failure: true,
     });
     expect(onSubmitted).toHaveBeenCalled();
   });

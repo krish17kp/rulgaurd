@@ -45,6 +45,7 @@ export function buildReportHtml(job: DatasetJob, result: DatasetJobResult): stri
   const s = result.summary;
   const ps = s.partial_set;
   const q = result.health_quality;
+  const r = result.dataset_rul;
   const notValidated = job.validation?.status === "not_validated";
   const incomplete = ps?.incomplete_bearings.map((b) => b.bearing) ?? [];
   const ids = Object.keys(result.decisions).sort();
@@ -98,7 +99,7 @@ ${job.validation ? `<p class="box${notValidated ? " warn" : ""}"><strong>${notVa
 <tr><td>Sampling rate</td><td>${result.profile.sampling_rate_hz != null ? `${result.profile.sampling_rate_hz.toLocaleString()} Hz` : "unknown"}</td></tr>
 <tr><td>Channels</td><td>${esc(result.profile.channels_found.join(", ") || "none")}</td></tr>
 <tr><td>Files found / processed / skipped / failed</td><td>${s.files_found} / ${s.files_processed} / ${s.files_skipped} / ${s.files_failed}</td></tr>
-<tr><td>Bearing runs found / processed / failed</td><td>${s.bearings_found} / ${s.bearings_processed} / ${s.bearings_failed}</td></tr>${q ? `<tr><td>Health rating reliability</td><td><strong>${esc(q.rating)}</strong>${q.trend != null ? `, trend with time ${q.trend.toFixed(2)}, smoothness ${Math.round(q.smoothness! * 100)}%` : ""}${q.weak_bearings?.length ? `. Weak: <span class=mono>${esc(q.weak_bearings.join(", "))}</span>` : ""}</td></tr>` : ""}</table>
+<tr><td>Bearing runs found / processed / failed</td><td>${s.bearings_found} / ${s.bearings_processed} / ${s.bearings_failed}</td></tr>${q ? `<tr><td>Health rating reliability</td><td><strong>${esc(q.rating)}</strong>${q.trend != null ? `, trend with time ${q.trend.toFixed(2)}, smoothness ${Math.round(q.smoothness! * 100)}%` : ""}${q.weak_bearings?.length ? `. Weak: <span class=mono>${esc(q.weak_bearings.join(", "))}</span>` : ""}</td></tr>` : ""}${r ? `<tr><td>RUL learned from this dataset</td><td><strong>${esc(r.status.replaceAll("_", " "))}</strong> (${r.n_bearings} run-to-failure bearing(s), held-out test)${r.mae_seconds != null ? `: average error ${(r.mae_seconds / 3600).toFixed(2)} h vs ${(r.naive_mae_seconds! / 3600).toFixed(2)} h for the average-life guess` : ""}</td></tr>` : ""}</table>
 ${s.failed.length ? `<p class="box warn">Not processed: ${s.failed.map((f) => `<span class=mono>${esc(f.bearing)}</span> (${esc(f.reason)})`).join("; ")}</p>` : ""}
 <h2>Per bearing, at the last recording</h2>
 <table><tr><th>Bearing</th><th>Recordings</th><th>Health indicator</th><th>Stage</th><th>RUL</th></tr>${rows.join("")}</table>

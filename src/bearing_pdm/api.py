@@ -3810,6 +3810,7 @@ class JobMappingRequest(BaseModel):
     columns: dict[str, str] = Field(max_length=64)
     sampling_rate_hz: float
     recording_interval_s: float | None = None
+    ran_to_failure: bool = False
 
 
 @app.post("/jobs/{job_id}/mapping")

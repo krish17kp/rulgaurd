@@ -108,9 +108,10 @@ def add_self_normalized_features(df: pd.DataFrame,
     return out
 
 
-def after_reference_window(df: pd.DataFrame) -> pd.Series:
+def after_reference_window(df: pd.DataFrame,
+                           reference: tuple[int, int] | None = None) -> pd.Series:
     """True for recordings strictly after their bearing's reference window -
     the rows on which SN features carry information and on which every
-    cross-domain model is evaluated."""
-    limit = df["dataset_id"].map(lambda d: sum(reference_window(d)))
+    cross-domain model is evaluated. `reference` as in add_self_normalized_features."""
+    limit = sum(reference) if reference else df["dataset_id"].map(lambda d: sum(reference_window(d)))
     return df["sequence_index"] >= limit

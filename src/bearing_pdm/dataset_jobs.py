@@ -898,7 +898,8 @@ def submit_mapping(job_id: str, mapping: dict) -> dict:
         interval = None
     (d / "mapping.json").write_text(json.dumps(
         {"columns": columns, "sampling_rate_hz": float(rate),
-         "recording_interval_s": None if interval is None else float(interval)}))
+         "recording_interval_s": None if interval is None else float(interval),
+         "ran_to_failure": mapping.get("ran_to_failure") is True}))
     state.update(state="queued", message="Mapping confirmed. Waiting for the processing worker.")
     state["stages"]["process"].update(status="pending")
     _write_state(d, state)
@@ -911,7 +912,7 @@ def submit_mapping(job_id: str, mapping: dict) -> dict:
 
 
 def _generic_runs(d: Path, data: Path):
-    from bearing_pdm.adapters import GenericAdapter
+    from bearing_pdm.adapters import ROLE_RUN_TO_FAILURE, GenericAdapter
 
     proposal = _read_state(d)["mapping_proposal"]
     m = json.loads((d / "mapping.json").read_text())
@@ -923,7 +924,10 @@ def _generic_runs(d: Path, data: Path):
     root = (data / proposal["root"]).resolve()
     if not root.is_relative_to(data.resolve()):
         raise JobError("invalid dataset root")
-    runs = [replace(adapter.discover(root / r["path"])[0], bearing_id=r["id"])
+    # Only the user's word makes a custom bearing a run-to-failure record: nothing in
+    # the files says it failed. With it, the last recording is the failure (pipeline.py).
+    rtf = {"run_to_failure": True, "role": ROLE_RUN_TO_FAILURE} if m.get("ran_to_failure") else {}
+    runs = [replace(adapter.discover(root / r["path"])[0], bearing_id=r["id"], **rtf)
             for r in proposal["runs"]]
     return root, adapter, runs
 
@@ -1058,6 +1062,7 @@ def _process(d: Path, data: Path, plan: dict, root: Path, profile: dict, all_fil
     from bearing_pdm.health import health_quality
     from bearing_pdm.pipeline import build_canonical_features
     from bearing_pdm.routing import candidates_from_bundle, oof_from_predictions, route_dataset
+    from bearing_pdm.upload_rul import dataset_rul
 
     run_files = {r.run_id: _run_files(r) for r in runs}
     _update(d, state="processing",
@@ -1116,6 +1121,14 @@ def _process(d: Path, data: Path, plan: dict, root: Path, profile: dict, all_fil
         progress=lambda msg: _update(d, stages={"process": {"detail": msg[:200]}}),
         adapter=adapter)
     validation = validation_for(dataset, adapter.display_name, candidates_from_bundle(bundle))
+    _update(d, message="Testing RUL on this dataset: each run-to-failure bearing is predicted "
+                       "by a model trained on the others.")
+    rul = dataset_rul(frames, adapter.reference_window,
+                      list(bundle["raw_seconds"]["model"].feature_columns),
+                      progress=lambda msg: _update(d, stages={"process": {"detail": msg[:200]}}))
+    rul["ends_healthy"] = sorted(b for b, t in trajectories.items()
+                                 if t and t[0].get("actual_rul_seconds") is not None
+                                 and t[-1].get("stage") == "HEALTHY")
     split = []
     if partial:
         wrap = root.relative_to(data).as_posix()
@@ -1137,7 +1150,7 @@ def _process(d: Path, data: Path, plan: dict, root: Path, profile: dict, all_fil
     result = {"outcome": "analyzed", "dataset_id": dataset,
               "profile": _sanitize(profile, root), "decisions": _sanitize(decisions, root),
               "trajectories": trajectories, "validation": validation, "summary": summary,
-              "health_quality": health_quality(trajectories)}
+              "health_quality": health_quality(trajectories), "dataset_rul": rul}
     (d / "result.json").write_text(json.dumps(_json_clean(result)))
     if failed_runs:
         message = (f"Partially completed: {len(failed_runs)} of {len(runs)} bearing run(s) could "

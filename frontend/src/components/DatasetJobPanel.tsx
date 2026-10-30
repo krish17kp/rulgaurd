@@ -22,6 +22,7 @@ import { RoutingBundleResult } from "@/components/RoutingBundleResult";
 import { MappingForm } from "@/components/MappingForm";
 import { buildReportHtml, downloadText } from "@/lib/report";
 import { HealthQualityCard } from "@/components/HealthQualityCard";
+import { DatasetRulCard } from "@/components/DatasetRulCard";
 
 /** A selected file plus the name the server should see: the folder-relative
  * path for a folder upload, otherwise the file name. */
@@ -397,6 +398,7 @@ export function DatasetJobPanel({
                 </button>
               </div>
               {result.health_quality && <HealthQualityCard quality={result.health_quality} />}
+              {result.dataset_rul && <DatasetRulCard rul={result.dataset_rul} />}
               <BearingTable result={result} incomplete={incompleteOf(phase.job)} />
               <RoutingBundleResult
                 data={result}

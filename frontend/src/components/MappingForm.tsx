@@ -25,6 +25,7 @@ export function MappingForm({ job, onSubmitted }: { job: DatasetJob; onSubmitted
   );
   const [rate, setRate] = useState(p.sampling_rate_hz ? String(Math.round(p.sampling_rate_hz)) : "");
   const [interval, setIntervalS] = useState("");
+  const [ranToFailure, setRanToFailure] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,6 +49,7 @@ export function MappingForm({ job, onSubmitted }: { job: DatasetJob; onSubmitted
           columns,
           sampling_rate_hz: Number(rate),
           recording_interval_s: p.needs_interval ? Number(interval) : null,
+          ran_to_failure: ranToFailure,
         })
       );
     } catch (err) {
@@ -145,6 +147,22 @@ export function MappingForm({ job, onSubmitted }: { job: DatasetJob; onSubmitted
           </label>
         )}
       </div>
+
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={ranToFailure}
+          onChange={(e) => setRanToFailure(e.target.checked)}
+          className="mt-1"
+        />
+        <span>
+          <span className="font-medium">Every bearing ran until it failed</span>
+          <span className="block text-xs text-foreground-muted">
+            Tick only if each folder&apos;s last file was recorded at failure. RULGuard then learns remaining life from
+            these bearings and tests it on each one in turn. With {p.runs.length < 3 ? "fewer than 3 bearings, as here," : "fewer than 3 bearings"} RUL is still withheld.
+          </span>
+        </span>
+      </label>
 
       {p.warnings.length > 0 && (
         <ul className="list-inside list-disc text-xs text-caution">

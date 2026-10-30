@@ -73,11 +73,12 @@ _KEEP = ["dataset_id", "bearing_run_id", "sequence_index", "elapsed_s", "rul_sec
          "life_fraction", "total_life_s"]
 
 
-def prepare(frames: list[pd.DataFrame]) -> pd.DataFrame:
-    """Concatenate canonical frames, add SN features and the evaluation mask."""
+def prepare(frames: list[pd.DataFrame], reference: tuple[int, int] | None = None) -> pd.DataFrame:
+    """Concatenate canonical frames, add SN features and the evaluation mask.
+    `reference` overrides the registered reference window (a custom upload)."""
     df = pd.concat(frames, ignore_index=True)
-    df = add_self_normalized_features(df)
-    df["evaluable"] = after_reference_window(df) & df["rul_seconds"].notna()
+    df = add_self_normalized_features(df, reference)
+    df["evaluable"] = after_reference_window(df, reference) & df["rul_seconds"].notna()
     df["total_life_s"] = df.groupby("bearing_run_id")["elapsed_s"].transform("max").where(
         df["rul_seconds"].notna())
     return df

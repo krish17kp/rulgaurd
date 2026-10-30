@@ -807,11 +807,37 @@ export interface HealthQuality {
   thresholds?: { strong: number; moderate: number };
 }
 
+export interface DatasetRulPoint {
+  sequence_index: number;
+  elapsed_s: number;
+  actual_rul_seconds: number | null;
+  predicted_rul_seconds: number | null;
+  rul_lo: number | null;
+  rul_hi: number | null;
+  naive_rul_seconds: number | null;
+}
+
+export interface DatasetRul {
+  status: "validated" | "not_better_than_naive" | "too_few_bearings" | "no_failure_data";
+  n_bearings: number;
+  min_bearings: number;
+  model: string;
+  mae_seconds?: number;
+  naive_mae_seconds?: number;
+  skill_vs_naive?: number | null;
+  nmae_life?: number;
+  interval_coverage?: number;
+  per_bearing?: Array<{ bearing: string; n: number; mae_seconds: number; naive_mae_seconds: number; coverage: number; total_life_s: number }>;
+  trajectories?: Record<string, DatasetRulPoint[]>;
+  ends_healthy: string[];
+}
+
 export interface DatasetJobResult extends RoutingBundlePayload {
   outcome: "analyzed" | "profile_only";
   validation: JobValidation | null;
   summary: JobSummary;
   health_quality?: HealthQuality;
+  dataset_rul?: DatasetRul;
 }
 
 export const JOB_TERMINAL_STATES: JobStateName[] = ["completed", "partial", "failed", "cancelled"];
@@ -858,7 +884,7 @@ export function startDatasetJob(id: string): Promise<DatasetJob> {
 
 export function submitDatasetJobMapping(
   id: string,
-  mapping: { columns: Record<string, string>; sampling_rate_hz: number; recording_interval_s: number | null }
+  mapping: { columns: Record<string, string>; sampling_rate_hz: number; recording_interval_s: number | null; ran_to_failure: boolean }
 ): Promise<DatasetJob> {
   return request<DatasetJob>(`/jobs/${encodeURIComponent(id)}/mapping`, {
     method: "POST",

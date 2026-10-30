@@ -525,9 +525,55 @@ def test_custom_dataset_pauses_for_mapping_then_runs_the_same_pipeline(jobs):
     assert all(p["health_indicator"] is not None for p in traj)
     assert all(d["status"] == "RUL_SUPPRESSED" for d in result["decisions"].values())
     assert result["validation"]["status"] == "not_validated"
+    assert result["dataset_rul"]["status"] == "no_failure_data"  # not declared run-to-failure
     assert not (dj.JOBS_ROOT / out["id"] / "data").exists()
     with pytest.raises(dj.JobError, match="not waiting"):
         dj.submit_mapping(out["id"], {"columns": {}, "sampling_rate_hz": 1})
+
+
+def _failing_rigs(base: Path, lives: tuple[int, ...]) -> Path:
+    """Rigs of different lives whose vibration rises in the last few recordings before
+    failure - remaining life is learnable, the mean-life guess is not."""
+    import numpy as np
+
+    rng = np.random.default_rng(1)
+    for k, life in enumerate(lives):
+        (base / f"rig_{k}").mkdir(parents=True)
+        for i in range(life):
+            sd = 1 + 4 * np.exp(-(life - 1 - i) / 4)
+            x, y = rng.normal(0, sd, 1000), rng.normal(0, sd, 1000)
+            rows = "\n".join(f"{u:.5f},{v:.5f}" for u, v in zip(x, y))
+            (base / f"rig_{k}" / f"rec{i + 1}.csv").write_text("acc_x,acc_y\n" + rows + "\n")
+    return base
+
+
+def _map_and_run(out: dict, ran_to_failure: bool) -> dict:
+    return dj.submit_mapping(out["id"], {
+        "columns": {"acc_x": "vibration_x", "acc_y": "vibration_y"}, "sampling_rate_hz": 1000,
+        "recording_interval_s": 600, "ran_to_failure": ran_to_failure})
+
+
+@needs_bundle
+def test_run_to_failure_upload_learns_and_tests_rul_on_its_own_bearings(jobs):
+    src = _failing_rigs(jobs / "src", (24, 30, 36, 42))
+    out = _submit([_zip_tree(src, jobs / "rtf.zip")])
+    done = _map_and_run(out, ran_to_failure=True)
+    assert done["state"] == "completed", done["message"]
+    rul = dj.read_result(out["id"])["dataset_rul"]
+    assert rul["status"] == "validated", rul
+    assert rul["n_bearings"] == 4 and len(rul["per_bearing"]) == 4
+    assert rul["mae_seconds"] < rul["naive_mae_seconds"]
+    traj = rul["trajectories"]["generic:rig_0"]
+    assert traj[-1]["actual_rul_seconds"] == 0 and traj[-1]["predicted_rul_seconds"] is not None
+
+
+@needs_bundle
+def test_fewer_than_three_failed_bearings_withholds_rul(jobs):
+    src = _failing_rigs(jobs / "src", (24, 30))
+    out = _submit([_zip_tree(src, jobs / "rtf.zip")])
+    assert _map_and_run(out, ran_to_failure=True)["state"] == "completed"
+    rul = dj.read_result(out["id"])["dataset_rul"]
+    assert rul["status"] == "too_few_bearings" and "trajectories" not in rul
 
 
 def test_headerless_custom_dataset_guesses_vibration_but_skips_the_time_column(jobs):
