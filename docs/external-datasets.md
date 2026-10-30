@@ -347,3 +347,32 @@ Official NASA route `https://phm-datasets.s3.amazonaws.com/NASA/4.+Bearings.zip`
 curl (exit 0, 1,075,597,174 bytes = Content-Length), sha256 in `ims/bearings.zip.sha256`; extracted
 with the official 7-Zip 23.01 build (the distribution `7z` cannot decode RAR). The official NASA zip is 1,075,597,174 bytes (HTTP HEAD, 2026-09-25; S3 ETag
 `a201e36fe558f3f50509701b6d573532-63`, a multipart ETag, not an md5).
+
+## 7. Candidate datasets for testing the Upload page (searched 2026-10-30)
+
+Ten datasets not yet used by the project, found for testing forevue.tech uploads
+(docs/upload-analysis.md). Facts are as stated on the linked record or in the
+awesome-bearing-dataset index (https://github.com/VictorBauler/awesome-bearing-dataset,
+`docs/datasets.md`); "not stated" means the source did not give it. None has been
+downloaded or run yet. The KAIST run-to-failure set (Mendeley `5hcdd3tdvb`, NSK 6205,
+129 hourly files, stopped at 85 degC / 9 m/s^2) is the project's own college dataset and is
+not listed again.
+
+Expected result follows the fixed upload rules: RUL is learned and tested only with 3+
+bearings that ran to failure; every dataset gets health, stages and the reliability rating.
+
+| # | Dataset | Run-to-failure units | Format, size | Expected on the site | Source |
+|---|---|---|---|---|---|
+| 1 | University of Ferrara, self-aligning double-row ball bearings (Data in Brief 2024) | 6 accelerated tests; all ended with an outer-raceway defect | `.mat` (radial acceleration + sampling frequency per file), two Mendeley parts, `.7z` | RUL tested (6 bearings) | https://data.mendeley.com/datasets/htk59pp5wx/1 and DOI 10.17632/zz8hpyx939.1 |
+| 2 | UNSW, natural spalls (MSSP 2022) | 4 run-to-failure tests | `.mat`, horizontal + vertical acceleration and encoder | RUL tested (4); recordings at several speeds, so order and speed need checking | https://data.mendeley.com/datasets/h4df4mgrfb/3 |
+| 3 | Paderborn University, time-varying load and speed (Javanmardi et al. 2024) | 17 (B01-B17), no defect seeded | ZIP archives, 152 GB, CC BY 4.0 | RUL tested (17); too large for one upload, use a subset of bearings | https://zenodo.org/records/10868257 |
+| 4 | DLR oscillating needle bearings | 8 tests x 2 bearings | `.mat` (time column + raw signal), 36.7 GB, CC BY 4.0 | RUL tested if each bearing is its own folder; oscillating motion, not rotation | https://zenodo.org/records/20742913 |
+| 5 | Wind turbine high-speed shaft bearing (Bechhoefer; MathWorks example) | 1 bearing, 50 days, inner-race fault | `.mat` (`sensor-[timestamp].mat`), CC BY-NC-SA 4.0 | Health only; RUL withheld (fewer than 3) | https://github.com/mathworks/WindTurbineHighSpeedBearingPrognosis-Data |
+| 6 | Politecnico di Torino DIRG, endurance part | 1 endurance test (~230 h) on a bearing with a seeded 450 um roller indentation | not stated | Health only; RUL withheld | https://doi.org/10.5281/zenodo.3559552 |
+| 7 | University of Ottawa UORED-VAFCLS (2023) | none (diagnosis; natural accelerated degradation states) | not stated | Health only; no failure data | listed in the awesome-bearing-dataset index |
+| 8 | SCA bearing dataset (Mittuniversitetet 2024) | none (natural industrial faults, diagnosis) | not stated | Health only; no failure data | listed in the awesome-bearing-dataset index |
+| 9 | MFPT fault data sets (incl. a wind-turbine intermediate-shaft bearing) | none (fault examples) | `.mat` | Health only; checks the `.mat` reader | https://mfpt.org/fault-data-sets/ |
+| 10 | Luleå wind turbine drivetrain vibration (2018) | none (field data, anomaly detection) | not stated | Health only; no failure data | listed in the awesome-bearing-dataset index |
+
+Datasets 1-4 are the ones that exercise per-upload RUL. Datasets 5-10 check that RUL is
+withheld with the right reason while health results are still produced.
