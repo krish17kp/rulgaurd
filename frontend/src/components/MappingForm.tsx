@@ -125,7 +125,7 @@ export function MappingForm({ job, onSubmitted }: { job: DatasetJob; onSubmitted
           />
           <span className="text-xs font-normal text-foreground-muted">
             {p.sampling_rate_hz
-              ? "Worked out from the file's time column."
+              ? "Read from the files (a time column or the audio file header)."
               : "Required. Look it up in the dataset's documentation; it is never guessed."}
           </span>
         </label>

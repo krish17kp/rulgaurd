@@ -576,6 +576,47 @@ def test_fewer_than_three_failed_bearings_withholds_rul(jobs):
     assert rul["status"] == "too_few_bearings" and "trajectories" not in rul
 
 
+def _signal_rigs(base: Path, lives: tuple[int, ...], fmt: str) -> Path:
+    """Same rising-before-failure rigs, as MATLAB (.mat, an N x 2 matrix plus a scalar
+    RPM that is not a signal) or 2-channel 16-bit .wav recordings at 1 kHz."""
+    import numpy as np
+    from scipy.io import savemat, wavfile
+
+    rng = np.random.default_rng(2)
+    for k, life in enumerate(lives):
+        (base / f"rig_{k}").mkdir(parents=True)
+        for i in range(life):
+            sd = 1 + 4 * np.exp(-(life - 1 - i) / 4)
+            xy = rng.normal(0, sd, (1000, 2))
+            f = base / f"rig_{k}" / f"rec{i + 1}.{fmt}"
+            if fmt == "mat":
+                savemat(f, {"acc": xy, "rpm": 1800.0})
+            else:
+                wavfile.write(f, 1000, np.clip(xy * 3000, -32767, 32767).astype(np.int16))
+    return base
+
+
+@needs_bundle
+@pytest.mark.parametrize("fmt, columns, rate", [
+    ("mat", ("acc[0]", "acc[1]"), None),
+    ("wav", ("channel_1", "channel_2"), 1000.0),
+])
+def test_mat_and_wav_recordings_are_mapped_and_analysed(jobs, fmt, columns, rate):
+    src = _signal_rigs(jobs / "src", (24, 30, 36), fmt)
+    out = _submit([_zip_tree(src, jobs / "sig.zip")])
+    assert out["state"] == "needs_mapping", out["message"]
+    p = out["mapping_proposal"]
+    assert [c["name"] for c in p["columns"]] == list(columns)  # rpm scalar is not a signal
+    assert [c["role"] for c in p["columns"]] == ["vibration_x", "vibration_y"]
+    assert p["sampling_rate_hz"] == rate  # a .wav header states it; .mat never assumed
+    done = dj.submit_mapping(out["id"], {
+        "columns": dict(zip(columns, ("vibration_x", "vibration_y"))), "sampling_rate_hz": 1000,
+        "recording_interval_s": 600, "ran_to_failure": True})
+    assert done["state"] == "completed", done["message"]
+    assert done["summary"]["files_processed"] == 24 + 30 + 36
+    assert dj.read_result(out["id"])["dataset_rul"]["n_bearings"] == 3
+
+
 def test_headerless_custom_dataset_guesses_vibration_but_skips_the_time_column(jobs):
     src = _custom_dataset(jobs / "src", header=False)
     out = _submit([_zip_tree(src, jobs / "custom.zip")])

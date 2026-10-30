@@ -820,6 +820,9 @@ def _generic_proposal(data: Path, root: Path, profile: dict) -> dict | None:
 
     sample = next((f for f in profile["files"] if f.get("readable")
                    and any(c["numeric"] and not c["constant"] for c in f["columns"])), None)
+    rate = None
+    if sample is None:
+        sample, rate = _signal_sample(root)
     if sample is None:
         return None
     signal_cols = [c for c in sample["columns"] if c["numeric"] and not c["constant"]]
@@ -858,10 +861,35 @@ def _generic_proposal(data: Path, root: Path, profile: dict) -> dict | None:
         "delimiter": sample["delimiter"], "has_header": sample["has_header"],
         "rows_per_file": sample["rows"],
         "columns": columns, "roles": list(GENERIC_ROLES), "runs": runs[:200],
-        "sampling_rate_hz": profile["sampling_rate_hz"] if from_time else None,
+        "sampling_rate_hz": rate or (profile["sampling_rate_hz"] if from_time else None),
         "needs_interval": any(r["files"] > 1 for r in runs),
-        "warnings": [w for w in profile["warnings"] if "adapter" not in w][:10],
+        "warnings": [w for w in profile["warnings"]
+                     if "adapter" not in w and "no tabular" not in w][:10],
     }
+
+
+def _signal_sample(root: Path) -> tuple[dict | None, float | None]:
+    """The profiler only reads text tables; for .mat/.wav recordings, the first file that
+    opens stands in as the sample, described the way profile_file describes a table.
+    A .wav header states its sampling rate; a .mat file is never assumed to."""
+    import numpy as np
+
+    from bearing_pdm.generic import SIGNAL_SUFFIXES, read_generic_file, wav_sampling_rate
+
+    files = sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in SIGNAL_SUFFIXES)
+    for f in files[:20]:
+        try:
+            df = read_generic_file(f, None, True)
+        except Exception:  # noqa: BLE001 - try the next file; none readable -> no proposal
+            continue
+        cols = [{"name": c, "numeric": True, "constant": bool(np.ptp(df[c].to_numpy()) == 0),
+                 "canonical": None, "confidence": "none"} for c in df.columns]
+        if not any(not c["constant"] for c in cols):
+            continue
+        return ({"relative_path": f.relative_to(root).as_posix(), "has_header": True,
+                 "delimiter": None, "rows": len(df), "columns": cols},
+                wav_sampling_rate(f) if f.suffix.lower() == ".wav" else None)
+    return None, None
 
 
 def _numeric(values):
