@@ -177,7 +177,11 @@ export interface ExplainResponse {
 /** M7 explanation layer (docs/rag.md) - never computes or alters RUL/HI/
  * stage/applicability; only explains a result already produced above. */
 export async function explainPrediction(
-  context: Partial<PredictRulResponse> & { health_indicator?: number | null; degradation_stage?: string | null },
+  context: Partial<PredictRulResponse> & {
+    dataset_id?: string | null;
+    health_indicator?: number | null;
+    degradation_stage?: string | null;
+  },
   question: string
 ): Promise<ExplainResponse> {
   return request<ExplainResponse>("/explain", {

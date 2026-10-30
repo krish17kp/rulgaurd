@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ExplainResponse, PredictRulResponse, explainPrediction } from "@/lib/api";
+import { ExplainResponse, explainPrediction } from "@/lib/api";
 
 /**
  * Defensive cleanup only - the system prompt (src/bearing_pdm/rag/explain.py
@@ -40,7 +40,7 @@ type ExplainUiState =
  * `result`. The primary RUL card above this stays the ML model output
  * (goals.md #15).
  */
-export function ExplainResult({ result }: { result: Partial<PredictRulResponse> }) {
+export function ExplainResult({ result }: { result: Parameters<typeof explainPrediction>[0] }) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<ExplainUiState>({ phase: "ready" });
   const [question, setQuestion] = useState("");

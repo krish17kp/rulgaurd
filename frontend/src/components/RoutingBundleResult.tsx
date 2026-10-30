@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { RoutingBundlePayload } from "@/lib/api";
 import { MultiSeriesChart, ChartSeries } from "@/components/MultiSeriesChart";
+import { ExplainResult } from "@/components/ExplainResult";
 
 const MODEL_NAMES: Record<string, string> = {
   raw_seconds: "FEMTO RUL model",
@@ -119,6 +120,28 @@ export function RoutingBundleResult({
         ]
       : [];
 
+  // What the explanation layer is told about this bearing: only values already shown on this page.
+  const last = trajectory[trajectory.length - 1];
+  const levels = Object.values(decision.applicability).map((a) => a.level);
+  const explainContext = {
+    dataset_id: data.dataset_id,
+    model_name: current.model ?? undefined,
+    rul_seconds: rulAvailable ? last?.predicted_rul_seconds ?? undefined : undefined,
+    rul_hours: rulAvailable && last?.predicted_rul_seconds != null ? last.predicted_rul_seconds / 3600 : undefined,
+    applicability_level: (current.model && decision.applicability[current.model]?.level) ||
+      (["LOW", "MEDIUM", "HIGH"] as const).find((l) => levels.includes(l)) || null,
+    applicability_reasons: [
+      ...(rulAvailable ? [] : [`RUL withheld: ${withheldReason(decision, notValidated)}`]),
+      ...Object.entries(decision.applicability).map(
+        ([m, a]) => `${modelName(m)}: ${a.level} applicability (feature shift ${a.shift_ratio.toFixed(2)}x)`
+      ),
+      ...(partial ? ["This bearing's trajectory is partial: some archive parts were not uploaded."] : []),
+    ],
+    compatibility: rulAvailable ? undefined : ("RETRAIN_REQUIRED" as const),
+    health_indicator: last?.health_indicator ?? null,
+    degradation_stage: last?.stage ?? null,
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <label className="flex items-center gap-2 self-end text-xs text-foreground-muted">
@@ -204,6 +227,7 @@ export function RoutingBundleResult({
         ) : (
           <MultiSeriesChart series={rulSeries} xLabel="elapsed time (h)" yLabel="RUL (h)" />
         )}
+        <ExplainResult key={bearing} result={explainContext} />
       </section>
 
       <section className="rounded-xl border border-surface-border bg-surface p-4">
