@@ -19,6 +19,7 @@ import {
   uploadDatasetJobChunk,
 } from "@/lib/api";
 import { RoutingBundleResult } from "@/components/RoutingBundleResult";
+import { buildReportHtml, downloadText } from "@/lib/report";
 
 /** A selected file plus the name the server should see: the folder-relative
  * path for a folder upload, otherwise the file name. */
@@ -366,6 +367,22 @@ export function DatasetJobPanel({
           {phase.job.summary && <SummaryCard job={phase.job} />}
           {result && result.outcome === "analyzed" && (
             <>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => downloadText(buildReportHtml(phase.job, result), `rulguard-report-${phase.job.id}.html`, "text/html")}
+                  className="rounded-full border-2 border-surface-border bg-mint px-4 py-1.5 font-display text-sm font-bold"
+                >
+                  Download analysis report
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadText(JSON.stringify(result, null, 2), `rulguard-results-${phase.job.id}.json`, "application/json")}
+                  className="rounded-full border-2 border-surface-border bg-surface px-4 py-1.5 text-sm font-semibold hover:bg-mint"
+                >
+                  Download raw results (JSON)
+                </button>
+              </div>
               <BearingTable result={result} incomplete={incompleteOf(phase.job)} />
               <RoutingBundleResult
                 data={result}

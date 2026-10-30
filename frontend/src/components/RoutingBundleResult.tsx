@@ -21,7 +21,7 @@ const LEVEL_TEXT = {
 } as const;
 
 /** Plain-language reason RUL was withheld, most decisive cause first. */
-function withheldReason(decision: RoutingBundlePayload["decisions"][string], notValidated: boolean): string {
+export function withheldReason(decision: RoutingBundlePayload["decisions"][string], notValidated: boolean): string {
   if (notValidated) {
     return "No RULGuard model has shown skill on this dataset in held-out testing, so a life estimate would be a guess.";
   }
