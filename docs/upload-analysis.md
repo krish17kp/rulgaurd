@@ -18,8 +18,9 @@ withholds a result. Code: `src/bearing_pdm/dataset_jobs.py`, `health.py`
 
 ## What every analysed upload gets
 
-Health indicator and degradation stage per recording, from the frozen reference HI. The
-stage is a severity band on the HI, not a fault diagnosis.
+Health indicator and degradation stage per recording, from the cross-domain amplitude
+health indicator (self-normalised RMS and peak-to-peak, fit on the FEMTO learning set only,
+D26). The stage is a severity band on the HI, not a fault diagnosis.
 
 **How reliable is the health rating.** Rated from the uploaded trajectories themselves:
 the mean over bearings of the trend `-Spearman(HI, elapsed time)`. Strong from 0.7,

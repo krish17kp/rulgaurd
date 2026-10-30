@@ -403,7 +403,8 @@ export function DatasetJobPanel({
               <RoutingBundleResult
                 data={result}
                 incompleteBearings={incompleteOf(phase.job)}
-                notValidated={phase.job.validation?.status === "not_validated"}
+                notValidated={(phase.job.validation?.pretrained_status ?? phase.job.validation?.status) === "not_validated"}
+                ownRulShown={result.dataset_rul?.status === "validated"}
                 signalNote="Raw signal is not kept: uploaded and extracted files are deleted as soon as processing ends. Only these derived results remain, for 7 days."
               />
             </>
@@ -740,7 +741,7 @@ function BearingTable({ result, incomplete }: { result: DatasetJobResult; incomp
             <th className="py-1 pr-3">Recordings</th>
             <th className="py-1 pr-3">Health indicator</th>
             <th className="py-1 pr-3">Stage</th>
-            <th className="py-1 pr-3">RUL</th>
+            <th className="py-1 pr-3">RUL (pretrained models)</th>
           </tr>
         </thead>
         <tbody>

@@ -69,7 +69,7 @@ export function buildReportHtml(job: DatasetJob, result: DatasetJobResult): stri
     const last = t[t.length - 1];
     const rul =
       d.current.status === "RUL_SUPPRESSED" || last?.predicted_rul_seconds == null
-        ? `<p><strong>RUL intentionally withheld.</strong> ${esc(withheldReason(d, notValidated))}</p>`
+        ? `<p><strong>${r?.status === "validated" ? "Pretrained models: RUL withheld (RUL learned from this dataset is in the dataset table)." : "RUL intentionally withheld."}</strong> ${esc(withheldReason(d, notValidated))}</p>`
         : `<p><strong>RUL at last recording: ${(last.predicted_rul_seconds / 3600).toFixed(2)} h</strong>${
             last.rul_lo != null && last.rul_hi != null ? ` (interval ${(last.rul_lo / 3600).toFixed(2)} to ${(last.rul_hi / 3600).toFixed(2)} h)` : ""
           } from the ${esc(modelName(d.current.model ?? ""))}${d.current.status === "RUL_EXPERIMENTAL" ? ", experimental" : ""}.</p>`;
@@ -102,7 +102,7 @@ ${job.validation ? `<p class="box${notValidated ? " warn" : ""}"><strong>${notVa
 <tr><td>Bearing runs found / processed / failed</td><td>${s.bearings_found} / ${s.bearings_processed} / ${s.bearings_failed}</td></tr>${q ? `<tr><td>Health rating reliability</td><td><strong>${esc(q.rating)}</strong>${q.trend != null ? `, trend with time ${q.trend.toFixed(2)}, smoothness ${Math.round(q.smoothness! * 100)}%` : ""}${q.weak_bearings?.length ? `. Weak: <span class=mono>${esc(q.weak_bearings.join(", "))}</span>` : ""}</td></tr>` : ""}${r ? `<tr><td>RUL learned from this dataset</td><td><strong>${esc(r.status.replaceAll("_", " "))}</strong> (${r.n_bearings} run-to-failure bearing(s), held-out test)${r.mae_seconds != null ? `: average error ${(r.mae_seconds / 3600).toFixed(2)} h vs ${(r.naive_mae_seconds! / 3600).toFixed(2)} h for the average-life guess` : ""}</td></tr>` : ""}</table>
 ${s.failed.length ? `<p class="box warn">Not processed: ${s.failed.map((f) => `<span class=mono>${esc(f.bearing)}</span> (${esc(f.reason)})`).join("; ")}</p>` : ""}
 <h2>Per bearing, at the last recording</h2>
-<table><tr><th>Bearing</th><th>Recordings</th><th>Health indicator</th><th>Stage</th><th>RUL</th></tr>${rows.join("")}</table>
+<table><tr><th>Bearing</th><th>Recordings</th><th>Health indicator</th><th>Stage</th><th>RUL (pretrained models)</th></tr>${rows.join("")}</table>
 <h2>Bearing details</h2>${bearings.join("\n")}
 <p class=muted>Stages are severity bands on the health indicator, not a physical fault diagnosis. RUL is shown only when a model is applicable and validated; numbers come from the numeric models, never from generated text.</p>
 </body></html>`;

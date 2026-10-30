@@ -801,6 +801,32 @@
         "title": "Body_knowledge_load_knowledge_load_post",
         "type": "object"
       },
+      "Body_knowledge_search_lab_knowledge_search_post": {
+        "properties": {
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "contentMediaType": "application/octet-stream",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
+          "query": {
+            "default": "",
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "title": "Body_knowledge_search_lab_knowledge_search_post",
+        "type": "object"
+      },
       "Body_predict_rul_from_femto_acquisition_predict_rul_femto_acquisition_post": {
         "properties": {
           "file": {
@@ -1201,6 +1227,64 @@
         "title": "ExplainResponse",
         "type": "object"
       },
+      "FaultSnapshotResponse": {
+        "properties": {
+          "applicability": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicability"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "features": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Features",
+            "type": "object"
+          },
+          "file_id": {
+            "title": "File Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "sample_rate_hz": {
+            "title": "Sample Rate Hz",
+            "type": "number"
+          },
+          "signal": {
+            "$ref": "#/components/schemas/FemtoSignalChannel"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "file_id",
+          "label",
+          "sample_rate_hz",
+          "signal",
+          "features",
+          "applicability",
+          "note"
+        ],
+        "title": "FaultSnapshotResponse",
+        "type": "object"
+      },
       "FemtoSignalChannel": {
         "properties": {
           "fft_frequency_hz": {
@@ -1387,6 +1471,72 @@
         "title": "JobFile",
         "type": "object"
       },
+      "JobMappingRequest": {
+        "properties": {
+          "columns": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 64,
+            "title": "Columns",
+            "type": "object"
+          },
+          "ran_to_failure": {
+            "default": false,
+            "title": "Ran To Failure",
+            "type": "boolean"
+          },
+          "recording_interval_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Interval S"
+          },
+          "sampling_rate_hz": {
+            "title": "Sampling Rate Hz",
+            "type": "number"
+          }
+        },
+        "required": [
+          "columns",
+          "sampling_rate_hz"
+        ],
+        "title": "JobMappingRequest",
+        "type": "object"
+      },
+      "KnowledgeFile": {
+        "properties": {
+          "chunks": {
+            "title": "Chunks",
+            "type": "integer"
+          },
+          "file": {
+            "title": "File",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "status",
+          "chunks"
+        ],
+        "title": "KnowledgeFile",
+        "type": "object"
+      },
       "KnowledgeFileStatus": {
         "properties": {
           "chunk_count": {
@@ -1425,6 +1575,45 @@
           "status"
         ],
         "title": "KnowledgeFileStatus",
+        "type": "object"
+      },
+      "KnowledgeHit": {
+        "properties": {
+          "chunk_id": {
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "chunk_id",
+          "score",
+          "text"
+        ],
+        "title": "KnowledgeHit",
         "type": "object"
       },
       "KnowledgeIngestResponse": {
@@ -1479,6 +1668,44 @@
           "chunk_count"
         ],
         "title": "KnowledgeLoadResponse",
+        "type": "object"
+      },
+      "KnowledgeSearchResponse": {
+        "properties": {
+          "chunks": {
+            "title": "Chunks",
+            "type": "integer"
+          },
+          "documents": {
+            "title": "Documents",
+            "type": "integer"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeHit"
+            },
+            "title": "Hits",
+            "type": "array"
+          },
+          "index": {
+            "title": "Index",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "documents",
+          "chunks",
+          "hits"
+        ],
+        "title": "KnowledgeSearchResponse",
         "type": "object"
       },
       "MatAnalysisResponse": {
@@ -1773,6 +2000,154 @@
           "missing"
         ],
         "title": "RequiredAction",
+        "type": "object"
+      },
+      "SignalSource": {
+        "properties": {
+          "acquisition_count": {
+            "default": 0,
+            "title": "Acquisition Count",
+            "type": "integer"
+          },
+          "bearing_run_id": {
+            "title": "Bearing Run Id",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "sequence_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Sequence Indices",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "dataset_id",
+          "bearing_run_id",
+          "label"
+        ],
+        "title": "SignalSource",
+        "type": "object"
+      },
+      "SyntheticRequest": {
+        "properties": {
+          "baseline_noise_std": {
+            "default": 0.05,
+            "maximum": 10.0,
+            "minimum": 0.0,
+            "title": "Baseline Noise Std",
+            "type": "number"
+          },
+          "n_acquisitions": {
+            "default": 10,
+            "maximum": 200.0,
+            "minimum": 2.0,
+            "title": "N Acquisitions",
+            "type": "integer"
+          },
+          "sample_rate_hz": {
+            "default": 25600.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 200000.0,
+            "title": "Sample Rate Hz",
+            "type": "number"
+          },
+          "samples_per_acquisition": {
+            "default": 2560,
+            "maximum": 65536.0,
+            "minimum": 256.0,
+            "title": "Samples Per Acquisition",
+            "type": "integer"
+          },
+          "seed": {
+            "default": 42,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "shaft_freq_hz": {
+            "default": 50.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Shaft Freq Hz",
+            "type": "number"
+          }
+        },
+        "title": "SyntheticRequest",
+        "type": "object"
+      },
+      "SyntheticResponse": {
+        "properties": {
+          "applicability": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicability"
+          },
+          "first_acquisition": {
+            "items": {
+              "type": "number"
+            },
+            "title": "First Acquisition",
+            "type": "array"
+          },
+          "kurtosis": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Kurtosis",
+            "type": "array"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "rms": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Rms",
+            "type": "array"
+          },
+          "rul_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rul Status"
+          }
+        },
+        "required": [
+          "first_acquisition",
+          "rms",
+          "kurtosis",
+          "applicability",
+          "rul_status",
+          "note"
+        ],
+        "title": "SyntheticResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -2675,6 +3050,58 @@
         "summary": "Upload Dataset Job Chunk"
       }
     },
+    "/jobs/{job_id}/mapping": {
+      "post": {
+        "description": "Confirm the column mapping of a custom-format dataset and resume processing.",
+        "operationId": "map_dataset_job_jobs__job_id__mapping_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobMappingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Map Dataset Job Jobs  Job Id  Mapping Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Map Dataset Job"
+      }
+    },
     "/jobs/{job_id}/result": {
       "get": {
         "operationId": "get_dataset_job_result_jobs__job_id__result_get",
@@ -2833,6 +3260,406 @@
           }
         },
         "summary": "Knowledge Load"
+      }
+    },
+    "/lab/experiment/fixtures": {
+      "get": {
+        "operationId": "experiment_fixtures_lab_experiment_fixtures_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "title": "Response Experiment Fixtures Lab Experiment Fixtures Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Experiment Fixtures",
+        "tags": [
+          "lab"
+        ]
+      }
+    },
+    "/lab/experiment/{dataset_id}/{file_id}": {
+      "get": {
+        "description": "One bundled CWRU/Paderborn recording: waveform (first 0.1 s), FFT, features and\napplicability against the FEMTO model. Never an RUL: these are fault snapshots.",
+        "operationId": "experiment_snapshot_lab_experiment__dataset_id___file_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaultSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Experiment Snapshot",
+        "tags": [
+          "lab"
+        ]
+      }
+    },
+    "/lab/knowledge/search": {
+      "post": {
+        "description": "Search the project's built-in knowledge index, or a temporary index built from the\nuploaded documents for this request only. Never replaces the shared /explain index.",
+        "operationId": "knowledge_search_lab_knowledge_search_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_knowledge_search_lab_knowledge_search_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Knowledge Search",
+        "tags": [
+          "lab"
+        ]
+      }
+    },
+    "/lab/routing": {
+      "get": {
+        "operationId": "list_routing_lab_routing_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response List Routing Lab Routing Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Routing",
+        "tags": [
+          "lab"
+        ]
+      }
+    },
+    "/lab/routing/{dataset_id}": {
+      "get": {
+        "description": "The offline routing_<dataset>.json, sanitized exactly as build_routing_bundle does,\nin the same response shape /analyze/bundle returns for an uploaded routing bundle.",
+        "operationId": "routing_result_lab_routing__dataset_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisBundleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Routing Result",
+        "tags": [
+          "lab"
+        ]
+      }
+    },
+    "/lab/signals": {
+      "get": {
+        "description": "Every waveform the site can show: all FEMTO learning acquisitions on the server,\nplus the measured windows bundled in the deployment snapshot (the only college ones).",
+        "operationId": "list_signals_lab_signals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SignalSource"
+                  },
+                  "title": "Response List Signals Lab Signals Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Signals",
+        "tags": [
+          "lab"
+        ]
+      }
+    },
+    "/lab/signals/femto": {
+      "get": {
+        "description": "One FEMTO learning acquisition, through the same reader the upload endpoint uses.",
+        "operationId": "femto_signal_lab_signals_femto_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "bearing",
+            "required": true,
+            "schema": {
+              "title": "Bearing",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "title": "Index",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FemtoSignalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Femto Signal",
+        "tags": [
+          "lab"
+        ]
+      }
+    },
+    "/lab/signals/snapshot": {
+      "get": {
+        "description": "A measured window bundled in deploy_data, with its cached feature row.",
+        "operationId": "snapshot_signal_lab_signals_snapshot_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "bearing",
+            "required": true,
+            "schema": {
+              "title": "Bearing",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sequence_index",
+            "required": true,
+            "schema": {
+              "title": "Sequence Index",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FemtoSignalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Snapshot Signal",
+        "tags": [
+          "lab"
+        ]
+      }
+    },
+    "/lab/synthetic": {
+      "post": {
+        "description": "The Streamlit lab's synthetic simulator: demonstration data, never real-world evidence.",
+        "operationId": "synthetic_lab_synthetic_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyntheticRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyntheticResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Synthetic",
+        "tags": [
+          "lab"
+        ]
+      }
+    },
+    "/lab/synthetic/zip": {
+      "post": {
+        "operationId": "synthetic_zip_lab_synthetic_zip_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyntheticRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Synthetic Zip",
+        "tags": [
+          "lab"
+        ]
       }
     },
     "/models/compatibility": {

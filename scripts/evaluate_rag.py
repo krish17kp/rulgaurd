@@ -73,6 +73,7 @@ def main() -> int:
         retrieval.append({"question": q, "expected": sorted(expected), "retrieved": docs,
                           "first_relevant_rank": rank})
 
+    text_of = {c.chunk_id: c.text for c in index.chunks}
     answers = []
     for name, ctx in CONTEXTS.items():
         for q, _ in QUESTIONS:
@@ -83,7 +84,8 @@ def main() -> int:
                             "online_answer_rejected": r.explanation.startswith(
                                 "An online answer was discarded"),
                             "unsupported_numbers": unsupported_numbers(
-                                r.explanation, ctx, "", q, r.citations)
+                                r.explanation, ctx,
+                                "\n".join(text_of[i] for i in r.retrieved_chunk_ids), q, r.citations)
                             if not r.fallback_used else []})
 
     n = len(retrieval)

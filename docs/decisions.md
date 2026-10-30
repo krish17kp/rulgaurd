@@ -656,3 +656,26 @@ incomplete and censored (`run_to_failure=False`, so no end-of-life label is inve
 true time for partial ones. Split `.7z.NNN` sets with a gap are still refused (byte split).
 Real part04 alone, run through the worker locally: 1,503 members, 1,501 recordings processed,
 2 skipped (split into part03/part05), Bearing3_1 and Bearing3_2 incomplete, job state "partial".
+
+## D32: RUL learned per upload, health reliability rating, number check on explanations (2026-10-30)
+
+Problem: the Upload page withheld RUL for every non-FEMTO dataset, even when its bearings ran
+to failure, and gave no measure of how far to trust the health indicator.
+
+Decision: (1) for an upload with >= 3 run-to-failure bearings, score the `raw_seconds`
+ExtraTrees leave-one-bearing-out on that dataset alone (`upload_rul.dataset_rul`, reusing
+`experiments.run_split`) and show RUL only when the held-out MAE beats the naive mean-life
+baseline; the metrics are shown either way. Custom bearings become run-to-failure only on
+the uploader's confirmation. (2) Rate the HI by the mean per-bearing
+`-Spearman(HI, elapsed)` (strong >= 0.7, moderate >= 0.4), fixed before any upload.
+(3) Reject any online explanation that contains a number not present in its inputs.
+(4) Read `.mat`/`.wav` recordings through the generic adapter.
+
+Alternatives rejected: applying the FEMTO model with a per-dataset calibration (needs labels
+of the same dataset anyway and was weaker in the CAL experiments); choosing between
+`raw_seconds` and `sn_fraction` per upload (selection on the test result). M6 (CNN) not
+started at the owner's instruction.
+
+Evidence: XJTU-SY reproduction MAE 22,283 s vs naive 32,456 s; FEMTO learning 4,900 s vs
+6,556 s; tests in `tests/test_dataset_jobs.py`, `tests/test_health.py`, `tests/test_rag.py`;
+audit in `artifacts/evidence/M9/summary.md`; docs/upload-analysis.md.

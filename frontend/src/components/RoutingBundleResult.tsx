@@ -48,6 +48,7 @@ export function RoutingBundleResult({
   signalNote,
   incompleteBearings = [],
   notValidated = false,
+  ownRulShown = false,
 }: {
   data: RoutingBundlePayload;
   signalNote?: string;
@@ -55,6 +56,8 @@ export function RoutingBundleResult({
   incompleteBearings?: string[];
   /** The job's validation says no model has skill on this dataset. */
   notValidated?: boolean;
+  /** RUL learned from the uploaded dataset itself is shown in its own section. */
+  ownRulShown?: boolean;
 }) {
   const bearingIds = Object.keys(data.decisions).sort();
   const [bearing, setBearing] = useState(bearingIds[0] ?? "");
@@ -214,8 +217,11 @@ export function RoutingBundleResult({
         <h2 className="text-sm font-semibold">Remaining useful life</h2>
         {!rulAvailable ? (
           <div className="mt-2 text-sm">
-            <p className="font-medium">RUL intentionally withheld</p>
-            <p className="mt-1 text-foreground-muted">{withheldReason(decision, notValidated)}</p>
+            <p className="font-medium">{ownRulShown ? "Pretrained models: RUL withheld" : "RUL intentionally withheld"}</p>
+            <p className="mt-1 text-foreground-muted">
+              {withheldReason(decision, notValidated)}
+              {ownRulShown && " The RUL learned from this dataset's own bearings is shown in its own section above."}
+            </p>
             {advanced && (
               <p className="mt-1 text-xs text-foreground-muted">
                 Status: <span className="font-mono">{current.status}</span>, scope {current.scope || "n/a"}, validated skill{" "}

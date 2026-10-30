@@ -53,7 +53,7 @@ Requires `pip install -e . --no-deps && pip install -r requirements.txt` first (
 - `config/data_paths.toml` - local, gitignored, real paths. Copy from `.example.toml`.
 - `data/fixtures/` - tiny committed real-data excerpts for tests only.
 - `data/interim/`, `data/processed/` - generated, gitignored.
-- `artifacts/` - models (`.joblib`), DuckDB (`metadata.duckdb`), FAISS index (M7, not yet created).
+- `artifacts/` - models (`.joblib`), DuckDB (`metadata.duckdb`), RAG index (`rag_index/index.json`, TF-IDF NumPy, M7).
 - `reports/` - figures, metrics, PDF.
 - `deliverables/review/` - review-day presentation materials (slides, study PDFs, diagrams) — not app code.
 - `src/bearing_pdm/` - package code.
@@ -72,4 +72,4 @@ Committing secrets/private absolute paths into git history. Committing extracted
 ## Current milestone
 **M10 (cross-dataset / adaptive framework) DONE 2026-09-25 on branch `cross-dataset`:** adapters for FEMTO, college, IMS, XJTU-SY; profiler; applicability/OOD; conformal uncertainty; causal routing that suppresses RUL. See `docs/cross-dataset.md`, `docs/cross-dataset-results.md` (generated), decisions D23-D27. External datasets live outside the repo (`docs/external-datasets.md`).
 
-M0-M4, M4b, minimal M8, and M5 are **DONE** — see `docs/milestone.md` for acceptance criteria/evidence and `TODO.md` for per-task status; both are kept current and take precedence over this file if they ever disagree. M4b (FEMTO hidden-set/`Full_Test_Set` scoring) and M5 (degradation-stage classification) shipped 2026-08-30, after the review-day (2026-07-25) M0-M4/M8 milestones. **M6 (optional CNN), M7 (RAG/LLM), and M9 (final audit) remain deliberately deferred — no work has started on them.** See `docs/decisions.md` D13-D20 for what was found and fixed getting M4b/M5 done (path-separator bug, ruff version drift, hidden-set scoring bugs, HI pinning defect).
+M0-M4, M4b, minimal M8, and M5 are **DONE** — see `docs/milestone.md` for acceptance criteria/evidence and `TODO.md` for per-task status; both are kept current and take precedence over this file if they ever disagree. M4b (FEMTO hidden-set/`Full_Test_Set` scoring) and M5 (degradation-stage classification) shipped 2026-08-30, after the review-day (2026-07-25) M0-M4/M8 milestones. **M7 (RAG/LLM) and M9 (final audit) are DONE (2026-10-30, `artifacts/evidence/M7/`, `M9/`, D32). M6 (optional CNN) stays deferred at the owner's instruction.** Uploads with 3+ run-to-failure bearings now get RUL learned and tested on that dataset (`upload_rul.py`, `docs/upload-analysis.md`). See `docs/decisions.md` D13-D20 for what was found and fixed getting M4b/M5 done (path-separator bug, ruff version drift, hidden-set scoring bugs, HI pinning defect).

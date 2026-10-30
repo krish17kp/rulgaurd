@@ -1,0 +1,433 @@
+{
+  "generated_at": "2026-10-30T07:40:28.606202+00:00",
+  "index_chunks": 560,
+  "index_documents": 16,
+  "top_k": 4,
+  "retrieval": {
+    "hit_at_k": 0.9166666666666666,
+    "hit_at_1": 0.8333333333333334,
+    "mrr": 0.8611111111111112,
+    "per_question": [
+      {
+        "question": "Why is RUL withheld for my uploaded dataset?",
+        "expected": [
+          "doc_dataset_compatibility",
+          "doc_prediction_reliability",
+          "doc_upload_analysis"
+        ],
+        "retrieved": [
+          "doc_upload_analysis",
+          "doc_dataset_compatibility",
+          "doc_upload_analysis",
+          "doc_prediction_reliability"
+        ],
+        "first_relevant_rank": 1
+      },
+      {
+        "question": "How many run-to-failure bearings are needed before RUL is shown for an upload?",
+        "expected": [
+          "doc_upload_analysis"
+        ],
+        "retrieved": [
+          "doc_upload_analysis",
+          "doc_upload_analysis",
+          "doc_upload_analysis",
+          "doc_decisions"
+        ],
+        "first_relevant_rank": 1
+      },
+      {
+        "question": "What does the health rating reliability trend measure?",
+        "expected": [
+          "doc_upload_analysis"
+        ],
+        "retrieved": [
+          "doc_upload_analysis",
+          "doc_decisions",
+          "doc_prediction_reliability",
+          "lit_maintenance_strategies_multistage"
+        ],
+        "first_relevant_rank": 1
+      },
+      {
+        "question": "What naive baseline must the RUL model beat?",
+        "expected": [
+          "doc_cross_dataset",
+          "doc_decisions",
+          "doc_upload_analysis"
+        ],
+        "retrieved": [
+          "doc_decisions",
+          "doc_upload_analysis",
+          "doc_decisions",
+          "doc_decisions"
+        ],
+        "first_relevant_rank": 1
+      },
+      {
+        "question": "What does applicability LOW mean for a prediction?",
+        "expected": [
+          "doc_cross_dataset",
+          "doc_dataset_compatibility",
+          "doc_prediction_reliability"
+        ],
+        "retrieved": [
+          "doc_prediction_reliability",
+          "doc_dataset_compatibility",
+          "doc_dataset_compatibility",
+          "doc_milestone"
+        ],
+        "first_relevant_rank": 1
+      },
+      {
+        "question": "Which fields does a canonical feature row contain?",
+        "expected": [
+          "doc_data_contract"
+        ],
+        "retrieved": [
+          "doc_dataset_audit",
+          "doc_architecture",
+          "doc_architecture",
+          "doc_dataset_compatibility"
+        ],
+        "first_relevant_rank": null
+      },
+      {
+        "question": "How was the FEMTO hidden Full_Test_Set scored?",
+        "expected": [
+          "doc_dataset_audit",
+          "doc_decisions",
+          "doc_milestone"
+        ],
+        "retrieved": [
+          "doc_milestone",
+          "doc_decisions",
+          "doc_cross_dataset",
+          "doc_dataset_audit"
+        ],
+        "first_relevant_rank": 1
+      },
+      {
+        "question": "Are degradation stages a fault diagnosis?",
+        "expected": [
+          "doc_decisions",
+          "doc_upload_analysis"
+        ],
+        "retrieved": [
+          "lit_ml_approach_pdm",
+          "lit_ml_approach_pdm",
+          "doc_decisions",
+          "lit_ml_approach_pdm"
+        ],
+        "first_relevant_rank": 3
+      },
+      {
+        "question": "Why is life fraction used as the cross-domain target?",
+        "expected": [
+          "doc_cross_dataset",
+          "doc_decisions"
+        ],
+        "retrieved": [
+          "doc_decisions",
+          "doc_cross_dataset",
+          "doc_decisions",
+          "doc_cross_dataset"
+        ],
+        "first_relevant_rank": 1
+      },
+      {
+        "question": "Can RULGuard read MATLAB mat or wav recordings?",
+        "expected": [
+          "doc_upload_analysis"
+        ],
+        "retrieved": [
+          "doc_upload_analysis",
+          "doc_decisions",
+          "lit_sustainability_14_03387",
+          "doc_decisions"
+        ],
+        "first_relevant_rank": 1
+      },
+      {
+        "question": "How does predictive maintenance differ from preventive maintenance?",
+        "expected": [
+          "lit_"
+        ],
+        "retrieved": [
+          "lit_maintenance_strategies_multistage",
+          "lit_sustainability_14_03387",
+          "lit_maintenance_strategies_multistage",
+          "lit_sustainability_14_03387"
+        ],
+        "first_relevant_rank": 1
+      },
+      {
+        "question": "Why did the health indicator pin at 1.0 for many learning acquisitions?",
+        "expected": [
+          "doc_decisions"
+        ],
+        "retrieved": [
+          "doc_decisions",
+          "doc_decisions",
+          "doc_decisions",
+          "doc_upload_analysis"
+        ],
+        "first_relevant_rank": 1
+      }
+    ]
+  },
+  "grounding": {
+    "n_answers": 24,
+    "providers": [
+      "deterministic-fallback",
+      "online:groq:openai/gpt-oss-120b"
+    ],
+    "n_online_answers": 3,
+    "n_online_rejected_for_numbers": 1,
+    "n_answers_with_citations": 24,
+    "n_insufficient_evidence": 0,
+    "n_shown_with_unsupported_numbers": 0,
+    "per_answer": [
+      {
+        "context": "rul_shown",
+        "question": "Why is RUL withheld for my uploaded dataset?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": true,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_shown",
+        "question": "How many run-to-failure bearings are needed before RUL is shown for an upload?",
+        "provider": "online:groq:openai/gpt-oss-120b",
+        "fallback_used": false,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_shown",
+        "question": "What does the health rating reliability trend measure?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 1,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_shown",
+        "question": "What naive baseline must the RUL model beat?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_shown",
+        "question": "What does applicability LOW mean for a prediction?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_shown",
+        "question": "Which fields does a canonical feature row contain?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 1,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_shown",
+        "question": "How was the FEMTO hidden Full_Test_Set scored?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_shown",
+        "question": "Are degradation stages a fault diagnosis?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 3,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_shown",
+        "question": "Why is life fraction used as the cross-domain target?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_shown",
+        "question": "Can RULGuard read MATLAB mat or wav recordings?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 1,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_shown",
+        "question": "How does predictive maintenance differ from preventive maintenance?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_shown",
+        "question": "Why did the health indicator pin at 1.0 for many learning acquisitions?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 1,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_withheld",
+        "question": "Why is RUL withheld for my uploaded dataset?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_withheld",
+        "question": "How many run-to-failure bearings are needed before RUL is shown for an upload?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_withheld",
+        "question": "What does the health rating reliability trend measure?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 1,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_withheld",
+        "question": "What naive baseline must the RUL model beat?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_withheld",
+        "question": "What does applicability LOW mean for a prediction?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_withheld",
+        "question": "Which fields does a canonical feature row contain?",
+        "provider": "online:groq:openai/gpt-oss-120b",
+        "fallback_used": false,
+        "status": "complete",
+        "n_citations": 1,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_withheld",
+        "question": "How was the FEMTO hidden Full_Test_Set scored?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_withheld",
+        "question": "Are degradation stages a fault diagnosis?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 3,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_withheld",
+        "question": "Why is life fraction used as the cross-domain target?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_withheld",
+        "question": "Can RULGuard read MATLAB mat or wav recordings?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 1,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_withheld",
+        "question": "How does predictive maintenance differ from preventive maintenance?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 4,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      },
+      {
+        "context": "rul_withheld",
+        "question": "Why did the health indicator pin at 1.0 for many learning acquisitions?",
+        "provider": "deterministic-fallback",
+        "fallback_used": true,
+        "status": "complete",
+        "n_citations": 1,
+        "online_answer_rejected": false,
+        "unsupported_numbers": []
+      }
+    ]
+  }
+}

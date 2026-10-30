@@ -73,19 +73,23 @@ Not claimed: a stage is a severity band, **not** a fault type. Warning lead time
 14,740 s down to 120 s (Bearing3_1) because FEMTO degradation is flat-then-cliff - reported,
 not hidden.
 
-## M6 - optional 1D-CNN-over-HI experiment (post-review, only if M4 evidence justifies it)
+## M6 - optional 1D-CNN-over-HI experiment (DEFERRED: not started at the owner's instruction, 2026-10-30)
 One controlled config, one ablation, accept/reject decision vs. classical baseline.
 
-## M7 - RAG and local report generation (post-review)
+## M7 - RAG and local report generation (DONE 2026-10-30)
 Ollama `llama3.1:8b` + `nomic-embed-text`, FAISS or NumPy fallback, citation-required retrieval, deterministic template fallback.
+As built: Groq online model (the server has no GPU for a local 8B model), TF-IDF NumPy index,
+citations, deterministic template fallback, and a check that replaces any online answer
+containing a number absent from its inputs. Evidence: `artifacts/evidence/M7/`.
 
 ## M8 - Streamlit dashboard and PDF (minimal DONE 2026-07-21)
 Minimal version required for review (task IDs M8-T1..T4): dataset select, signal/FFT/HI/RUL panels, cached artifact loading, no page-load training.
 Full version (post-review): PDF export polish, precomputed model-evaluation page details.
 Evidence: `artifacts/evidence/REVIEW-M8/`.
 
-## M9 - reproducibility and final capstone audit (post-review)
+## M9 - reproducibility and final capstone audit (DONE 2026-10-30)
 Clean-environment run-through, final Ponytail-style simplicity pass, final scientific audit, no stale docs.
+Evidence: `artifacts/evidence/M9/summary.md`; decision D32.
 
 ## M10 - cross-dataset / adaptive framework (DONE 2026-09-25, branch `cross-dataset`)
 Adapters (FEMTO, college, IMS, XJTU-SY) onto one canonical recording; dataset profiler and

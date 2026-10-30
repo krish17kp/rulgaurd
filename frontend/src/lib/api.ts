@@ -757,6 +757,8 @@ export interface JobSummary {
 
 export interface JobValidation {
   status: "validated" | "not_validated";
+  /** Set when RUL was validated on the upload itself: the pretrained models' own verdict. */
+  pretrained_status?: "validated" | "not_validated";
   note: string;
   skills: Record<string, number | null>;
   trained_on: string[];

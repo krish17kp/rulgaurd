@@ -1154,6 +1154,13 @@ def _process(d: Path, data: Path, plan: dict, root: Path, profile: dict, all_fil
     rul = dataset_rul(frames, adapter.reference_window,
                       list(bundle["raw_seconds"]["model"].feature_columns),
                       progress=lambda msg: _update(d, stages={"process": {"detail": msg[:200]}}))
+    if rul["status"] == "validated":   # the pretrained models' verdict is kept, not overwritten
+        validation = {**validation, "status": "validated", "pretrained_status": validation["status"],
+                      "note": (f"RUL was learned from this dataset's own {rul['n_bearings']} "
+                               "run-to-failure bearings and tested on each one held out: average "
+                               f"error {rul['mae_seconds'] / 3600:.2f} h vs "
+                               f"{rul['naive_mae_seconds'] / 3600:.2f} h for the average-life "
+                               "guess. The pretrained RULGuard models are not used for it.")}
     rul["ends_healthy"] = sorted(b for b, t in trajectories.items()
                                  if t and t[0].get("actual_rul_seconds") is not None
                                  and t[-1].get("stage") == "HEALTHY")

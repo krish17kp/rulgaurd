@@ -563,6 +563,8 @@ def test_run_to_failure_upload_learns_and_tests_rul_on_its_own_bearings(jobs):
     assert rul["status"] == "validated", rul
     assert rul["n_bearings"] == 4 and len(rul["per_bearing"]) == 4
     assert rul["mae_seconds"] < rul["naive_mae_seconds"]
+    assert done["validation"]["status"] == "validated"  # on this dataset's own bearings
+    assert done["validation"]["pretrained_status"] == "not_validated"  # kept, not overwritten
     traj = rul["trajectories"]["generic:rig_0"]
     assert traj[-1]["actual_rul_seconds"] == 0 and traj[-1]["predicted_rul_seconds"] is not None
 
