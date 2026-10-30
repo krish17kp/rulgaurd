@@ -775,3 +775,25 @@ def test_abstention_structural_fix_does_not_regress_existing_golden_positives(bu
         if baseline and not grounded:
             regressions.append(q["id"])
     assert regressions == [], f"topical-grounding gate regressed: {regressions}"
+
+
+def test_online_answer_that_changes_a_number_is_replaced_by_the_checked_template(monkeypatch):
+    """The prompt says never alter a number; build_explanation checks it."""
+    from bearing_pdm.rag.explain import unsupported_numbers
+
+    ctx = PredictionContext(rul_seconds=20160.0, rul_hours=5.6, health_indicator=0.4321,
+                            degradation_stage="DEGRADING", compatibility="COMPATIBLE")
+    assert unsupported_numbers("About 5.6 hours (20,160 s, 336 min) left; HI 0.43, 43%.",
+                               ctx, "", "", []) == []
+    assert unsupported_numbers("About 9.2 hours left.", ctx, "", "", []) == ["9.2"]
+
+    _clear_all_credential_env(monkeypatch)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    monkeypatch.setattr(GroqProvider, "generate", lambda self, *a: "It has 9.2 hours left.")
+    result = build_explanation(ctx, "", VectorIndex.build())
+    assert result.fallback_used and result.provider == "deterministic-fallback"
+    assert result.explanation.startswith("An online answer was discarded")
+    assert "9.2" in result.explanation.splitlines()[0] and "20160.0 seconds" in result.explanation
+
+    monkeypatch.setattr(GroqProvider, "generate", lambda self, *a: "It has 5.6 hours left.")
+    assert not build_explanation(ctx, "", VectorIndex.build()).fallback_used

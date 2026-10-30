@@ -22,7 +22,16 @@ def main() -> int:
     if not result.chunks:
         print("No chunks ingested - aborting.", file=sys.stderr)
         return 1
-    index = VectorIndex.build()
+    # A source missing here (the literature PDFs live outside the repo) keeps the
+    # chunks the existing index already holds for it, instead of silently vanishing.
+    chunks = list(result.chunks)
+    missing = {doc_id for doc_id, _ in result.skipped}
+    if missing and DEFAULT_INDEX_PATH.exists():
+        kept = [c for c in VectorIndex.load(DEFAULT_INDEX_PATH).chunks if c.doc_id in missing]
+        print(f"Kept {len(kept)} existing chunks for {len(missing)} unavailable source(s)",
+              file=sys.stderr)
+        chunks += kept
+    index = VectorIndex.build_from_chunks(chunks)
     index.save(DEFAULT_INDEX_PATH)
     print(f"Indexed {len(index.chunks)} chunks from "
           f"{len({c.doc_id for c in index.chunks})} documents -> {DEFAULT_INDEX_PATH}")

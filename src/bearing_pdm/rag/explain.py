@@ -28,9 +28,10 @@ at all.
 
 from __future__ import annotations
 
+import json
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import httpx
@@ -576,6 +577,33 @@ def _is_topically_grounded(question: str, chunk_text: str) -> bool:
     return bool(q_words & chunk_words)
 
 
+_NUMBER = re.compile(r"(?<![\w.])-?\d+(?:,\d{3})*(?:\.\d+)?")
+# Unit changes an honest answer may make to a supplied number: s -> min/h/days,
+# fraction -> percent, and back.
+_CONVERSIONS = (1, 1 / 60, 1 / 3600, 1 / 86400, 100, 1 / 100)
+
+
+def unsupported_numbers(answer: str, context: PredictionContext, evidence_text: str,
+                        question: str, citations: list[Citation]) -> list[str]:
+    """Numbers in a generated answer that appear nowhere in what the model was given.
+    The prompt forbids altering a number; this checks it. A number matches a supplied
+    one (or a unit conversion of it) to the precision the answer writes it with; small
+    integers (counts, list items) always pass."""
+    given = " ".join([json.dumps(asdict(context)), evidence_text, question,
+                      *(c.document_title for c in citations)])
+    known = [float(t.replace(",", "")) * f for t in _NUMBER.findall(given) for f in _CONVERSIONS]
+    bad = []
+    for token in _NUMBER.findall(answer):
+        x = float(token.replace(",", ""))
+        if x.is_integer() and 0 <= x <= 12:
+            continue
+        decimals = len(token.split(".")[1]) if "." in token else 0
+        tol = max(0.5 * 10 ** -decimals, 0.005 * abs(x))
+        if not any(abs(x - k) <= tol for k in known):
+            bad.append(token)
+    return bad
+
+
 def build_explanation(
     context: PredictionContext,
     question: str,
@@ -602,6 +630,7 @@ def build_explanation(
     # immediately (no retry) and moves to the next; it is never silently
     # swallowed - the reason is available via the raised exception for
     # whoever calls build_explanation to log if they choose to.
+    rejected = ""
     for provider in (GroqProvider(), OnlineLLM(), OpenAIProvider(), OpenRouterProvider()):
         if not provider.available():
             continue
@@ -609,6 +638,12 @@ def build_explanation(
             text = provider.generate(question, context, citations, evidence_text)
         except (ProviderUnavailable, ProviderBillingBlocked, httpx.HTTPError):
             continue  # try the next provider in the chain
+        bad = unsupported_numbers(text, context, evidence_text, question, citations)
+        if bad:
+            rejected = (f"An online answer was discarded because it contained number(s) "
+                        f"({', '.join(bad[:5])}) found neither in the model result nor in the "
+                        "cited evidence. The checked template answer is shown instead.\n\n")
+            break
         model_used = getattr(provider, "model_used", None) or getattr(provider, "model", None)
         provider_label = f"{provider.name}:{model_used}" if model_used else provider.name
         return ExplanationResult(
@@ -619,7 +654,7 @@ def build_explanation(
         )
 
     fallback = DeterministicFallbackLLM()
-    text = fallback.generate(question, context, citations, evidence_text)
+    text = rejected + fallback.generate(question, context, citations, evidence_text)
     status = "complete"
     if question.strip() and not retrieved:
         status = "insufficient_evidence"

@@ -68,6 +68,10 @@ SOURCE_DOCUMENTS: list[SourceDocument] = [
                    REPO_ROOT / "docs" / "dataset-compatibility.md", "project_doc"),
     SourceDocument("doc_prediction_reliability", "Prediction Reliability",
                    REPO_ROOT / "docs" / "prediction-reliability.md", "project_doc"),
+    SourceDocument("doc_cross_dataset", "Cross-Dataset Framework",
+                   REPO_ROOT / "docs" / "cross-dataset.md", "project_doc"),
+    SourceDocument("doc_upload_analysis", "Upload Analysis: Health Reliability and RUL",
+                   REPO_ROOT / "docs" / "upload-analysis.md", "project_doc"),
     # Literature already supplied to the project, outside the repo per
     # capstone-root CLAUDE.md's "Literature. Reference only." - indexed by
     # absolute path, not copied in. Filenames verified against `ls` of the
