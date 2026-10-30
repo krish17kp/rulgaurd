@@ -45,7 +45,7 @@ export function SiteNav() {
 
   return (
     <header className="sticky top-0 z-10 px-3 pt-3 pb-2">
-      <nav className="mx-auto flex max-w-6xl items-center gap-2 rounded-full border-2 border-surface-border bg-background/85 py-2 pr-2 pl-4 shadow-[3px_3px_0_0_var(--foreground)] backdrop-blur-md">
+      <nav className="mx-auto flex max-w-6xl items-center gap-2 rounded-full border-2 border-surface-border bg-background py-2 pr-2 pl-4 shadow-[3px_3px_0_0_var(--foreground)] backdrop-blur-md">
         <a href={HOME} className="mr-2 flex items-center gap-2 font-display text-base font-extrabold">
           {/* eslint-disable-next-line @next/next/no-img-element -- tiny static SVG logo: next/image adds nothing here */}
           <img src="/favicon.svg" alt="" className="size-7" />

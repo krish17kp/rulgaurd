@@ -11,12 +11,42 @@ export interface ChartSeries {
   points: Array<{ x: number; y: number | null }>;
 }
 
-function downsamplePoints(points: Array<{ x: number; y: number | null }>, maxPoints: number) {
+type Pt = { x: number; y: number | null };
+
+function downsamplePoints<T>(points: T[], maxPoints: number): T[] {
   if (points.length <= maxPoints) return points;
   const step = points.length / maxPoints;
-  const out: Array<{ x: number; y: number | null }> = [];
+  const out: T[] = [];
   for (let i = 0; i < maxPoints; i++) out.push(points[Math.floor(i * step)]);
   return out;
+}
+
+/** Split a line at null values and at x gaps much wider than the usual spacing (e.g.
+ * recordings missing because an archive part was not uploaded), so the chart never draws a
+ * straight line across data that does not exist. Returns the segments and the gap spans. */
+export function splitAtGaps(points: Pt[], gapFactor = 10) {
+  const xs = points.filter((p) => p.y !== null).map((p) => p.x);
+  const steps = xs.slice(1).map((x, i) => x - xs[i]).filter((d) => d > 0).sort((a, b) => a - b);
+  const median = steps.length ? steps[Math.floor(steps.length / 2)] : 0;
+  const segments: Array<Array<{ x: number; y: number }>> = [];
+  const gaps: Array<[number, number]> = [];
+  let current: Array<{ x: number; y: number }> = [];
+  for (const p of points) {
+    if (p.y === null) {
+      if (current.length) segments.push(current);
+      current = [];
+      continue;
+    }
+    const prev = current[current.length - 1];
+    if (prev && median > 0 && p.x - prev.x > gapFactor * median) {
+      segments.push(current);
+      gaps.push([prev.x, p.x]);
+      current = [];
+    }
+    current.push({ x: p.x, y: p.y });
+  }
+  if (current.length) segments.push(current);
+  return { segments, gaps };
 }
 
 export function MultiSeriesChart({
@@ -27,6 +57,7 @@ export function MultiSeriesChart({
   yLabel,
   referenceLine,
   mode = "line",
+  markers = [],
 }: {
   series: ChartSeries[];
   width?: number;
@@ -37,8 +68,20 @@ export function MultiSeriesChart({
   referenceLine?: boolean;
   /** "line" connects points (trajectories); "points" draws dots only (scatter). */
   mode?: "line" | "points";
+  /** Labelled vertical lines, e.g. where the degradation stage changes. */
+  markers?: Array<{ x: number; label: string }>;
 }) {
   const downsampled = series.map((s) => ({ ...s, points: downsamplePoints(s.points, 1200) }));
+  // Lines are split before downsampling so a gap can never be sampled away.
+  const lines = series.map((s) => {
+    const { segments, gaps } = splitAtGaps(s.points);
+    const total = segments.reduce((n, seg) => n + seg.length, 0) || 1;
+    return {
+      ...s,
+      gaps,
+      segments: segments.map((seg) => downsamplePoints(seg, Math.max(2, Math.round((1200 * seg.length) / total)))),
+    };
+  });
   const allX = downsampled.flatMap((s) => s.points.map((p) => p.x));
   const allY = downsampled.flatMap((s) => s.points.map((p) => p.y).filter((y): y is number => y !== null));
   if (allX.length === 0 || allY.length === 0) {
@@ -73,23 +116,46 @@ export function MultiSeriesChart({
                   <circle key={`${s.label}-${i}`} cx={toX(p.x)} cy={toY(p.y)} r={2} fill={s.color} fillOpacity={0.6} />
                 ))
             )
-          : downsampled.map((s) => {
-              // Break the polyline at null gaps instead of drawing through them.
-              const segments: string[] = [];
-              let current: string[] = [];
-              for (const p of s.points) {
-                if (p.y === null) {
-                  if (current.length) segments.push(current.join(" "));
-                  current = [];
-                  continue;
-                }
-                current.push(`${toX(p.x).toFixed(1)},${toY(p.y).toFixed(1)}`);
-              }
-              if (current.length) segments.push(current.join(" "));
-              return segments.map((points, i) => (
-                <polyline key={`${s.label}-${i}`} points={points} fill="none" stroke={s.color} strokeWidth={1.5} />
-              ));
-            })}
+          : lines.map((s) =>
+              s.segments.map((seg, i) =>
+                seg.length === 1 ? (
+                  <circle key={`${s.label}-${i}`} cx={toX(seg[0].x)} cy={toY(seg[0].y)} r={1.5} fill={s.color} />
+                ) : (
+                  <polyline
+                    key={`${s.label}-${i}`}
+                    points={seg.map((p) => `${toX(p.x).toFixed(1)},${toY(p.y).toFixed(1)}`).join(" ")}
+                    fill="none"
+                    stroke={s.color}
+                    strokeWidth={1.5}
+                  />
+                )
+              )
+            )}
+        {mode === "line" &&
+          lines.flatMap((s) =>
+            s.gaps.map(([a, b], i) => {
+              const x = toX(a);
+              const w = toX(b) - x;
+              return (
+                <g key={`gap-${s.label}-${i}`}>
+                  <rect x={x} y={pad} width={w} height={height - 2 * pad} fill="currentColor" fillOpacity={0.06} />
+                  {w > 60 && (
+                    <text x={x + w / 2} y={pad + 12} textAnchor="middle" fontSize="9" fill="currentColor" opacity={0.55}>
+                      no recordings
+                    </text>
+                  )}
+                </g>
+              );
+            })
+          )}
+        {markers.map((m) => (
+          <g key={`${m.label}-${m.x}`}>
+            <line x1={toX(m.x)} y1={pad} x2={toX(m.x)} y2={height - pad} stroke="currentColor" strokeOpacity={0.35} strokeDasharray="3 3" />
+            <text x={toX(m.x) + 3} y={height - pad - 4} fontSize="9" fill="currentColor" opacity={0.7}>
+              {m.label}
+            </text>
+          </g>
+        ))}
         {xLabel && (
           <text x={width / 2} y={height - 4} textAnchor="middle" fontSize="10" fill="currentColor" opacity={0.6}>
             {xLabel}

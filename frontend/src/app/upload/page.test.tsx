@@ -287,6 +287,8 @@ describe("UploadPage", () => {
       first: "XJTU-SY_Bearing_Datasets.part05.rar",
       total_bytes: 14,
       missing: ["XJTU-SY_Bearing_Datasets.part01.rar", "XJTU-SY_Bearing_Datasets.part06.rar"],
+      expected_parts: 6,
+      files: [{ name: "XJTU-SY_Bearing_Datasets.part05.rar", size: 14 }],
       notes: ["Only 1 of 6 parts selected (missing: XJTU-SY_Bearing_Datasets.part01.rar, XJTU-SY_Bearing_Datasets.part06.rar)."],
     });
     render(<UploadPage />);
@@ -296,7 +298,10 @@ describe("UploadPage", () => {
       new File(["fake rar bytes"], "XJTU-SY_Bearing_Datasets.part05.rar")
     );
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Upload and analyze these parts" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Analyze only these parts (partial)" })).toBeInTheDocument());
+    expect(screen.getByText("1 of 6 parts selected: 2 missing")).toBeInTheDocument();
+    expect(screen.getByText(/XJTU-SY_Bearing_Datasets\.part06\.rar \(missing\)/)).toBeInTheDocument();
+    expect(screen.getByText("Add the missing parts")).toBeInTheDocument();
     expect(screen.getByText(/missing: XJTU-SY_Bearing_Datasets\.part01\.rar/)).toBeInTheDocument();
     expect(screen.queryByText(/can.t be analyzed as it is/)).not.toBeInTheDocument();
     expect(predictRulFromFemtoAcquisition).not.toHaveBeenCalled();

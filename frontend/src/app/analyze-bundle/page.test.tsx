@@ -125,9 +125,9 @@ describe("AnalyzeBundlePage", () => {
     await userEvent.upload(screen.getByTestId("file-input"), zipFile());
 
     await waitFor(() => expect(screen.getAllByText("xjtu").length).toBeGreaterThan(0));
-    expect(screen.getByText(/RUL unavailable for this analysis/)).toBeInTheDocument();
+    expect(screen.getByText(/RUL intentionally withheld/)).toBeInTheDocument();
     expect(screen.getByText(/RUL_SUPPRESSED/)).toBeInTheDocument();
-    expect(screen.getByText("LOW")).toBeInTheDocument();
+    expect(screen.getByText(/: LOW, the signal differs strongly/)).toBeInTheDocument();
   });
 
   it("shows the rejection message for a corrupted/invalid bundle, not a crash", async () => {

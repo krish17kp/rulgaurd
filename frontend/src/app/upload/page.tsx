@@ -461,6 +461,14 @@ export default function UploadPage() {
               }))
             );
           }}
+          onAdd={(files) => {
+            setSelectionSeq((n) => n + 1);
+            setDatasetFiles((prev) => {
+              const byName = new Map((prev ?? []).map((p) => [p.name, p]));
+              for (const file of files) byName.set(file.name, { file, name: file.name });
+              return [...byName.values()];
+            });
+          }}
         />
       )}
 

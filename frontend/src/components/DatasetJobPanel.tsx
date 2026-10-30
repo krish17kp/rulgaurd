@@ -125,11 +125,14 @@ export function DatasetJobPanel({
   resumeJobId,
   onReset,
   onPick,
+  onAdd,
 }: {
   picked: PickedFile[] | null;
   resumeJobId: string | null;
   onReset: () => void;
   onPick: (files: File[], fromFolder: boolean) => void;
+  /** Add files (e.g. the missing archive parts) to the current selection. */
+  onAdd: (files: File[]) => void;
 }) {
   const [phase, setPhase] = useState<Phase>({ kind: "planning" });
   const [result, setResult] = useState<DatasetJobResult | null>(null);
@@ -291,7 +294,13 @@ export function DatasetJobPanel({
       )}
 
       {phase.kind === "plan" && picked && (
-        <PlanSummary plan={phase.plan} count={picked.length} onStart={() => void begin()} onCancel={startOver} />
+        <PlanSummary
+          plan={phase.plan}
+          count={picked.length}
+          onStart={() => void begin()}
+          onCancel={startOver}
+          onAdd={onAdd}
+        />
       )}
 
       {phase.kind === "uploading" && (
@@ -357,9 +366,11 @@ export function DatasetJobPanel({
           {phase.job.summary && <SummaryCard job={phase.job} />}
           {result && result.outcome === "analyzed" && (
             <>
-              <BearingTable result={result} />
+              <BearingTable result={result} incomplete={incompleteOf(phase.job)} />
               <RoutingBundleResult
                 data={result}
+                incompleteBearings={incompleteOf(phase.job)}
+                notValidated={phase.job.validation?.status === "not_validated"}
                 signalNote="Raw signal is not kept: uploaded and extracted files are deleted as soon as processing ends. Only these derived results remain, for 7 days."
               />
             </>
@@ -393,29 +404,76 @@ function PlanSummary({
   count,
   onStart,
   onCancel,
+  onAdd,
 }: {
   plan: JobPlan;
   count: number;
   onStart: () => void;
   onCancel: () => void;
+  onAdd: (files: File[]) => void;
 }) {
   const archive = plan.kind !== "files";
-  const partial = (plan.missing?.length ?? 0) > 0;
+  const missing = plan.missing ?? [];
+  const partial = missing.length > 0;
+  const multipart = plan.kind.startsWith("multipart");
+  const selectedParts = plan.files?.map((f) => f.name) ?? [];
+  const expected = plan.expected_parts ?? selectedParts.length;
+  const addInput = (label: string, primary: boolean) => (
+    <label
+      className={`cursor-pointer rounded-lg px-4 py-2 text-xs font-medium ${
+        primary ? "bg-accent text-white shadow-sm hover:bg-accent/90" : "border border-surface-border"
+      }`}
+    >
+      {label}
+      <input
+        type="file"
+        multiple
+        accept=".rar,.7z,.001,.002,.003,.004,.005,.006,.007,.008,.009"
+        className="sr-only"
+        onChange={(e) => {
+          onAdd(Array.from(e.target.files ?? []));
+          e.target.value = "";
+        }}
+      />
+    </label>
+  );
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-surface-border bg-surface p-5 text-sm">
       <h2 className="text-base font-semibold">What will happen</h2>
       <p>
         {count.toLocaleString()} file{count === 1 ? "" : "s"}, {formatBytes(plan.total_bytes)}, recognised as a{" "}
         <span className="font-medium">{KIND_LABEL[plan.kind]}</span>
-        {plan.kind.startsWith("multipart") && plan.first && !partial && (
+        {multipart && plan.first && !partial && (
           <>
             {" "}
             with every part present; extraction starts from <span className="font-mono">{plan.first}</span>
           </>
         )}
-        {partial && <> with only some of its parts: the recordings stored in the selected part(s) are analysed</>}
         .
       </p>
+      {multipart && (
+        <div
+          className={`rounded-lg border p-3 ${
+            partial ? "border-caution/40 bg-caution/10 text-caution" : "border-success/40 bg-success/10 text-success"
+          }`}
+        >
+          <p className="font-medium">
+            {partial
+              ? `${selectedParts.length} of ${expected} parts selected: ${missing.length} missing`
+              : `${selectedParts.length}/${expected} parts selected ✓`}
+          </p>
+          <ul className="mt-2 grid grid-cols-1 gap-x-4 gap-y-0.5 font-mono text-xs sm:grid-cols-2">
+            {[...selectedParts.map((n) => [n, true] as const), ...missing.map((n) => [n, false] as const)]
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([name, ok]) => (
+                <li key={name}>
+                  {ok ? "✓" : "✗"} {name}
+                  {!ok && " (missing)"}
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
       <ol className="list-inside list-decimal text-foreground-muted">
         <li>Upload to the RULGuard server in resumable 16 MB pieces.</li>
         {archive && <li>Check every part against the archive headers and safety-check the contents.</li>}
@@ -432,10 +490,22 @@ function PlanSummary({
           {n}
         </p>
       ))}
-      <div className="flex gap-2">
-        <button type="button" onClick={onStart} className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white shadow-sm hover:bg-accent/90">
-          {partial ? "Upload and analyze these parts" : "Upload and analyze"}
-        </button>
+      <div className="flex flex-wrap gap-2">
+        {partial ? (
+          <>
+            {addInput("Add the missing parts", true)}
+            <button type="button" onClick={onStart} className="rounded-lg border border-surface-border px-4 py-2 text-xs font-medium">
+              Analyze only these parts (partial)
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" onClick={onStart} className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white shadow-sm hover:bg-accent/90">
+              Upload and analyze
+            </button>
+            {multipart && addInput("Add more parts", false)}
+          </>
+        )}
         <button type="button" onClick={onCancel} className="rounded-lg border border-surface-border px-3 py-2 text-xs font-medium">
           Remove
         </button>
@@ -490,6 +560,10 @@ function StageList({ job }: { job: DatasetJob }) {
   );
 }
 
+function incompleteOf(job: DatasetJob): string[] {
+  return job.summary?.partial_set?.incomplete_bearings.map((b) => b.bearing) ?? [];
+}
+
 function JobStatusBanner({ job }: { job: DatasetJob }) {
   const tone =
     job.state === "completed" && job.summary?.bearings_processed
@@ -499,9 +573,17 @@ function JobStatusBanner({ job }: { job: DatasetJob }) {
         : job.state === "partial" || job.state === "completed"
           ? "border-caution/40 bg-caution/10 text-caution"
           : "border-surface-border bg-surface text-foreground";
+  const ps = job.summary?.partial_set;
+  const headline =
+    ps && JOB_TERMINAL_STATES.includes(job.state) && job.state !== "failed" && job.state !== "cancelled"
+      ? `Partial analysis completed: ${job.summary!.bearings_processed} bearing run(s) found in ${ps.uploaded.length} of ${
+          ps.uploaded.length + ps.missing.length
+        } archive parts.`
+      : null;
   return (
-    <div className={`rounded-lg border p-4 text-sm ${tone}`}>
-      <p className="font-medium">{job.message}</p>
+    <div className={`rounded-lg border p-4 text-sm ${ps && headline ? "border-caution/40 bg-caution/10 text-caution" : tone}`}>
+      {headline && <p className="text-base font-semibold">{headline}</p>}
+      <p className={headline ? "mt-1" : "font-medium"}>{job.message}</p>
       <p className="mt-1 text-xs opacity-80">Job {job.id}</p>
     </div>
   );
@@ -531,6 +613,21 @@ function SummaryCard({ job }: { job: DatasetJob }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-surface-border bg-surface p-5 text-sm">
       <h2 className="text-base font-semibold">Processing summary{s.display_name ? `: ${s.display_name}` : ""}</h2>
+      <p
+        className={`rounded-lg border px-3 py-2 text-xs font-medium ${
+          s.partial_set ? "border-caution/40 bg-caution/10 text-caution" : "border-success/40 bg-success/10 text-success"
+        }`}
+      >
+        {[
+          s.display_name,
+          s.partial_set && `Parts ${s.partial_set.uploaded.length}/${s.partial_set.uploaded.length + s.partial_set.missing.length}`,
+          `Bearings ${s.bearings_processed}/${s.bearings_found}`,
+          `Files ${s.files_processed.toLocaleString()}`,
+          s.partial_set ? "Partial" : s.bearings_failed === 0 && s.files_failed === 0 ? "Complete ✓" : "Completed with errors",
+        ]
+          .filter(Boolean)
+          .join("  |  ")}
+      </p>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4">
         {cells.map(([label, value]) => (
           <div key={label} className="flex flex-col">
@@ -592,7 +689,7 @@ function SummaryCard({ job }: { job: DatasetJob }) {
   );
 }
 
-function BearingTable({ result }: { result: DatasetJobResult }) {
+function BearingTable({ result, incomplete }: { result: DatasetJobResult; incomplete: string[] }) {
   const rows = Object.keys(result.decisions)
     .sort()
     .map((id) => {
@@ -619,7 +716,10 @@ function BearingTable({ result }: { result: DatasetJobResult }) {
               <td className="py-1 pr-3 font-mono">{r.id}</td>
               <td className="py-1 pr-3 tabular-nums">{r.n.toLocaleString()}</td>
               <td className="py-1 pr-3 tabular-nums">{r.hi != null ? r.hi.toFixed(3) : "—"}</td>
-              <td className="py-1 pr-3">{r.stage ?? "—"}</td>
+              <td className="py-1 pr-3">
+                {r.stage ?? "—"}
+                {incomplete.includes(r.id) && <span className="text-caution"> (partial trajectory)</span>}
+              </td>
               <td className="py-1 pr-3">
                 {r.status === "RUL_SUPPRESSED" ? "withheld" : r.status === "RUL_EXPERIMENTAL" ? "experimental" : "available"}
               </td>

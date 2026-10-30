@@ -718,6 +718,8 @@ export interface JobPlan {
   notes: string[];
   /** Parts of a multi-part RAR set that were not selected: only the selected parts are analysed. */
   missing?: string[];
+  /** Highest part number expected (known part count, or the highest selected). */
+  expected_parts?: number;
   files?: Array<{ name: string; size: number }>;
   file_count?: number;
 }

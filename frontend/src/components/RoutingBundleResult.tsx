@@ -4,6 +4,36 @@ import { useState } from "react";
 import { RoutingBundlePayload } from "@/lib/api";
 import { MultiSeriesChart, ChartSeries } from "@/components/MultiSeriesChart";
 
+const MODEL_NAMES: Record<string, string> = {
+  raw_seconds: "FEMTO RUL model",
+  sn_fraction: "Normalized life-fraction model",
+  sn_fraction_multi: "Cross-dataset normalized model",
+};
+
+export function modelName(id: string): string {
+  return MODEL_NAMES[id] ?? id;
+}
+
+const LEVEL_TEXT = {
+  HIGH: "looks like its training data",
+  MEDIUM: "partly differs from its training data",
+  LOW: "differs strongly from its training data",
+} as const;
+
+/** Plain-language reason RUL was withheld, most decisive cause first. */
+function withheldReason(decision: RoutingBundlePayload["decisions"][string], notValidated: boolean): string {
+  if (notValidated) {
+    return "No RULGuard model has shown skill on this dataset in held-out testing, so a life estimate would be a guess.";
+  }
+  if (!decision.quality_ok && decision.quality_reasons.length) {
+    return `The recordings did not pass the quality checks: ${decision.quality_reasons.join("; ")}.`;
+  }
+  if (Object.values(decision.applicability).every((a) => a.level === "LOW")) {
+    return "This bearing's vibration differs too much from the data every model was trained on.";
+  }
+  return "No model passed both the applicability check and the validated-skill check for this bearing.";
+}
+
 /** Any dataset the cross-dataset pipeline routes (XJTU, IMS, a manually
  * mapped generic dataset, or a future adapter) - dataset-agnostic by the
  * same shape bundle_kind() uses server-side, so one renderer covers all of
@@ -15,9 +45,15 @@ import { MultiSeriesChart, ChartSeries } from "@/components/MultiSeriesChart";
 export function RoutingBundleResult({
   data,
   signalNote,
+  incompleteBearings = [],
+  notValidated = false,
 }: {
   data: RoutingBundlePayload;
   signalNote?: string;
+  /** Bearings cut short by archive parts that were not uploaded. */
+  incompleteBearings?: string[];
+  /** The job's validation says no model has skill on this dataset. */
+  notValidated?: boolean;
 }) {
   const bearingIds = Object.keys(data.decisions).sort();
   const [bearing, setBearing] = useState(bearingIds[0] ?? "");
@@ -47,6 +83,15 @@ export function RoutingBundleResult({
           },
         ]
       : [];
+  const partial = incompleteBearings.includes(bearing);
+  // Where the degradation stage changes along the trajectory.
+  const stageMarkers: Array<{ x: number; label: string }> = [];
+  let lastStage: string | null = null;
+  for (const p of trajectory) {
+    if (!p.stage) continue;
+    if (lastStage && p.stage !== lastStage) stageMarkers.push({ x: p.elapsed_s / 3600, label: p.stage.toLowerCase() });
+    lastStage = p.stage;
+  }
   const rulSeries: ChartSeries[] =
     trajectory.length > 1 && rulAvailable
       ? [
@@ -135,34 +180,52 @@ export function RoutingBundleResult({
       )}
 
       <section className="rounded-xl border border-surface-border bg-surface p-4">
-        <h2 className="text-sm font-semibold">Applicability</h2>
-        <dl className="mt-2 grid grid-cols-3 gap-2 text-sm">
-          {Object.entries(decision.applicability).map(([model, app]) => (
-            <div key={model} className="col-span-3 grid grid-cols-3 gap-2 border-t border-surface-border py-1 first:border-t-0">
-              <dt className="font-mono text-xs text-foreground-muted">{model}</dt>
-              <dd>{app.level}</dd>
-              <dd className="text-xs text-foreground-muted">shift {app.shift_ratio.toFixed(2)}x</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-
-      <section className="rounded-xl border border-surface-border bg-surface p-4">
         <h2 className="text-sm font-semibold">Remaining useful life</h2>
         {!rulAvailable ? (
-          <p className="mt-2 text-sm text-foreground-muted">
-            RUL unavailable for this analysis ({current.status}). The applicability or validated-
-            skill gate above did not permit a prediction for this bearing — see Applicability.
-          </p>
+          <div className="mt-2 text-sm">
+            <p className="font-medium">RUL intentionally withheld</p>
+            <p className="mt-1 text-foreground-muted">{withheldReason(decision, notValidated)}</p>
+            <p className="mt-1 text-xs text-foreground-muted">
+              Status: <span className="font-mono">{current.status}</span>
+            </p>
+          </div>
         ) : (
           <MultiSeriesChart series={rulSeries} xLabel="elapsed time (h)" yLabel="RUL (h)" />
         )}
       </section>
 
+      <section className="rounded-xl border border-surface-border bg-surface p-4">
+        <h2 className="text-sm font-semibold">Does each model apply to this bearing?</h2>
+        <ul className="mt-2 flex flex-col text-sm">
+          {Object.entries(decision.applicability).map(([model, app]) => (
+            <li key={model} className="flex flex-wrap items-baseline justify-between gap-2 border-t border-surface-border py-2 first:border-t-0">
+              <span>
+                <span className="font-medium">{modelName(model)}</span>
+                <span className="text-foreground-muted">: {app.level}, the signal {LEVEL_TEXT[app.level]}</span>
+              </span>
+              <span className="text-xs text-foreground-muted">
+                <span className="font-mono">{model}</span>, feature shift {app.shift_ratio.toFixed(2)}x
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
       {hiSeries.length > 0 ? (
         <section className="rounded-xl border border-surface-border bg-surface p-4">
-          <h2 className="text-sm font-semibold">Health / trajectory</h2>
-          <MultiSeriesChart series={hiSeries} xLabel="elapsed time (h)" yLabel="HI (1 healthy → 0 failed)" />
+          <h2 className="text-sm font-semibold">Health / trajectory{partial ? " (partial trajectory)" : ""}</h2>
+          {partial && (
+            <p className="mt-1 text-xs text-caution">
+              Some of this bearing&apos;s recordings are in archive parts that were not uploaded. Shaded spans have no
+              recordings; the line is never drawn across them.
+            </p>
+          )}
+          <MultiSeriesChart
+            series={hiSeries}
+            xLabel="elapsed time (h)"
+            yLabel="HI (1 healthy → 0 failed)"
+            markers={stageMarkers}
+          />
         </section>
       ) : (
         <section className="rounded-xl border border-surface-border bg-surface p-4 text-sm text-foreground-muted">
