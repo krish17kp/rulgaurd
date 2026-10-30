@@ -126,6 +126,8 @@ describe("AnalyzeBundlePage", () => {
 
     await waitFor(() => expect(screen.getAllByText("xjtu").length).toBeGreaterThan(0));
     expect(screen.getByText(/RUL intentionally withheld/)).toBeInTheDocument();
+    expect(screen.queryByText(/RUL_SUPPRESSED/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText(/Show advanced details/));
     expect(screen.getByText(/RUL_SUPPRESSED/)).toBeInTheDocument();
     expect(screen.getByText(/: LOW, the signal differs strongly/)).toBeInTheDocument();
   });

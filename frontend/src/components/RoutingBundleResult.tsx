@@ -57,6 +57,7 @@ export function RoutingBundleResult({
 }) {
   const bearingIds = Object.keys(data.decisions).sort();
   const [bearing, setBearing] = useState(bearingIds[0] ?? "");
+  const [advanced, setAdvanced] = useState(false);
   const decision = data.decisions[bearing];
   const trajectory = data.trajectories?.[bearing] ?? [];
 
@@ -120,6 +121,10 @@ export function RoutingBundleResult({
 
   return (
     <div className="flex flex-col gap-6">
+      <label className="flex items-center gap-2 self-end text-xs text-foreground-muted">
+        <input type="checkbox" checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} />
+        Show advanced details (status codes, model IDs, feature shift, reasons)
+      </label>
       <section className="rounded-xl border border-surface-border bg-surface p-4">
         <h2 className="text-sm font-semibold">Overview</h2>
         <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
@@ -140,7 +145,10 @@ export function RoutingBundleResult({
           <dt className="text-foreground-muted">Bearings</dt>
           <dd>{bearingIds.length}</dd>
         </dl>
-        {data.profile.warnings.length > 0 && (
+        {advanced && (
+          <p className="mt-2 text-xs text-foreground-muted">Sampling rate source: {data.profile.sampling_rate_source}</p>
+        )}
+        {advanced && data.profile.warnings.length > 0 && (
           <ul className="mt-2 list-inside list-disc text-xs text-foreground-muted">
             {data.profile.warnings.map((w) => (
               <li key={w}>{w}</li>
@@ -185,9 +193,13 @@ export function RoutingBundleResult({
           <div className="mt-2 text-sm">
             <p className="font-medium">RUL intentionally withheld</p>
             <p className="mt-1 text-foreground-muted">{withheldReason(decision, notValidated)}</p>
-            <p className="mt-1 text-xs text-foreground-muted">
-              Status: <span className="font-mono">{current.status}</span>
-            </p>
+            {advanced && (
+              <p className="mt-1 text-xs text-foreground-muted">
+                Status: <span className="font-mono">{current.status}</span>, scope {current.scope || "n/a"}, validated skill{" "}
+                {current.validated_skill != null ? current.validated_skill.toFixed(2) : "n/a"}
+                {decision.quality_ok ? ", quality checks passed" : `, quality: ${decision.quality_reasons.join("; ")}`}
+              </p>
+            )}
           </div>
         ) : (
           <MultiSeriesChart series={rulSeries} xLabel="elapsed time (h)" yLabel="RUL (h)" />
@@ -203,9 +215,18 @@ export function RoutingBundleResult({
                 <span className="font-medium">{modelName(model)}</span>
                 <span className="text-foreground-muted">: {app.level}, the signal {LEVEL_TEXT[app.level]}</span>
               </span>
-              <span className="text-xs text-foreground-muted">
-                <span className="font-mono">{model}</span>, feature shift {app.shift_ratio.toFixed(2)}x
-              </span>
+              {advanced && (
+                <span className="text-xs text-foreground-muted">
+                  <span className="font-mono">{model}</span>, feature shift {app.shift_ratio.toFixed(2)}x
+                </span>
+              )}
+              {advanced && app.reasons.length > 0 && (
+                <ul className="w-full list-inside list-disc text-xs text-foreground-muted">
+                  {app.reasons.map((r) => (
+                    <li key={r}>{r}</li>
+                  ))}
+                </ul>
+              )}
             </li>
           ))}
         </ul>
