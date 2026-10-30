@@ -1055,6 +1055,7 @@ def _process(d: Path, data: Path, plan: dict, root: Path, profile: dict, all_fil
     import joblib
     import pandas as pd
 
+    from bearing_pdm.health import health_quality
     from bearing_pdm.pipeline import build_canonical_features
     from bearing_pdm.routing import candidates_from_bundle, oof_from_predictions, route_dataset
 
@@ -1135,7 +1136,8 @@ def _process(d: Path, data: Path, plan: dict, root: Path, profile: dict, all_fil
                                   "missing": plan["missing"], "incomplete_bearings": cut_runs}
     result = {"outcome": "analyzed", "dataset_id": dataset,
               "profile": _sanitize(profile, root), "decisions": _sanitize(decisions, root),
-              "trajectories": trajectories, "validation": validation, "summary": summary}
+              "trajectories": trajectories, "validation": validation, "summary": summary,
+              "health_quality": health_quality(trajectories)}
     (d / "result.json").write_text(json.dumps(_json_clean(result)))
     if failed_runs:
         message = (f"Partially completed: {len(failed_runs)} of {len(runs)} bearing run(s) could "

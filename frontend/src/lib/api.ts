@@ -795,10 +795,23 @@ export interface DatasetJob {
   updated_at: number;
 }
 
+export interface HealthQuality {
+  rating: "strong" | "moderate" | "weak" | "insufficient";
+  n_bearings: number;
+  note?: string;
+  trend?: number;
+  smoothness?: number;
+  prognosability?: number | null;
+  end_of_life_known?: boolean;
+  weak_bearings?: string[];
+  thresholds?: { strong: number; moderate: number };
+}
+
 export interface DatasetJobResult extends RoutingBundlePayload {
   outcome: "analyzed" | "profile_only";
   validation: JobValidation | null;
   summary: JobSummary;
+  health_quality?: HealthQuality;
 }
 
 export const JOB_TERMINAL_STATES: JobStateName[] = ["completed", "partial", "failed", "cancelled"];

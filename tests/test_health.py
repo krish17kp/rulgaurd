@@ -330,3 +330,23 @@ def test_reference_hi_diagnostics_reports_the_pinning_guards():
     assert (report["pct_at_zero"] == 0.0).all()
     assert (report["spearman"] < -0.5).all()
     assert (report["hi_healthy_window"] > report["hi_final_1pct"]).all()
+
+
+def test_health_quality_rates_trend_and_flags_bearings_whose_health_rises():
+    from bearing_pdm.health import health_quality
+
+    def run(hi, rul=None):
+        return [{"sequence_index": i, "elapsed_s": 60.0 * i, "health_indicator": h,
+                 "actual_rul_seconds": rul} for i, h in enumerate(hi)]
+
+    falling = np.linspace(1.0, 0.1, 20)
+    q = health_quality({"a": run(falling), "b": run(falling), "c": run(falling[::-1])})
+    assert q["rating"] == "weak"  # mean trend (1 + 1 - 1) / 3 < 0.4: a rising bearing is not hidden
+    assert q["weak_bearings"] == ["c"]
+    assert q["prognosability"] is None and not q["end_of_life_known"]
+
+    q = health_quality({"a": run(falling, rul=1.0), "b": run(falling, rul=1.0)})
+    assert q["rating"] == "strong" and q["trend"] == pytest.approx(1.0)
+    assert q["end_of_life_known"] and q["prognosability"] is not None
+
+    assert health_quality({"a": run(falling[:5])})["rating"] == "insufficient"

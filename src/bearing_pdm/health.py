@@ -581,3 +581,51 @@ def prognostic_metrics(df: pd.DataFrame, hi: pd.Series, end_fraction: float = 0.
         "prognosability": prognosability,
         "per_bearing": per.to_dict(orient="records"),
     }
+
+
+# Fixed before looking at any upload, not tuned: a rating of the MEAN per-bearing trend
+# -Spearman(HI, elapsed). The mean, not the median, so bearings whose health rises
+# over time pull the rating down instead of being hidden. On the deployed routing
+# trajectories: XJTU-SY 0.64 (moderate), FEMTO learning set 0.26 (weak).
+TREND_STRONG, TREND_MODERATE = 0.7, 0.4
+MIN_RECORDINGS_FOR_TREND = 10
+
+
+def health_quality(trajectories: dict[str, list[dict]]) -> dict:
+    """How far to trust a dataset's health indicator, from its own trajectories.
+
+    Uses `prognostic_metrics` (Coble & Hines 2009). Trend and smoothness need no
+    labels, so they apply to any upload. Consistency at failure (prognosability)
+    is reported only when every bearing has a known end of life; without one,
+    the HI's accuracy cannot be measured, only its consistency."""
+    rows = [{"bearing_run_id": b, "sequence_index": p["sequence_index"],
+             "elapsed_s": p["elapsed_s"], "health_indicator": p.get("health_indicator"),
+             "rul_seconds": p.get("actual_rul_seconds")}
+            for b, points in trajectories.items() for p in points]
+    df = pd.DataFrame(rows)
+    if len(df):  # all-None RUL (any upload without failure points) is object dtype
+        df["rul_seconds"] = pd.to_numeric(df["rul_seconds"], errors="coerce")
+    usable = (df.groupby("bearing_run_id")["health_indicator"].count()
+              if len(df) else pd.Series(dtype=int))
+    df = df[df["bearing_run_id"].isin(usable[usable >= MIN_RECORDINGS_FOR_TREND].index)]
+    if df.empty:
+        return {"rating": "insufficient", "n_bearings": 0,
+                "note": f"Each bearing needs at least {MIN_RECORDINGS_FOR_TREND} recordings "
+                        "with a health value to judge its trend."}
+    m = prognostic_metrics(df, df["health_indicator"].astype(float))
+    per = [{"bearing": r["bearing_run_id"], "n": r["n"], "trend": -r["spearman_elapsed"],
+            "smoothness": r["monotonicity"]} for r in m["per_bearing"]]
+    trend = float(np.nanmean([r["trend"] for r in per]))
+    labelled = df.groupby("bearing_run_id")["rul_seconds"].apply(lambda s: s.notna().any())
+    return {
+        "rating": ("strong" if trend >= TREND_STRONG else
+                   "moderate" if trend >= TREND_MODERATE else "weak"),
+        "trend": trend,
+        "smoothness": m["monotonicity_mean"],
+        "prognosability": m["prognosability"] if bool(labelled.all()) else None,
+        "end_of_life_known": bool(labelled.all()),
+        "n_bearings": m["n_bearings"],
+        "weak_bearings": [r["bearing"] for r in per if not r["trend"] >= TREND_MODERATE],
+        "per_bearing": per,
+        "thresholds": {"strong": TREND_STRONG, "moderate": TREND_MODERATE},
+    }

@@ -21,6 +21,7 @@ import {
 import { RoutingBundleResult } from "@/components/RoutingBundleResult";
 import { MappingForm } from "@/components/MappingForm";
 import { buildReportHtml, downloadText } from "@/lib/report";
+import { HealthQualityCard } from "@/components/HealthQualityCard";
 
 /** A selected file plus the name the server should see: the folder-relative
  * path for a folder upload, otherwise the file name. */
@@ -395,6 +396,7 @@ export function DatasetJobPanel({
                   Download raw results (JSON)
                 </button>
               </div>
+              {result.health_quality && <HealthQualityCard quality={result.health_quality} />}
               <BearingTable result={result} incomplete={incompleteOf(phase.job)} />
               <RoutingBundleResult
                 data={result}
