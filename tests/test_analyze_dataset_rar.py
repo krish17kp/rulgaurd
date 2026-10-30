@@ -98,7 +98,7 @@ def test_run_analysis_persists_canonical_parquet_and_manifest(tmp_path, monkeypa
     import bearing_pdm.domain as domain
     import bearing_pdm.routing as routing
 
-    monkeypatch.setattr(domain, "add_self_normalized_features", lambda df: df)
+    monkeypatch.setattr(domain, "add_self_normalized_features", lambda df, reference=None: df)
     monkeypatch.setattr(analyze_dataset.joblib, "load", lambda path: {
         "stage_thresholds": FakeThresholds(),
         "hi_model": object(),
