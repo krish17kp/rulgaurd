@@ -704,6 +704,7 @@ export function getCrossDatasetComparison(): Promise<CrossDatasetResponse> {
 export type JobKind = "zip" | "7z" | "rar" | "multipart_rar" | "multipart_7z" | "files";
 export type JobStateName =
   | "awaiting_upload"
+  | "needs_mapping"
   | "queued"
   | "checking"
   | "extracting"
@@ -761,6 +762,22 @@ export interface JobValidation {
   trained_on: string[];
 }
 
+export type MappingRole = "vibration_x" | "vibration_y" | "temperature_bearing" | "temperature_ambient";
+
+/** A custom-format dataset's proposed column mapping (dataset_jobs._generic_proposal):
+ * roles come from column names, or are a labelled guess for a headerless file. */
+export interface MappingProposal {
+  sample_file: string;
+  has_header: boolean;
+  rows_per_file: number;
+  columns: Array<{ name: string; role: MappingRole | null; confidence: string; usable: boolean }>;
+  roles: MappingRole[];
+  runs: Array<{ id: string; files: number }>;
+  sampling_rate_hz: number | null;
+  needs_interval: boolean;
+  warnings: string[];
+}
+
 export interface DatasetJob {
   id: string;
   state: JobStateName;
@@ -773,6 +790,7 @@ export interface DatasetJob {
   summary: JobSummary | null;
   validation: JobValidation | null;
   has_result: boolean;
+  mapping_proposal?: MappingProposal;
   created_at: number;
   updated_at: number;
 }
@@ -823,6 +841,16 @@ export async function uploadDatasetJobChunk(
 
 export function startDatasetJob(id: string): Promise<DatasetJob> {
   return request<DatasetJob>(`/jobs/${encodeURIComponent(id)}/start`, { method: "POST" });
+}
+
+export function submitDatasetJobMapping(
+  id: string,
+  mapping: { columns: Record<string, string>; sampling_rate_hz: number; recording_interval_s: number | null }
+): Promise<DatasetJob> {
+  return request<DatasetJob>(`/jobs/${encodeURIComponent(id)}/mapping`, {
+    method: "POST",
+    body: JSON.stringify(mapping),
+  });
 }
 
 export function cancelDatasetJob(id: string): Promise<DatasetJob> {

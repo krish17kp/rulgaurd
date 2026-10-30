@@ -472,3 +472,69 @@ def test_api_plan_is_a_dry_run(tmp_path, monkeypatch):
     assert body["first"] == "XJTU-SY_Bearing_Datasets.part01.rar"
     assert [f["name"][-10:] for f in body["files"]] == [f"part0{n}.rar" for n in range(1, 7)]
     assert not (tmp_path / "jobs").exists()
+
+
+# --------------------------------------------------------------------------- custom formats
+
+
+def _custom_dataset(base: Path, header: bool = True) -> Path:
+    """Two bearing folders of numbered CSV recordings whose vibration grows; a readme
+    beside them must not be read as a recording."""
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    for b in ("rig_a", "rig_b"):
+        (base / b).mkdir(parents=True)
+        (base / b / "readme.txt").write_text("test rig notes")
+        for i in range(1, 13):
+            t = np.arange(2000) / 2000
+            x, y = rng.normal(0, 1 + i / 4, 2000), rng.normal(0, 1, 2000)
+            rows = "\n".join(f"{a:.4f},{u:.5f},{v:.5f},{40 + i}" for a, u, v in zip(t, x, y))
+            head = "time_s,acc_x,acc_y,bearing_temp\n" if header else ""
+            (base / b / f"rec{i}.csv").write_text(head + rows + "\n")
+    return base
+
+
+@needs_bundle
+def test_custom_dataset_pauses_for_mapping_then_runs_the_same_pipeline(jobs):
+    src = _custom_dataset(jobs / "src")
+    out = _submit([_zip_tree(src, jobs / "custom.zip")])
+    assert out["state"] == "needs_mapping", out["message"]
+    p = out["mapping_proposal"]
+    roles = {c["name"]: c["role"] for c in p["columns"]}
+    assert roles["acc_x"] == "vibration_x" and roles["acc_y"] == "vibration_y"
+    assert [(r["id"], r["files"]) for r in p["runs"]] == [("rig_a", 12), ("rig_b", 12)]
+    assert p["needs_interval"] and p["sampling_rate_hz"] == pytest.approx(2000, rel=1e-3)
+    assert (dj.JOBS_ROOT / out["id"] / "data").is_dir()  # kept until confirmed
+
+    with pytest.raises(dj.JobError, match="time between recordings"):
+        dj.submit_mapping(out["id"], {"columns": {"acc_x": "vibration_x"}, "sampling_rate_hz": 2000})
+    with pytest.raises(dj.JobError, match="vibration"):
+        dj.submit_mapping(out["id"], {"columns": {"bearing_temp": "temperature_bearing"},
+                                      "sampling_rate_hz": 2000, "recording_interval_s": 60})
+    done = dj.submit_mapping(out["id"], {
+        "columns": {"acc_x": "vibration_x", "acc_y": "vibration_y",
+                    "bearing_temp": "temperature_bearing"},
+        "sampling_rate_hz": 2000, "recording_interval_s": 60})
+    assert done["state"] == "completed", done["message"]
+    assert done["summary"]["bearings_processed"] == 2
+    assert done["summary"]["files_processed"] == 24  # readme.txt files skipped
+    result = dj.read_result(out["id"])
+    traj = result["trajectories"]["generic:rig_a"]
+    assert [p["elapsed_s"] for p in traj] == [60.0 * i for i in range(12)]  # rec2 before rec10
+    assert all(p["health_indicator"] is not None for p in traj)
+    assert all(d["status"] == "RUL_SUPPRESSED" for d in result["decisions"].values())
+    assert result["validation"]["status"] == "not_validated"
+    assert not (dj.JOBS_ROOT / out["id"] / "data").exists()
+    with pytest.raises(dj.JobError, match="not waiting"):
+        dj.submit_mapping(out["id"], {"columns": {}, "sampling_rate_hz": 1})
+
+
+def test_headerless_custom_dataset_guesses_vibration_but_skips_the_time_column(jobs):
+    src = _custom_dataset(jobs / "src", header=False)
+    out = _submit([_zip_tree(src, jobs / "custom.zip")])
+    assert out["state"] == "needs_mapping"
+    cols = {c["name"]: (c["role"], c["confidence"]) for c in out["mapping_proposal"]["columns"]}
+    assert cols["0"] == (None, "none")  # 0, 0.0005, ... only increases: a time column
+    assert cols["1"] == ("vibration_x", "guess") and cols["2"] == ("vibration_y", "guess")
+    assert out["mapping_proposal"]["sampling_rate_hz"] is None  # never assumed

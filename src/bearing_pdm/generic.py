@@ -10,24 +10,33 @@ via profiler.apply_manual_mapping().
 from __future__ import annotations
 
 import io
+import re
 from pathlib import Path
 
 import pandas as pd
 
 
-def discover_generic_files(root: str | Path) -> list[Path]:
-    """Sorted tabular files directly under `root` (non-recursive: a generic
-    dataset's file-ordering semantics are not known, so this does not guess
-    at a nested layout the way a dataset-specific adapter can)."""
+def _natural_key(path: Path) -> list:
+    """file2 before file10: digit runs compare as numbers."""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", path.name)]
+
+
+def discover_generic_files(root: str | Path, suffix: str | None = None) -> list[Path]:
+    """Tabular files directly under `root` in natural name order (non-recursive: a
+    generic dataset's file-ordering semantics are not known, so this does not guess
+    at a nested layout the way a dataset-specific adapter can). `suffix` keeps only
+    files of the recordings' own format, so a readme.txt beside CSVs is not read."""
     from bearing_pdm.profiler import (
         TABULAR_SUFFIXES,  # deferred: profiler -> adapters -> generic cycle
     )
 
     root = Path(root)
     files = sorted(
-        p for p in root.iterdir()
-        if p.is_file() and not p.name.startswith(".")
-        and (p.suffix.lower() in TABULAR_SUFFIXES or p.suffix[1:].isdigit())
+        (p for p in root.iterdir()
+         if p.is_file() and not p.name.startswith(".")
+         and (p.suffix.lower() in TABULAR_SUFFIXES or p.suffix[1:].isdigit())
+         and (suffix is None or p.suffix.lower() == suffix)),
+        key=_natural_key,
     )
     if not files:
         raise FileNotFoundError(f"No tabular files found directly under {root}")

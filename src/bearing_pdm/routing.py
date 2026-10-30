@@ -245,11 +245,14 @@ TRAJECTORY_COLUMNS = (
 )
 
 
-def route_dataset(df: pd.DataFrame, dataset: str, bundle: dict, oof=None, progress=print):
+def route_dataset(df: pd.DataFrame, dataset: str, bundle: dict, oof=None, progress=print,
+                  adapter=None):
     """Route every bearing of one dataset's canonical feature frame.
 
     Shared by scripts/analyze_dataset.py and the web dataset jobs
-    (dataset_jobs.py) so both apply the identical gate. Returns
+    (dataset_jobs.py) so both apply the identical gate. `adapter` supplies the
+    per-dataset windows for a dataset outside the ADAPTERS registry (a custom
+    upload's GenericAdapter). Returns
     (per-recording frames, decisions by bearing, trajectories by bearing)."""
     from dataclasses import replace
 
@@ -260,14 +263,16 @@ def route_dataset(df: pd.DataFrame, dataset: str, bundle: dict, oof=None, progre
         stage_persistence,
     )
 
-    df = add_self_normalized_features(df)
+    df = add_self_normalized_features(df, adapter.reference_window if adapter else None)
     candidates = candidates_from_bundle(bundle)
     frames, decisions, trajectories = [], {}, {}
     for bearing, g in df.groupby("bearing_run_id"):
-        thresholds = replace(bundle["stage_thresholds"], persistence=stage_persistence(dataset))
-        out, decision = analyze_bearing(g, candidates, bundle["hi_model"],
-                                        thresholds, reference_window(dataset),
-                                        oof=oof, smooth_window=hi_smooth_window(dataset))
+        persistence = adapter.stage_persistence if adapter else stage_persistence(dataset)
+        thresholds = replace(bundle["stage_thresholds"], persistence=persistence)
+        out, decision = analyze_bearing(
+            g, candidates, bundle["hi_model"], thresholds,
+            adapter.reference_window if adapter else reference_window(dataset), oof=oof,
+            smooth_window=adapter.hi_smooth_window if adapter else hi_smooth_window(dataset))
         frames.append(out)
         decisions[bearing] = decision
         present = [c for c in TRAJECTORY_COLUMNS if c in out]

@@ -19,6 +19,7 @@ import {
   uploadDatasetJobChunk,
 } from "@/lib/api";
 import { RoutingBundleResult } from "@/components/RoutingBundleResult";
+import { MappingForm } from "@/components/MappingForm";
 import { buildReportHtml, downloadText } from "@/lib/report";
 
 /** A selected file plus the name the server should see: the folder-relative
@@ -156,6 +157,7 @@ export function DatasetJobPanel({
       }
       jobRef.current = job;
       setPhase({ kind: "server", job });
+      if (job.state === "needs_mapping") return; // resumes after the user confirms the mapping
       if (JOB_TERMINAL_STATES.includes(job.state)) {
         if (job.has_result) {
           try {
@@ -363,6 +365,16 @@ export function DatasetJobPanel({
               </p>
             )}
           </div>
+          {phase.job.state === "needs_mapping" && phase.job.mapping_proposal && (
+            <MappingForm
+              key={phase.job.id}
+              job={phase.job}
+              onSubmitted={(job) => {
+                setPhase({ kind: "server", job });
+                void poll(job.id);
+              }}
+            />
+          )}
           {phase.job.validation && <ValidationNote validation={phase.job.validation} />}
           {phase.job.summary && <SummaryCard job={phase.job} />}
           {result && result.outcome === "analyzed" && (

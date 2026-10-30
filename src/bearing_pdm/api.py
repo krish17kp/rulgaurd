@@ -3806,6 +3806,18 @@ def start_dataset_job(job_id: str) -> dict:
     return _job_call(dataset_jobs.start_job, job_id)
 
 
+class JobMappingRequest(BaseModel):
+    columns: dict[str, str] = Field(max_length=64)
+    sampling_rate_hz: float
+    recording_interval_s: float | None = None
+
+
+@app.post("/jobs/{job_id}/mapping")
+def map_dataset_job(job_id: str, body: JobMappingRequest) -> dict:
+    """Confirm the column mapping of a custom-format dataset and resume processing."""
+    return _job_call(dataset_jobs.submit_mapping, job_id, body.model_dump())
+
+
 @app.post("/jobs/{job_id}/cancel")
 def cancel_dataset_job(job_id: str) -> dict:
     return _job_call(dataset_jobs.cancel_job, job_id)

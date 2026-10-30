@@ -17,6 +17,11 @@ The scientific path is unchanged: dataset adapters -> build_canonical_features
 dataset no model has shown held-out skill on gets inspection results (health
 indicator, stage, applicability) and RUL is withheld by that gate - never
 manufactured here.
+
+A format no adapter recognises pauses in `needs_mapping` with a proposed column
+mapping (profiler names, else a labelled guess); nothing is processed until the
+user confirms the vibration columns, sampling rate and recording interval
+(`submit_mapping`). The worker then runs the same path through GenericAdapter.
 """
 
 from __future__ import annotations
@@ -65,6 +70,7 @@ EXTRACT_TIMEOUT_S = 3 * 3600
 ARCHIVE_SUFFIXES = (".zip", ".7z", ".rar")
 TERMINAL = ("completed", "partial", "failed", "cancelled")
 ACTIVE = ("queued", "checking", "extracting", "detecting", "processing")
+GENERIC_ROLES = ("vibration_x", "vibration_y", "temperature_bearing", "temperature_ambient")
 STAGES = ("upload", "check", "extract", "detect", "process")
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,32}$")
@@ -488,6 +494,9 @@ def sweep() -> None:
             _delete_raw(d)
             if now - state.get("updated_at", 0) > RESULT_TTL_S:
                 shutil.rmtree(d, ignore_errors=True)
+        elif state["state"] == "needs_mapping":
+            if now - state.get("updated_at", 0) > INCOMPLETE_TTL_S:
+                shutil.rmtree(d, ignore_errors=True)
         elif state["state"] == "awaiting_upload":
             latest = max([state.get("updated_at", 0)]
                          + [p.stat().st_mtime for p in d.rglob("*") if p.is_file()])
@@ -795,6 +804,130 @@ def _sanitize(obj: Any, root: Path) -> Any:
     return json.loads(text)
 
 
+# ---------------------------------------------------------------------------
+# Custom (unrecognised) datasets
+# ---------------------------------------------------------------------------
+
+
+def _generic_proposal(data: Path, root: Path, profile: dict) -> dict | None:
+    """A column mapping for the user to confirm, or None when nothing looks like a signal.
+    One bearing run per folder that directly holds data files. Roles come from column
+    names (profiler); a headerless file gets a guess, labelled as one, that skips columns
+    which only ever increase (a time or index column)."""
+    import numpy as np
+
+    from bearing_pdm.generic import discover_generic_files, read_generic_file
+
+    sample = next((f for f in profile["files"] if f.get("readable")
+                   and any(c["numeric"] and not c["constant"] for c in f["columns"])), None)
+    if sample is None:
+        return None
+    signal_cols = [c for c in sample["columns"] if c["numeric"] and not c["constant"]]
+    increasing: set[str] = set()
+    if not sample["has_header"]:
+        df = read_generic_file(root / sample["relative_path"],
+                               sample["delimiter"], sample["has_header"])
+        increasing = {c for c in df.columns if len(df) > 2 and bool(
+            (np.diff(_numeric(df[c])) > 0).all())}
+    columns, guessed = [], 0
+    for c in sample["columns"]:
+        role = c["canonical"] if c["canonical"] in GENERIC_ROLES else None
+        confidence = c["confidence"] if role else "none"
+        columns.append({"name": c["name"], "role": role, "confidence": confidence,
+                        "usable": c["numeric"]})
+    if not any(col["role"] and col["role"].startswith("vibration") for col in columns):
+        for col in columns:
+            if (any(c["name"] == col["name"] for c in signal_cols) and not col["role"]
+                    and col["name"] not in increasing and guessed < 2):
+                col.update(role=("vibration_x", "vibration_y")[guessed], confidence="guess")
+                guessed += 1
+    suffix = Path(sample["relative_path"]).suffix.lower()
+    folders: dict[Path, int] = {}
+    for f in {p.parent for p in root.rglob("*") if p.is_file()}:
+        try:
+            folders[f] = len(discover_generic_files(f, suffix))
+        except FileNotFoundError:
+            continue
+    runs = [{"path": f.relative_to(root).as_posix(),
+             "id": root.name if f == root else f.relative_to(root).as_posix(), "files": n}
+            for f, n in sorted(folders.items())]
+    from_time = str(profile.get("sampling_rate_source", "")).startswith("time column")
+    return {
+        "root": root.relative_to(data).as_posix(),
+        "sample_file": sample["relative_path"], "suffix": suffix,
+        "delimiter": sample["delimiter"], "has_header": sample["has_header"],
+        "rows_per_file": sample["rows"],
+        "columns": columns, "roles": list(GENERIC_ROLES), "runs": runs[:200],
+        "sampling_rate_hz": profile["sampling_rate_hz"] if from_time else None,
+        "needs_interval": any(r["files"] > 1 for r in runs),
+        "warnings": [w for w in profile["warnings"] if "adapter" not in w][:10],
+    }
+
+
+def _numeric(values):
+    import pandas as pd
+
+    return pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+
+
+def submit_mapping(job_id: str, mapping: dict) -> dict:
+    """Validate the user's confirmed mapping against the proposal, then resume the job."""
+    d = job_dir(job_id)
+    state = _read_state(d)
+    if state["state"] != "needs_mapping":
+        raise JobError(f"job is {state['state']}, not waiting for a column mapping",
+                       code="CONFLICT", status=409)
+    proposal = state["mapping_proposal"]
+    names = {c["name"] for c in proposal["columns"] if c["usable"]}
+    columns = {str(k): str(v) for k, v in (mapping.get("columns") or {}).items() if v}
+    if set(columns) - names:
+        raise JobError(f"unknown or unusable column(s): {sorted(set(columns) - names)[:5]}")
+    if set(columns.values()) - set(GENERIC_ROLES):
+        raise JobError(f"unknown role(s): {sorted(set(columns.values()) - set(GENERIC_ROLES))}")
+    vib = [v for v in columns.values() if v.startswith("vibration")]
+    if not vib or len(vib) != len(set(vib)):
+        raise JobError("choose one or two vibration columns (each vibration role at most once)")
+    rate = mapping.get("sampling_rate_hz")
+    if not isinstance(rate, int | float) or not 1 <= rate <= 1_000_000:
+        raise JobError("sampling rate must be between 1 Hz and 1,000,000 Hz")
+    interval = mapping.get("recording_interval_s")
+    if proposal["needs_interval"]:
+        if not isinstance(interval, int | float) or not 0 < interval <= 10_000_000:
+            raise JobError("time between recordings must be a positive number of seconds")
+    else:
+        interval = None
+    (d / "mapping.json").write_text(json.dumps(
+        {"columns": columns, "sampling_rate_hz": float(rate),
+         "recording_interval_s": None if interval is None else float(interval)}))
+    state.update(state="queued", message="Mapping confirmed. Waiting for the processing worker.")
+    state["stages"]["process"].update(status="pending")
+    _write_state(d, state)
+    pid = _spawn_worker(d, job_id)
+    if pid is not None:
+        state = _read_state(d)
+        state["pid"] = pid
+        _write_state(d, state)
+    return public_state(d)
+
+
+def _generic_runs(d: Path, data: Path):
+    from bearing_pdm.adapters import GenericAdapter
+
+    proposal = _read_state(d)["mapping_proposal"]
+    m = json.loads((d / "mapping.json").read_text())
+    adapter = GenericAdapter(mapping=m["columns"], sampling_rate_hz=m["sampling_rate_hz"],
+                             delimiter=proposal["delimiter"], has_header=proposal["has_header"],
+                             recording_interval_s=m["recording_interval_s"],
+                             suffix=proposal["suffix"])
+    adapter.display_name = "Custom dataset (your column mapping)"
+    root = (data / proposal["root"]).resolve()
+    if not root.is_relative_to(data.resolve()):
+        raise JobError("invalid dataset root")
+    runs = [replace(adapter.discover(root / r["path"])[0], bearing_id=r["id"])
+            for r in proposal["runs"]]
+    return root, adapter, runs
+
+
 def run_job(job_id: str) -> None:
     d = JOBS_ROOT / job_id
     with open(JOBS_ROOT / ".worker.lock", "w") as lock:
@@ -820,16 +953,17 @@ def run_job(job_id: str) -> None:
 
 
 def _run_locked(d: Path) -> None:
-    import joblib
-    import pandas as pd
-
     from bearing_pdm.adapters import get_adapter
-    from bearing_pdm.pipeline import build_canonical_features
     from bearing_pdm.profiler import profile_folder
-    from bearing_pdm.routing import candidates_from_bundle, oof_from_predictions, route_dataset
 
     plan = _read_state(d)["plan"]
     data = d / "data"
+    if (d / "mapping.json").is_file():  # resumed after the user confirmed a custom mapping
+        root, adapter, runs = _generic_runs(d, data)
+        profile = profile_folder(root)
+        all_files = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
+        _process(d, data, plan, root, profile, all_files, adapter, "generic", runs, None, [])
+        return
     if plan["kind"] != "files":
         _update(d, state="checking", message="Checking the archive parts and contents.",
                 stages={"check": {"status": "running", "total": len(plan["files"])}})
@@ -858,6 +992,15 @@ def _run_locked(d: Path) -> None:
     profile = profile_folder(root)
     all_files = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
     known = [k["dataset_id"] for k in profile["known_datasets"]]
+    proposal = None if known else _generic_proposal(data, root, profile)
+    if proposal:
+        _update(d, state="needs_mapping", mapping_proposal=proposal,
+                message="Format not recognised as a known dataset. Confirm which columns are "
+                        "vibration, the sampling rate and the time between recordings to analyse it.",
+                stages={"detect": {"status": "done",
+                                   "detail": f"custom format, {len(proposal['runs'])} bearing "
+                                             "run(s) proposed: waiting for your confirmation"}})
+        return
     if not known:
         summary = {"dataset_id": None, "display_name": None,
                    "files_found": len(all_files), "files_processed": 0,
@@ -904,6 +1047,17 @@ def _run_locked(d: Path) -> None:
             if reason:
                 cut_runs.append({"bearing": r.run_id, "reason": reason})
                 runs[i] = replace(r, run_to_failure=False)
+    _process(d, data, plan, root, profile, all_files, adapter, dataset, runs, partial, cut_runs)
+
+
+def _process(d: Path, data: Path, plan: dict, root: Path, profile: dict, all_files: list[str],
+             adapter, dataset: str, runs: list, partial: dict | None, cut_runs: list) -> None:
+    import joblib
+    import pandas as pd
+
+    from bearing_pdm.pipeline import build_canonical_features
+    from bearing_pdm.routing import candidates_from_bundle, oof_from_predictions, route_dataset
+
     run_files = {r.run_id: _run_files(r) for r in runs}
     _update(d, state="processing",
             message=f"Recognised {adapter.display_name}: {len(runs)} bearing run(s). Extracting "
@@ -958,7 +1112,8 @@ def _run_locked(d: Path) -> None:
     oof = oof_from_predictions(pd.read_parquet(pred_path)) if pred_path.exists() else None
     _, decisions, trajectories = route_dataset(
         pd.concat(frames, ignore_index=True), dataset, bundle, oof=oof,
-        progress=lambda msg: _update(d, stages={"process": {"detail": msg[:200]}}))
+        progress=lambda msg: _update(d, stages={"process": {"detail": msg[:200]}}),
+        adapter=adapter)
     validation = validation_for(dataset, adapter.display_name, candidates_from_bundle(bundle))
     split = []
     if partial:

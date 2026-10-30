@@ -337,15 +337,17 @@ class GenericAdapter(DatasetAdapter):
         delimiter: str | None,
         has_header: bool,
         recording_interval_s: float | None = None,
+        suffix: str | None = None,
     ) -> None:
         self.mapping = mapping
+        self.suffix = suffix
         self.sampling_rate_hz = sampling_rate_hz
         self.delimiter = delimiter
         self.has_header = has_header
         self.recording_interval_s = recording_interval_s
 
     def discover(self, root, role=None):
-        files = generic.discover_generic_files(root)
+        files = generic.discover_generic_files(root, self.suffix)
         if len(files) > 1 and self.recording_interval_s is None:
             raise ValueError(
                 f"{len(files)} files found under {root} but no recording_interval_s was given - "
@@ -359,7 +361,7 @@ class GenericAdapter(DatasetAdapter):
         )]
 
     def recordings(self, run):
-        files = generic.discover_generic_files(run.source)
+        files = generic.discover_generic_files(run.source, self.suffix)
         for seq, path in enumerate(files):
             df = generic.read_generic_file(path, self.delimiter, self.has_header)
             signals = {

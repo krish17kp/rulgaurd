@@ -80,15 +80,17 @@ def _transform(values: pd.Series, kind: str) -> pd.Series:
     return v
 
 
-def add_self_normalized_features(df: pd.DataFrame) -> pd.DataFrame:
+def add_self_normalized_features(df: pd.DataFrame,
+                                 reference: tuple[int, int] | None = None) -> pd.DataFrame:
     """Copy of `df` with the `sn_*` columns added. Needs dataset_id,
     bearing_run_id, sequence_index and the canonical vibration feature columns.
-    Nothing is fit here: every reference is the bearing's own past."""
+    Nothing is fit here: every reference is the bearing's own past. `reference`
+    overrides the registered dataset's reference window (a custom upload)."""
     out = df.copy()
     for name in SN_SPEC:
         out[f"sn_{name}"] = np.nan
     for _run, group in out.groupby("bearing_run_id", sort=False):
-        skip, n_ref = reference_window(group["dataset_id"].iloc[0])
+        skip, n_ref = reference or reference_window(group["dataset_id"].iloc[0])
         ordered = group.sort_values("sequence_index").index
         window = ordered[skip:skip + n_ref]
         if len(window) == 0:              # shorter than the skip: best available
